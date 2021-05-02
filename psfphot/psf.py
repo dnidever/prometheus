@@ -72,7 +72,7 @@ def gaussian2d(x,y,pars,deriv=False,nderiv=None):
                                   db_dx_stddev * xdiff * ydiff +
                                   dc_dx_stddev * ydiff2))
             derivative.append(dg_dx_stddev)
-        if nderiv=>5:
+        if nderiv>=5:
             ystd3 = pars[2] ** 3            
             da_dy_stddev = -sint2 / ystd3
             db_dy_stddev = sin2t / ystd3
@@ -144,7 +144,7 @@ def gaussian2d_deriv(x, y, pars, nderiv=None):
                               db_dx_stddev * xdiff * ydiff +
                               dc_dx_stddev * ydiff2))
         derivative.append(dg_dx_stddev)
-    if nderiv=>5:
+    if nderiv>=5:
         ystd3 = pars[2] ** 3        
         da_dy_stddev = -sint2 / ystd3
         db_dy_stddev = sin2t / ystd3
