@@ -165,12 +165,89 @@ def gaussian2d_deriv(x, y, pars, nderiv=None):
 
     return derivative
 
+def gaussian2d_integrate(x, y, pars, deriv=False, nderiv=None):
+    """ Two dimensional Gaussian model function integrated over the pixels."""
+
+    # Use Error function
+    
+    shape = x.shape
+    
+    # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+    theta = np.deg2rad(pars[5])
+    cost2 = np.cos(theta) ** 2
+    sint2 = np.sin(theta) ** 2
+    sin2t = np.sin(2. * theta)
+    xstd2 = pars[3] ** 2
+    ystd2 = pars[4] ** 2
+    xdiff = x - pars[1]
+    ydiff = y - pars[2]
+    a = 0.5 * ((cost2 / xstd2) + (sint2 / ystd2))
+    b = 0.5 * ((sin2t / xstd2) - (sin2t / ystd2))
+    c = 0.5 * ((sint2 / xstd2) + (cost2 / ystd2))
+    g = pars[0] * np.exp(-((a * xdiff ** 2) + (b * xdiff * ydiff) +
+                           (c * ydiff ** 2)))
+
+    # Compute derivative as well
+    if deriv is True:
+
+        # How many derivative terms to return
+        if nderiv is not None:
+            if nderiv <=0:
+                nderiv = 6
+        else:
+            nderiv = 6
+        
+        derivative = []
+        if nderiv>=1:
+            dg_dA = g / pars[0]
+            derivative.append(dg_dA)
+        if nderiv>=2:        
+            dg_dx_mean = g * ((2. * a * xdiff) + (b * ydiff))
+            derivative.append(dg_dx_mean)
+        if nderiv>=3:
+            dg_dy_mean = g * ((b * xdiff) + (2. * c * ydiff))
+            derivative.append(dg_dy_mean)
+        if nderiv>=4:
+            cost = np.cos(theta)
+            sint = np.sin(theta)
+            xstd3 = pars[1] ** 3
+            da_dx_stddev = -cost2 / xstd3
+            db_dx_stddev = -sin2t / xstd3
+            dc_dx_stddev = -sint2 / xstd3        
+            dg_dx_stddev = g * (-(da_dx_stddev * xdiff2 +
+                                  db_dx_stddev * xdiff * ydiff +
+                                  dc_dx_stddev * ydiff2))
+            derivative.append(dg_dx_stddev)
+        if nderiv>=5:
+            ystd3 = pars[2] ** 3            
+            da_dy_stddev = -sint2 / ystd3
+            db_dy_stddev = sin2t / ystd3
+            dc_dy_stddev = -cost2 / ystd3        
+            dg_dy_stddev = g * (-(da_dy_stddev * xdiff2 +
+                                  db_dy_stddev * xdiff * ydiff +
+                                  dc_dy_stddev * ydiff2))
+            derivative.append(dg_dy_stddev)
+        if nderiv>=6:
+            cos2t = np.cos(2. * theta)            
+            da_dtheta = (sint * cost * ((1. / ystd2) - (1. / xstd2)))
+            db_dtheta = (cos2t / xstd2) - (cos2t / ystd2)
+            dc_dtheta = -da_dtheta        
+            dg_dtheta = g * (-(da_dtheta * xdiff2 +
+                               db_dtheta * xdiff * ydiff +
+                               dc_dtheta * ydiff2))
+            derivative.append(dg_dtheta)
+
+        return g,derivative
+            
+    # No derivative
+    else:        
+        return g
+
+    
 
 def moffat2d(x, y, pars, deriv=False, nderiv=None):
     """Two dimensional Moffat model function"""
     # pars = [amplitude, x0, y0, sigma, beta]
-    if pars is None:
-        pars = self.params
     rr_gg = ((x - pars[1]) ** 2 + (y - pars[2]) ** 2) / pars[3] ** 2
     g = pars[0] * (1 + rr_gg) ** (-pars[4])
 
@@ -204,7 +281,7 @@ def moffat2d(x, y, pars, deriv=False, nderiv=None):
             d_beta = -pars[0] * d_A * np.log(1 + rr_gg)
             derivative.append(d_beta)            
 
-        return derivative
+        return g,derivative
 
     # No derivative
     else:
@@ -212,11 +289,66 @@ def moffat2d(x, y, pars, deriv=False, nderiv=None):
         
 
 def moffat2d_deriv(x, y, pars, nderiv=None):
-        """Two dimensional Moffat model derivative with respect to parameters"""
-        # pars = [amplitude, x0, y0, sigma, beta]
-        if pars is None:
-            pars = self.params
+    """Two dimensional Moffat model derivative with respect to parameters"""
+    # pars = [amplitude, x0, y0, sigma, beta]
             
+    # How many derivative terms to return
+    if nderiv is not None:
+        if nderiv <=0:
+            nderiv = 5
+    else:
+        nderiv = 5
+        
+    rr_gg = ((x - pars[1]) ** 2 + (y - pars[2]) ** 2) / pars[3] ** 2
+
+    derivative = []
+    if nderiv>=1:
+        d_A = (1 + rr_gg) ** (-pars[4])
+        derivative.append(d_A)
+    if nderiv>=2:
+        d_x_0 = (2 * pars[0] * pars[4] * d_A * (x - pars[1]) /
+                 (pars[3] ** 2 * (1 + rr_gg)))
+        derivative.append(d_x_0)            
+    if nderiv>=3:
+        d_y_0 = (2 * pars[0] * pars[4] * d_A * (y - pars[2]) /
+                 (pars[3] ** 2 * (1 + rr_gg)))
+        derivative.append(d_y_0)            
+    if nderiv>=4:
+        d_sigma = (2 * pars[0] * pars[4] * d_A * rr_gg /
+                   (pars[3] * (1 + rr_gg)))
+        derivative.append(d_sigma)
+    if nderiv>=5:            
+        d_beta = -pars[0] * d_A * np.log(1 + rr_gg)
+        derivative.append(d_beta)            
+
+    return derivative
+
+
+def moffat2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
+    """Two dimensional Moffat model function"""
+    # pars = [amplitude, x0, y0, sigma, beta]
+
+    osamp2 = float(osamp)**2
+    x = np.atleast_1d(x)
+    y = np.atleast_1d(y)
+    nx = x.size
+    xshape = x.shape
+    # They must be 1D
+    if x.ndim>1:
+        x = x.flatten()
+        y = y.flatten()
+    dx = (np.arange(osamp).astype(float)+1)/osamp-(1/(2*osamp))-0.5
+    dx2 = np.tile(dx,(osamp,1))
+    x2 = np.tile(x,(osamp,osamp,1)) + np.tile(dx2.T,(nx,1,1)).T
+    y2 = np.tile(y,(osamp,osamp,1)) + np.tile(dx2,(nx,1,1)).T
+        
+    rr_gg = ((x2 - pars[1]) ** 2 + (y2 - pars[2]) ** 2) / pars[3] ** 2
+    g = pars[0] * (1 + rr_gg) ** (-pars[4])
+
+
+    # Compute derivative as well
+    if deriv is True:
+
         # How many derivative terms to return
         if nderiv is not None:
             if nderiv <=0:
@@ -224,30 +356,33 @@ def moffat2d_deriv(x, y, pars, nderiv=None):
         else:
             nderiv = 5
         
-        rr_gg = ((x - pars[1]) ** 2 + (y - pars[2]) ** 2) / pars[3] ** 2
-
         derivative = []
         if nderiv>=1:
-            d_A = (1 + rr_gg) ** (-pars[4])
-            derivative.append(d_A)
+            d_A = g/pars[0]
+            derivative.append(np.sum(np.sum(d_A,axis=0),axis=0)/osamp2)
         if nderiv>=2:
-            d_x_0 = (2 * pars[0] * pars[4] * d_A * (x - pars[1]) /
+            d_x_0 = (2 * pars[0] * pars[4] * d_A * (x2 - pars[1]) /
                      (pars[3] ** 2 * (1 + rr_gg)))
-            derivative.append(d_x_0)            
+            derivative.append(np.sum(np.sum(d_x_0,axis=0),axis=0)/osamp2)        
         if nderiv>=3:
-            d_y_0 = (2 * pars[0] * pars[4] * d_A * (y - pars[2]) /
+            d_y_0 = (2 * pars[0] * pars[4] * d_A * (y2 - pars[2]) /
                      (pars[3] ** 2 * (1 + rr_gg)))
-            derivative.append(d_y_0)            
+            derivative.append(np.sum(np.sum(d_y_0,axis=0),axis=0)/osamp2)  
         if nderiv>=4:
             d_sigma = (2 * pars[0] * pars[4] * d_A * rr_gg /
                        (pars[3] * (1 + rr_gg)))
-            derivative.append(d_sigma)
+            derivative.append(np.sum(np.sum(d_sigma,axis=0),axis=0)/osamp2)
         if nderiv>=5:            
             d_beta = -pars[0] * d_A * np.log(1 + rr_gg)
-            derivative.append(d_beta)            
+            derivative.append(np.sum(np.sum(d_beta,axis=0),axis=0)/osamp2)  
 
-        return derivative
+        g = np.sum(np.sum(g,axis=0),axis=0)/osamp2           
+        return g,derivative
 
+    # No derivative
+    else:
+        g = np.sum(np.sum(g,axis=0),axis=0)/osamp2
+        return g
 
     
 # PSF classes
