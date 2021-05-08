@@ -33,3 +33,24 @@ def getpsf(psfmodel,image,cat):
 
     pass
 
+def fitstar(im,cat,psf):
+    """ Fit a PSF model to a star in an image."""
+
+    # IM should be an image with an uncertainty array as well
+    nx,ny = im.data
+    
+    # Estimate sky
+    xc = cat['X'][0]
+    yc = cat['Y'][0]
+    x0 = np.maximum(0,xc-20)
+    x1 = np.minimum(xc-20,nx-1)
+    y0 = np.maximum(0,yc-20)
+    y1 = np.minium(yc-20,ny-1)
+    flux = im.data[x0:x1+1,y0:y1+1]
+    err = im.uncertainty[x0:x1+1,y0:y1+1]    
+    sky = np.median(im.data[x0:x1+1,y0:y1+1])
+    height = im.data[int(np.round(xc)),int(np.round(yc))]-sky
+    
+    pars,cov = curve_fit(psf,x,flux,sigma=err,p0=initpar,bounds=bounds)
+    
+    import pdb; pdb.set_trace()
