@@ -25,6 +25,9 @@ import time
 import matplotlib
 
 
+# Maybe x0/y0 should NOT be part of the parameters, and
+# x/y should actually just be dx/dy (relative to x0/y0)
+
 def gaussian2d(x,y,pars,deriv=False,nderiv=None):
     """Two dimensional Gaussian model function"""
     # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
@@ -305,9 +308,10 @@ def empirical(x, y, pars, deriv=False, nderiv=None):
 # PSF base class
 class PSFBase:
 
-    def __init__(self,pars,binned=False):
+    def __init__(self,pars,npix=101,binned=False):
         self._params = np.atleast_1d(pars)
         self.binned = binned
+        self.npix = npix
 
     @property
     def params(self):
@@ -317,8 +321,46 @@ class PSFBase:
     def params(self,value):
         self._params = value
         
-    def __call__(self,x,y,*args,**kwargs):
-        return self.evaluate(x,y,*args,**kwargs)
+    def __call__(self,x=None,y=None,pars=None,xy0=None,xy=None,*args,**kwargs):
+        # If xy0 is not input, then x/y are assumed to be relative to the
+        # center of the profile
+
+        # Make sure they are numpy arrays
+        x = np.atleast_1d(x)
+        y = np.atleast_1d(y)
+        
+        # Coordinates input
+        if x is not None and y is not None:
+            # x/y are absolute, make them relative to profile center
+            if xy0 is not None:
+                dx = x-xy0[0]
+                dy = y-xy0[1]
+        # Create default PSF "stamp" or use xy to figure out the x/y values to use
+        else:
+            # Default PSF stamp
+            if xy is None:
+                pix = np.arange(self.npix)-self.npix//2
+                dx2 = np.repeat(pix,self.npix).reshape(self.npix,self.npix)
+                dy2 = np.repeat(pix,npix).reshape(self.npix,self.npix).T
+                dx = dx2.flatten()
+                dy = dy2.flatten()
+            # Use xy to generate the x/y values to use
+            else:
+                x0,x1 = xy[0]
+                y0,y1 = xy[1]
+                dx = np.arange(x0,x1+1).astype(float)
+                nxpix = len(dx)
+                dy = np.arange(y0,y1+1).astype(float)
+                nypix = len(dy)
+                dx2 = np.repeat(dx,nypix).reshape(nxpix,nypix)
+                dy2 = np.repeat(dy,nxpix).reshape(nypix,nxpix).T 
+                dx = dx2.flatten()
+                dy = dy2.flatten()
+                if xy0 is not None:
+                    dx -= xy0[0]
+                    dy -= xy0[1]                
+
+        return self.evaluate(x=dx,y=dy,pars=pars,*args,**kwargs)
 
     def __str__(self):
         return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+')'
