@@ -44,7 +44,6 @@ def gaussian2d(x,y,pars,deriv=False,nderiv=None):
     c = 0.5 * ((sint2 / xstd2) + (cost2 / ystd2))
     g = pars[0] * np.exp(-((a * xdiff ** 2) + (b * xdiff * ydiff) +
                            (c * ydiff ** 2)))
-
     # Compute derivative as well
     if deriv is True:
 
@@ -68,7 +67,9 @@ def gaussian2d(x,y,pars,deriv=False,nderiv=None):
         if nderiv>=4:
             cost = np.cos(theta)
             sint = np.sin(theta)
-            xstd3 = pars[1] ** 3
+            xdiff2 = xdiff**2
+            ydiff2 = ydiff**2
+            xstd3 = pars[3] ** 3
             da_dx_stddev = -cost2 / xstd3
             db_dx_stddev = -sin2t / xstd3
             dc_dx_stddev = -sint2 / xstd3        
@@ -77,7 +78,7 @@ def gaussian2d(x,y,pars,deriv=False,nderiv=None):
                                   dc_dx_stddev * ydiff2))
             derivative.append(dg_dx_stddev)
         if nderiv>=5:
-            ystd3 = pars[2] ** 3            
+            ystd3 = pars[4] ** 3            
             da_dy_stddev = -sint2 / ystd3
             db_dy_stddev = sin2t / ystd3
             dc_dy_stddev = -cost2 / ystd3        
@@ -101,12 +102,24 @@ def gaussian2d(x,y,pars,deriv=False,nderiv=None):
     else:        
         return g
 
-def gaussian2d_integrate(x, y, pars, deriv=False, nderiv=None):
+def gaussian2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
     """ Two dimensional Gaussian model function integrated over the pixels."""
 
     # Use Error function
-    
+
+    # Deal with the shape, must be 1D to function properly
     shape = x.shape
+    ndim = x.ndim
+    if ndim>1:
+        x = x.flatten()
+        y = y.flatten()
+
+    osamp2 = float(osamp)**2
+    nx = x.size
+    dx = (np.arange(osamp).astype(float)+1)/osamp-(1/(2*osamp))-0.5
+    dx2 = np.tile(dx,(osamp,1))
+    x2 = np.tile(x,(osamp,osamp,1)) + np.tile(dx2.T,(nx,1,1)).T
+    y2 = np.tile(y,(osamp,osamp,1)) + np.tile(dx2,(nx,1,1)).T    
     
     # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
     theta = np.deg2rad(pars[5])
@@ -225,18 +238,21 @@ def moffat2d(x, y, pars, deriv=False, nderiv=None):
 
 
 def moffat2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
-    """Two dimensional Moffat model function"""
+    """Two dimensional Moffat model function integrated over the pixels"""
     # pars = [amplitude, x0, y0, sigma, beta]
 
-    osamp2 = float(osamp)**2
     x = np.atleast_1d(x)
     y = np.atleast_1d(y)
-    nx = x.size
-    xshape = x.shape
-    # They must be 1D
-    if x.ndim>1:
+    
+    # Deal with the shape, must be 1D to function properly
+    shape = x.shape
+    ndim = x.ndim
+    if ndim>1:
         x = x.flatten()
         y = y.flatten()
+    
+    osamp2 = float(osamp)**2
+    nx = x.size
     dx = (np.arange(osamp).astype(float)+1)/osamp-(1/(2*osamp))-0.5
     dx2 = np.tile(dx,(osamp,1))
     x2 = np.tile(x,(osamp,osamp,1)) + np.tile(dx2.T,(nx,1,1)).T
@@ -276,12 +292,21 @@ def moffat2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
             d_beta = -pars[0] * d_A * np.log(1 + rr_gg)
             derivative.append(np.sum(np.sum(d_beta,axis=0),axis=0)/osamp2)  
 
-        g = np.sum(np.sum(g,axis=0),axis=0)/osamp2           
+        g = np.sum(np.sum(g,axis=0),axis=0)/osamp2
+
+        # Reshape
+        if ndim>1:
+            g = g.reshape(shape)
+            derivative = [d.reshape(shape) for d in derivative]
+        
         return g,derivative
 
     # No derivative
     else:
         g = np.sum(np.sum(g,axis=0),axis=0)/osamp2
+        # Reshape
+        if ndim>1:
+            g = g.reshape(shape)
         return g
 
 
@@ -308,8 +333,8 @@ def empirical(x, y, pars, deriv=False, nderiv=None):
 # PSF base class
 class PSFBase:
 
-    def __init__(self,pars,npix=101,binned=False):
-        self._params = np.atleast_1d(pars)
+    def __init__(self,mpars,npix=101,binned=False):
+        self._params = np.atleast_1d(mpars)
         self.binned = binned
         self.npix = npix
 
@@ -321,46 +346,64 @@ class PSFBase:
     def params(self,value):
         self._params = value
         
-    def __call__(self,x=None,y=None,pars=None,xy0=None,xy=None,*args,**kwargs):
-        # If xy0 is not input, then x/y are assumed to be relative to the
-        # center of the profile
+    def __call__(self,x=None,y=None,pars=None,mpars=None,xy=None,deriv=False,**kwargs):
+        # X/Y and XY are absolute pixel values NOT relative ones
+        # PARS are the stellar parameters [height, xcen, ycen]
+        # MPARS are the model parameters
+        
+        # Nothing input, PSF postage stamp
+        if x is None and y is None and pars is None and xy is None:
+            pars = [1.0, self.npix//2, self.npix//2]
+            pix = np.arange(self.npix)
+            x = np.repeat(pix,self.npix).reshape(self.npix,self.npix)
+            y = np.repeat(pix,self.npix).reshape(self.npix,self.npix).T
 
+        # Get coordinates from XY
+        if x is None and y is None and xy is not None:
+            x0,x1 = xy[0]
+            y0,y1 = xy[1]
+            dx = np.arange(x0,x1+1).astype(float)
+            nxpix = len(dx)
+            dy = np.arange(y0,y1+1).astype(float)
+            nypix = len(dy)
+            x = np.repeat(dx,nypix).reshape(nxpix,nypix)
+            y = np.repeat(dy,nxpix).reshape(nypix,nxpix).T 
+
+        if x is None or y is None:
+            raise ValueError("X and Y or XY must be input")
+        if pars is None:
+            raise ValueError("PARS must be input")
+        if len(pars)<3 or len(pars)>4:
+            raise ValueError("PARS must have 3 or 4 elements")
+        
         # Make sure they are numpy arrays
         x = np.atleast_1d(x)
-        y = np.atleast_1d(y)
-        
-        # Coordinates input
-        if x is not None and y is not None:
-            # x/y are absolute, make them relative to profile center
-            if xy0 is not None:
-                dx = x-xy0[0]
-                dy = y-xy0[1]
-        # Create default PSF "stamp" or use xy to figure out the x/y values to use
-        else:
-            # Default PSF stamp
-            if xy is None:
-                pix = np.arange(self.npix)-self.npix//2
-                dx2 = np.repeat(pix,self.npix).reshape(self.npix,self.npix)
-                dy2 = np.repeat(pix,npix).reshape(self.npix,self.npix).T
-                dx = dx2.flatten()
-                dy = dy2.flatten()
-            # Use xy to generate the x/y values to use
-            else:
-                x0,x1 = xy[0]
-                y0,y1 = xy[1]
-                dx = np.arange(x0,x1+1).astype(float)
-                nxpix = len(dx)
-                dy = np.arange(y0,y1+1).astype(float)
-                nypix = len(dy)
-                dx2 = np.repeat(dx,nypix).reshape(nxpix,nypix)
-                dy2 = np.repeat(dy,nxpix).reshape(nypix,nxpix).T 
-                dx = dx2.flatten()
-                dy = dy2.flatten()
-                if xy0 is not None:
-                    dx -= xy0[0]
-                    dy -= xy0[1]                
+        y = np.atleast_1d(y)             
 
-        return self.evaluate(x=dx,y=dy,pars=pars,*args,**kwargs)
+        # No model parameters input, use saved ones
+        if mpars is None: mpars = self.params               
+
+        # Sky value input
+        sky = None
+        if len(pars)==4:
+            sky = pars[4]
+            pars = pars[0:3]
+        
+        # Make parameters for the function, STELLAR + MODEL parameters
+        inpars = np.hstack((pars,mpars))
+
+        # Evaluate
+        out = self.evaluate(x,y,inpars,deriv=deriv,**kwargs)
+
+        # Add sky to model
+        if sky is not None:
+            # With derivative
+            if deriv is True:
+                out[0] = out[0]+sky
+            else:
+                out += sky
+
+        return out
 
     def __str__(self):
         return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+')'
@@ -385,36 +428,33 @@ class PSFBase:
 class PSFGaussian(PSFBase):
 
     # Initalize the object
-    def __init__(self,pars=None,binned=False):
-        if pars is None:
-            pars = np.array([1.0,0.0,0.0,1.0,1.0,0.0])
-        if len(pars)<6:
-            raise ValueError('5 parameters required')
-        # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
-        if pars[3]<=0 or pars[4]<=0:
+    def __init__(self,mpars=None,npix=101,binned=False):
+        # MPARS are the model parameters
+        if mpars is None:
+            mpars = np.array([1.0,1.0,0.0])
+        if len(mpars)<3:
+            raise ValueError('3 parameters required')
+        # mpars = [xsigma, ysigma, theta]
+        if mpars[0]<=0 or mpars[1]<=0:
             raise ValueError('sigma parameters must be >0')
-        super().__init__(pars,binned=binned)
+        super().__init__(mpars,npix=npix,binned=binned)
         
-    def evaluate(self,x, y, pars=None, deriv=False, nderiv=None):
+    def evaluate(self,x, y, pars, binned=None, deriv=False, nderiv=None):
         """Two dimensional Gaussian model function"""
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
-        if pars is None:
-            pars = self.params
+        if binned is None: binned = self.binned
         if binned is True:
             return gaussian2d_integrate(x, y, pars, deriv=deriv, nderiv=nderiv)
         else:
             return gaussian2d(x, y, pars, deriv=deriv, nderiv=nderiv)
     
-    def deriv(self,x, y, pars=None, nderiv=None):
+    def deriv(self,x, y, pars, nderiv=None):
         """Two dimensional Gaussian model derivative with respect to parameters"""
-        if pars is None:
-            pars = self.params
         if binned is True:
             g, derivative = gaussian2d_integrate(x, y, pars, deriv=True, nderiv=nderiv)
-            return derivative
         else:
             g, derivative = gaussian2d(x, y, pars, deriv=True, nderiv=nderiv)
-            return derivative            
+        return derivative            
         
         
 # PSF Moffat class
@@ -424,130 +464,124 @@ class PSFMoffat(PSFBase):
     
     
     # Initalize the object
-    def __init__(self,pars=None,binned=False):
-        if pars is None:
-            pars = np.zeros(5,float)
-            pars = np.array([1.0,0.0,0.0,1.0,2.5])
-        if len(pars)<5:
-            raise ValueError('5 parameters required')
-        # pars = [amplitude, x0, y0, sigma, beta]
-        if pars[3]<=0:
+    def __init__(self,mpars=None,npix=101,binned=False):
+        # MPARS are model parameters
+        if mpars is None:
+            mpars = np.array([1.0,2.5])
+        if len(mpars)<5:
+            raise ValueError('2 parameters required')
+        # pars = [sigma, beta]
+        if mpars[0]<=0:
             raise ValueError('sigma must be >0')
-        if pars[4]<1 or pars[4]>6:
+        if mpars[1]<1 or mpars[1]>6:
             raise ValueError('alpha must be >1 and <6')
-        super().__init__(pars,binned=binned)
+        super().__init__(mpars,npix=npix,binned=binned)
         
-    def evaluate(self,x, y, pars=None, deriv=False, nderiv=None):
+    def evaluate(self,x, y, pars, binned=None, deriv=False, nderiv=None):
         """Two dimensional Moffat model function"""
         # pars = [amplitude, x0, y0, sigma, beta]
-        if pars is None:
-            pars = self.params
+        if binned is None: binned = self.binned
         if binned is True:
             return moffat2d_integrate(x, y, pars, deriv=deriv, nderiv=nderiv)
         else:
             return moffat2d(x, y, pars, deriv=deriv, nderiv=nderiv)
 
-    def deriv(self,x, y, pars=None, nderiv=None):
+    def deriv(self,x, y, pars, binned=None, nderiv=None):
         """Two dimensional Moffat model derivative with respect to parameters"""
-        if pars is None:
-            pars = self.params
+        if binned is None: binned = self.binned
         if binned is True:
-            return moffat2d_integrate_deriv(x, y, pars, nderiv=nderiv)
+            g, derivative = moffat2d_integrate(x, y, pars, deriv=True, nderiv=nderiv)
         else:
-            return moffat2d_deriv(x, y, pars, nderiv=nderiv)    
+            g, derivative = moffat2d(x, y, pars, deriv=True, nderiv=nderiv)
+        return derivative
 
 # PSF Lorentz class
 class PSFLorentz(PSFBase):
        
     # Initalize the object
-    def __init__(self,pars=None,binned=False):
-        if pars is None:
-            pars = np.zeros(5,float)
-            pars = np.array([1.0,0.0,0.0,1.0,2.5])
-        if len(pars)<5:
-            raise ValueError('5 parameters required')
-        # pars = [amplitude, x0, y0, sigma, beta]
-        if pars[3]<=0:
+    def __init__(self,mpars=None,npix=101,binned=False):
+        if mpars is None:
+            mpars = np.array([1.0,2.5])
+        if len(mpars)<2:
+            raise ValueError('2 parameters required')
+        # mpars = [sigma, beta]
+        if mpars[0]<=0:
             raise ValueError('sigma must be >0')
-        #if pars[4]<1 or pars[4]>6:
-        #    raise ValueError('alpha must be >1 and <6')
-        super().__init__(pars,binned=binned)
+        super().__init__(mpars,npix=npix,binned=binned)
         
-    def evaluate(self,x, y, pars=None, deriv=False, nderiv=None):
+    def evaluate(self,x, y, pars, binned=None, deriv=False, nderiv=None):
         """Two dimensional Lorentz model function"""
         # pars = [amplitude, x0, y0, sigma, beta]
-        if pars is None:
-            pars = self.params
-        return lorentz2d(x, y, pars, deriv=deriv, nderiv=nderiv)
+        if binned is None: binned = self.binned
+        if binned is True:
+            return lorentz2d_integrate(x, y, pars, binned=binned, deriv=deriv, nderiv=nderiv)
+        else:
+            return lorentz2d(x, y, pars, binned=binned, deriv=deriv, nderiv=nderiv)        
 
-    def deriv(self,x, y, pars=None, nderiv=None):
+        
+    def deriv(self,x, y, pars, binned=None, nderiv=None):
         """Two dimensional Lorentz model derivative with respect to parameters"""
-        if pars is None:
-            pars = self.params
-        g, derivative = lorentz2d_deriv(x, y, pars, deriv=True, nderiv=nderiv)
+        if binned is None: binned = self.binned
+        if binned is True:
+            g, derivative = lorentz2d_integrate(x, y, pars, binned=binned, deriv=True, nderiv=nderiv)
+        else:
+            g, derivative = lorentz2d(x, y, pars, binned=binned, deriv=True, nderiv=nderiv)        
         return derivative
     
 # PSF Penny class
 class PSFPenny(PSFBase):
     """ Gaussian core and Lorentzian wings, only Gaussian is tilted."""
-
+    # PARS are model parameters
+    
     # Initalize the object
-    def __init__(self,pars=None,binned=False):
-        if pars is None:
-            pars = np.zeros(5,float)
-            pars = np.array([1.0,0.0,0.0,1.0,2.5])
-        if len(pars)<5:
-            raise ValueError('5 parameters required')
-        # pars = [amplitude, x0, y0, sigma, beta]
-        if pars[3]<=0:
+    def __init__(self,mpars=None,npix=101,binned=False):
+        if mpars is None:
+            mpars = np.array([1.0,2.5])
+        if len(mpars)<2:
+            raise ValueError('2 parameters required')
+        # mpars = [sigma, beta]
+        if mpars[0]<=0:
             raise ValueError('sigma must be >0')
-        #if pars[4]<1 or pars[4]>6:
-        #    raise ValueError('alpha must be >1 and <6')
-        super().__init__(pars,binned=binned)
+        super().__init__(mpars,npix=npix,binned=binned)
         
-    def evaluate(self,x, y, pars=None, deriv=False, nderiv=None):
+    def evaluate(self,x, y, pars=None, binned=None, deriv=False, nderiv=None):
         """Two dimensional Penny model function"""
         # pars = [amplitude, x0, y0, sigma, beta]
-        if pars is None:
-            pars = self.params
-        return penny2d(x, y, pars, deriv=deriv, nderiv=nderiv)
+        if pars is None: pars = self.params
+        if binned is None: binned = self.binned
+        return penny2d(x, y, pars, binned=binned, deriv=deriv, nderiv=nderiv)
 
-    def deriv(self,x, y, pars=None, nderiv=None):
+    def deriv(self,x, y, pars=None, binned=None, nderiv=None):
         """Two dimensional Penny model derivative with respect to parameters"""
-        if pars is None:
-            pars = self.params
-        return penny2d_deriv(x, y, pars, nderiv=nderiv)
+        if pars is None: pars = self.params
+        if binned is None: binned = self.binned        
+        return penny2d_deriv(x, y, pars, binned=binned, nderiv=nderiv)
 
 
 class PSFEmpirical(PSFBase):
     """ Empirical look-up table PSF, can vary spatially."""
 
     # Initalize the object
-    def __init__(self,pars=None):
-        if pars is None:
-            raise ValueError('Must in put images')
-        # PARS should be a two-element tuple with (parameters, psf cube)
-        self.params = pars[0]
-        self.cube = pars[1]
+    def __init__(self,mpars=None,npix=101):
+        if mpars is None:
+            raise ValueError('Must input images')
+        # MPARS should be a two-element tuple with (parameters, psf cube)
+        self.cube = mpars[1]
         nx,ny,npars = cube.shape
-        
-        super().__init__(pars)
+        super().__init__(mpars[0],npix=npix)        
+
         
     def evaluate(self,x, y, pars=None, cube=None, deriv=False, nderiv=None):
         """Empirical look-up table"""
         # pars = [amplitude, x0, y0, sigma, beta]
-        if pars is None:
-            pars = self.params
-        if cube is None:
-            cube = self.cube
+        if pars is None: pars = self.params
+        if cube is None: cube = self.cube
         return empirical(x, y, pars, cube=cube, deriv=deriv, nderiv=nderiv)
 
     def deriv(self,x, y, pars=None, cube=None, nderiv=None):
         """Empirical look-up table derivative with respect to parameters"""
-        if pars is None:
-            pars = self.params
-        if cube is None:
-            cube = self.cube
+        if pars is None: pars = self.params
+        if cube is None: cube = self.cube
         return empirical(x, y, pars, cube=cube, nderiv=nderiv)   
 
 
