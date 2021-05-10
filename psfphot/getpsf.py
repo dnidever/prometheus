@@ -35,26 +35,47 @@ def getpsf(psfmodel,image,cat):
 
 def curvefit_psf(func,*args,**kwargs):
     """ Thin wrapper around curve_fit for PSFs."""
-    def wrap_psf(xdata,pars,*args,**kwargs):
-        return psf(xdata[0],xdata[1],pars,*args,**kwargs)
+    def wrap_psf(xdata,*args2,**kwargs2):
+        ## curve_fit separates each parameter while
+        ## psf expects on pars array
+        pars = args2
+        print(pars)
+        return func(xdata[0],xdata[1],pars,**kwargs2)
     return curve_fit(wrap_psf,*args,**kwargs)
+
+def curvefit_psfallpars(func,*args,**kwargs):
+    """ Thin wrapper around curve_fit for PSFs and fitting ALL parameters."""
+    def wrap_psf(xdata,*args2,**kwargs2):
+        ## curve_fit separates each parameter while
+        ## psf expects on pars array
+        allpars = args2
+        print(allpars)
+        nmpars = len(func.params)
+        mpars = allpars[-nmpars:]
+        pars = allpars[0:-nmpars]
+        return func(xdata[0],xdata[1],pars,mpars=mpars,**kwargs2)
+    return curve_fit(wrap_psf,*args,**kwargs)
+
 
 def fitstar(im,cat,psf):
     """ Fit a PSF model to a star in an image."""
 
     # IM should be an image with an uncertainty array as well
-    nx,ny = im.data
+    nx,ny = im.data.shape
+
+
+    ### ADD A FITTING RADIUS !!!!
     
-    # Estimate sky
-    xc = cat['X'][0]
-    yc = cat['Y'][0]
-    x0 = np.maximum(0,xc-20)
-    x1 = np.minimum(xc-20,nx-1)
-    y0 = np.maximum(0,yc-20)
-    y1 = np.minium(yc-20,ny-1)
+    xc = cat['X']
+    yc = cat['Y']
+    box = 20
+    x0 = int(np.maximum(0,np.floor(xc-box)))
+    x1 = int(np.minimum(np.ceil(xc+box),nx-1))
+    y0 = int(np.maximum(0,np.floor(yc-box)))
+    y1 = int(np.minimum(np.ceil(yc+box),ny-1))
     
     flux = im.data[x0:x1+1,y0:y1+1]
-    err = im.uncertainty[x0:x1+1,y0:y1+1]    
+    err = im.uncertainty.array[x0:x1+1,y0:y1+1]
     sky = np.median(im.data[x0:x1+1,y0:y1+1])
     height = im.data[int(np.round(xc)),int(np.round(yc))]-sky
 
@@ -64,8 +85,26 @@ def fitstar(im,cat,psf):
     Y = np.repeat(np.arange(y0,y1+1),nX).reshape(nY,nX).T
     xdata = np.vstack((X.ravel(), Y.ravel()))
 
-    initpar = []
-    pars,cov = curvefit_psf(psf,xdata,flux.ravel(),sigma=err.ravel(),p0=initpar,bounds=bounds)
+    #import pdb; pdb.set_trace()
 
+    # Just fit height, xc, yc, sky
+    #initpar = [height,xc,yc,sky]
+    #bounds = (-np.inf,np.inf)
+    #pars,cov = curvefit_psf(psf,xdata,flux.ravel(),sigma=err.ravel(),p0=initpar) #,bounds=bounds)
+    #return pars,cov
+
+    # Fit all parameters
+    initpar = np.hstack(([height,xc,yc,sky],psf.params.copy()))
+    #bounds = (-np.inf,np.inf)
+    allpars,cov = curvefit_psfallpars(psf,xdata,flux.ravel(),sigma=err.ravel(),p0=initpar) #,bounds=bounds)
+
+    bpsf = psf.copy()
+    bpsf.params = allpars[4:]
+    pars = allpars[0:4]
+    bmodel = bpsf(X,Y,pars)
     
     import pdb; pdb.set_trace()
+    
+    return pars,cov,bpsf
+    
+

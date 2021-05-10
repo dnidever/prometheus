@@ -386,7 +386,7 @@ class PSFBase:
         # Sky value input
         sky = None
         if len(pars)==4:
-            sky = pars[4]
+            sky = pars[3]
             pars = pars[0:3]
         
         # Make parameters for the function, STELLAR + MODEL parameters
