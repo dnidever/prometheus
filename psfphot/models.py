@@ -222,19 +222,12 @@ def moffat2d(x, y, pars, deriv=False, nderiv=None):
         if nderiv>=1:
             dg_dA = g / amp
             derivative.append(dg_dA)
-
-    # NEED TO REDERIVE ALL OF THE DERIVATIVES BELOW
-            
         if nderiv>=2:
-            dg_dx_0 = (-beta)*g/(1+rr_gg) * (xdiff**2 + c*ydiff)
+            dg_dx_0 = beta*g/(1+rr_gg) * (2*a*xdiff + c*ydiff)
             derivative.append(dg_dx_0)            
         if nderiv>=3:
-            dg_dy_0 = (-beta)*g/(1+rr_gg) * (ydiff**2 + c*xdiff)
-            
-            #dg_dy_0 = (2 * amp * pars[4] * dg_dA * ydiff /
-            #           (pars[3] ** 2 * (1 + rr_gg)))
-            derivative.append(dg_dy_0)
-            
+            dg_dy_0 = beta*g/(1+rr_gg) * (2*b*ydiff + c*xdiff)
+            derivative.append(dg_dy_0)            
         if nderiv>=4:
             dg_da = (-beta)*g/(1+rr_gg) * xdiff**2
             derivative.append(dg_da)
@@ -244,7 +237,6 @@ def moffat2d(x, y, pars, deriv=False, nderiv=None):
         if nderiv>=6:
             dg_dc = (-beta)*g/(1+rr_gg) * xdiff*ydiff
             derivative.append(dg_dc)
-            
         if nderiv>=7:            
             dg_dbeta = -g * np.log(1 + rr_gg)
             derivative.append(dg_dbeta) 
@@ -360,8 +352,8 @@ def penny2d(x, y, pars, deriv=False, nderiv=None):
     b = pars[4]
     c = pars[5]
     # Gaussian component
-    g = amp * np.exp(-0.5*((a * xdiff ** 2) + (b * xdiff * ydiff) +
-                           (c * ydiff ** 2)))
+    g = amp * np.exp(-0.5*((a * xdiff ** 2) + (b * ydiff ** 2) +
+                           (c * xdiff * ydiff)))
     # Add Lorentzian wings
     relamp = pars[6]
     sigma = pars[7]
@@ -386,32 +378,34 @@ def penny2d(x, y, pars, deriv=False, nderiv=None):
             df_dA = f / amp
             derivative.append(df_dA)
         if nderiv>=2:        
-            df_dx_mean = g * 0.5*((2. * a * xdiff) + (b * ydiff))
+            df_dx_mean = ( g * 0.5*((2 * a * xdiff) + (c * ydiff)) +
+                           2*f*xdiff/(sigma**2 * (1+rr_gg)) )
             derivative.append(df_dx_mean)
         if nderiv>=3:
-            df_dy_mean = g * 0.5*((b * xdiff) + (2. * c * ydiff))
+            df_dy_mean = ( g * 0.5*((2 * b * ydiff) + (c * xdiff)) +
+                           2*f*ydiff/(sigma**2 * (1+rr_gg)) )
             derivative.append(df_dy_mean)
         if nderiv>=4:       
             df_da = g * (-0.5) * xdiff ** 2
             derivative.append(df_da)
         if nderiv>=5:       
-            df_db = g * (-0.5) * xdiff * ydiff
+            df_db = g * (-0.5) * ydiff ** 2
             derivative.append(df_db)
         if nderiv>=6:       
-            df_dc = g * (-0.5) * ydiff ** 2
+            df_dc = g * (-0.5) * xdiff * ydiff
             derivative.append(df_dc)
         if nderiv>=7:       
             df_drelamp = l / relamp
             derivative.append(df_drelamp)
         if nderiv>=8:
-            df_dsigma= l / (1 + rr_gg) * 2*rr_gg/sigma  # CHECK THIS ONE!!!
+            df_dsigma = l/(1+rr_gg) * 2*rr_gg/sigma
             derivative.append(df_dsigma)
             
-        return g,derivative
+        return f,derivative
             
     # No derivative
     else:        
-        return g
+        return f
 
     
 
