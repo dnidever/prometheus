@@ -57,7 +57,7 @@ def curvefit_psfallpars(func,*args,**kwargs):
     return curve_fit(wrap_psf,*args,**kwargs)
 
 
-def fitstar(im,cat,psf):
+def fitstar(im,cat,psf,radius=None):
     """ Fit a PSF model to a star in an image."""
 
     # IM should be an image with an uncertainty array as well
@@ -68,11 +68,14 @@ def fitstar(im,cat,psf):
     
     xc = cat['X']
     yc = cat['Y']
-    box = 20
-    x0 = int(np.maximum(0,np.floor(xc-box)))
-    x1 = int(np.minimum(np.ceil(xc+box),nx-1))
-    y0 = int(np.maximum(0,np.floor(yc-box)))
-    y1 = int(np.minimum(np.ceil(yc+box),ny-1))
+    # use FWHM of PSF for the fitting radius
+    #box = 20
+    if radius is None:
+        radius = psf.fwhm()
+    x0 = int(np.maximum(0,np.floor(xc-radius)))
+    x1 = int(np.minimum(np.ceil(xc+radius),nx-1))
+    y0 = int(np.maximum(0,np.floor(yc-radius)))
+    y1 = int(np.minimum(np.ceil(yc+radius),ny-1))
     
     flux = im.data[x0:x1+1,y0:y1+1]
     err = im.uncertainty.array[x0:x1+1,y0:y1+1]

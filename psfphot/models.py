@@ -23,27 +23,47 @@ import copy
 import logging
 import time
 import matplotlib
+import getpsf
 
+# A bunch of the Gaussian2D and Moffat2D code comes from astropy's modeling module
+# https://docs.astropy.org/en/stable/_modules/astropy/modeling/functional_models.html
 
 # Maybe x0/y0 should NOT be part of the parameters, and
 # x/y should actually just be dx/dy (relative to x0/y0)
 
 def gaussian2d(x,y,pars,deriv=False,nderiv=None):
     """Two dimensional Gaussian model function"""
-    # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
-    theta = np.deg2rad(pars[5])
-    cost2 = np.cos(theta) ** 2
-    sint2 = np.sin(theta) ** 2
-    sin2t = np.sin(2. * theta)
-    xstd2 = pars[3] ** 2
-    ystd2 = pars[4] ** 2
+    # pars = [amplitude, x0, y0, a, b, c]
+    #theta = np.deg2rad(pars[5])
+    #cost2 = np.cos(theta) ** 2
+    #sint2 = np.sin(theta) ** 2
+    #sin2t = np.sin(2. * theta)
+    #xstd2 = pars[3] ** 2
+    #ystd2 = pars[4] ** 2
+    #xdiff = x - pars[1]
+    #ydiff = y - pars[2]
+    #a = 0.5 * ((cost2 / xstd2) + (sint2 / ystd2))
+    #b = 0.5 * ((sin2t / xstd2) - (sin2t / ystd2))
+    #c = 0.5 * ((sint2 / xstd2) + (cost2 / ystd2))
+    #g = pars[0] * np.exp(-((a * xdiff ** 2) + (b * xdiff * ydiff) +
+    #                       (c * ydiff ** 2)))
+
+    # Input A, B and C parameters instead
+    # it will speed up the function since we don't have
+    #  to compute anything
+    # We can always compute sigma_minor, sigma_major, theta later
+    #  if we want.
+
     xdiff = x - pars[1]
     ydiff = y - pars[2]
-    a = 0.5 * ((cost2 / xstd2) + (sint2 / ystd2))
-    b = 0.5 * ((sin2t / xstd2) - (sin2t / ystd2))
-    c = 0.5 * ((sint2 / xstd2) + (cost2 / ystd2))
-    g = pars[0] * np.exp(-((a * xdiff ** 2) + (b * xdiff * ydiff) +
-                           (c * ydiff ** 2)))
+    amp = pars[0]
+    a = pars[3]
+    b = pars[4]
+    c = pars[5]
+    g = pars[0] * np.exp(-0.5*((a * xdiff ** 2) + (b * ydiff ** 2) +
+                               (c * xdiff * ydiff)))
+
+    
     # Compute derivative as well
     if deriv is True:
 
@@ -56,45 +76,23 @@ def gaussian2d(x,y,pars,deriv=False,nderiv=None):
         
         derivative = []
         if nderiv>=1:
-            dg_dA = g / pars[0]
+            dg_dA = g / amp
             derivative.append(dg_dA)
         if nderiv>=2:        
-            dg_dx_mean = g * ((2. * a * xdiff) + (b * ydiff))
+            dg_dx_mean = g * 0.5*((2 * a * xdiff) + (c * ydiff))
             derivative.append(dg_dx_mean)
         if nderiv>=3:
-            dg_dy_mean = g * ((b * xdiff) + (2. * c * ydiff))
+            dg_dy_mean = g * 0.5*((2 * b * ydiff) + (c * xdiff))
             derivative.append(dg_dy_mean)
-        if nderiv>=4:
-            cost = np.cos(theta)
-            sint = np.sin(theta)
-            xdiff2 = xdiff**2
-            ydiff2 = ydiff**2
-            xstd3 = pars[3] ** 3
-            da_dx_stddev = -cost2 / xstd3
-            db_dx_stddev = -sin2t / xstd3
-            dc_dx_stddev = -sint2 / xstd3        
-            dg_dx_stddev = g * (-(da_dx_stddev * xdiff2 +
-                                  db_dx_stddev * xdiff * ydiff +
-                                  dc_dx_stddev * ydiff2))
-            derivative.append(dg_dx_stddev)
-        if nderiv>=5:
-            ystd3 = pars[4] ** 3            
-            da_dy_stddev = -sint2 / ystd3
-            db_dy_stddev = sin2t / ystd3
-            dc_dy_stddev = -cost2 / ystd3        
-            dg_dy_stddev = g * (-(da_dy_stddev * xdiff2 +
-                                  db_dy_stddev * xdiff * ydiff +
-                                  dc_dy_stddev * ydiff2))
-            derivative.append(dg_dy_stddev)
-        if nderiv>=6:
-            cos2t = np.cos(2. * theta)            
-            da_dtheta = (sint * cost * ((1. / ystd2) - (1. / xstd2)))
-            db_dtheta = (cos2t / xstd2) - (cos2t / ystd2)
-            dc_dtheta = -da_dtheta        
-            dg_dtheta = g * (-(da_dtheta * xdiff2 +
-                               db_dtheta * xdiff * ydiff +
-                               dc_dtheta * ydiff2))
-            derivative.append(dg_dtheta)
+        if nderiv>=4:       
+            dg_da = g * (-0.5) * xdiff ** 2
+            derivative.append(dg_da)
+        if nderiv>=5:       
+            dg_db = g * (-0.5) * ydiff ** 2
+            derivative.append(dg_db)
+        if nderiv>=6:       
+            dg_dc = g * (-0.5) * xdiff * ydiff
+            derivative.append(dg_dc)
 
         return g,derivative
             
@@ -196,40 +194,61 @@ def gaussian2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
 
 def moffat2d(x, y, pars, deriv=False, nderiv=None):
     """Two dimensional Moffat model function"""
-    # pars = [amplitude, x0, y0, sigma, beta]
-    rr_gg = ((x - pars[1]) ** 2 + (y - pars[2]) ** 2) / pars[3] ** 2
-    g = pars[0] * (1 + rr_gg) ** (-pars[4])
+    # pars = [amplitude, x0, y0, a, b, c, beta]
 
+    amp = pars[0]
+    xdiff = x - pars[1]
+    ydiff = y - pars[2]
+    a = pars[3]
+    b = pars[4]
+    c = pars[5]
+    beta = pars[6]
+
+    rr_gg = (a * xdiff ** 2) + (b * ydiff ** 2) + (c * xdiff * ydiff)
+    g = amp * (1 + rr_gg) ** (-beta)
+    
+    
     # Compute derivative as well
     if deriv is True:
 
         # How many derivative terms to return
         if nderiv is not None:
             if nderiv <=0:
-                nderiv = 5
+                nderiv = 7
         else:
-            nderiv = 5
+            nderiv = 7
         
         derivative = []
         if nderiv>=1:
-            d_A = g/pars[0]
-            derivative.append(d_A)
-        if nderiv>=2:
-            d_x_0 = (2 * pars[0] * pars[4] * d_A * (x - pars[1]) /
-                     (pars[3] ** 2 * (1 + rr_gg)))
-            derivative.append(d_x_0)            
-        if nderiv>=3:
-            d_y_0 = (2 * pars[0] * pars[4] * d_A * (y - pars[2]) /
-                     (pars[3] ** 2 * (1 + rr_gg)))
-            derivative.append(d_y_0)            
-        if nderiv>=4:
-            d_sigma = (2 * pars[0] * pars[4] * d_A * rr_gg /
-                       (pars[3] * (1 + rr_gg)))
-            derivative.append(d_sigma)
-        if nderiv>=5:            
-            d_beta = -pars[0] * d_A * np.log(1 + rr_gg)
-            derivative.append(d_beta)            
+            dg_dA = g / amp
+            derivative.append(dg_dA)
 
+    # NEED TO REDERIVE ALL OF THE DERIVATIVES BELOW
+            
+        if nderiv>=2:
+            dg_dx_0 = (-beta)*g/(1+rr_gg) * (xdiff**2 + c*ydiff)
+            derivative.append(dg_dx_0)            
+        if nderiv>=3:
+            dg_dy_0 = (-beta)*g/(1+rr_gg) * (ydiff**2 + c*xdiff)
+            
+            #dg_dy_0 = (2 * amp * pars[4] * dg_dA * ydiff /
+            #           (pars[3] ** 2 * (1 + rr_gg)))
+            derivative.append(dg_dy_0)
+            
+        if nderiv>=4:
+            dg_da = (-beta)*g/(1+rr_gg) * xdiff**2
+            derivative.append(dg_da)
+        if nderiv>=5:
+            dg_db = (-beta)*g/(1+rr_gg) * ydiff**2
+            derivative.append(dg_db)            
+        if nderiv>=6:
+            dg_dc = (-beta)*g/(1+rr_gg) * xdiff*ydiff
+            derivative.append(dg_dc)
+            
+        if nderiv>=7:            
+            dg_dbeta = -g * np.log(1 + rr_gg)
+            derivative.append(dg_dbeta) 
+            
         return g,derivative
 
     # No derivative
@@ -310,14 +329,91 @@ def moffat2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
         return g
 
 
+# Don't need this!  Moffat with beta=1
+#def lorentz2d(x, y, pars, deriv=False, nderiv=None):
+#    """Two dimensional Lorentz model function"""
+#    # 1/(1+(r**2/alpha**2)**beta)
+#    alpha = pars[0]
+#    beta = pars[1]
+#
+#    amp = pars[0]
+#    xdiff = x - pars[1]
+#    ydiff = y - pars[2]
+#    a = pars[3]
+#    b = pars[4]
+#    c = pars[5]
+#    beta = pars[6]
+#
+#    rr_gg = (a * xdiff ** 2) + (b * xdiff * ydiff) + (c * ydiff ** 2)
+#    g = amp * (1 + rr_gg) ** (-beta)
 
-def lorentz2d(x, y, pars, deriv=False, nderiv=None):
-    """Two dimensional Lorentz model function"""
-    pass
-
+    
 def penny2d(x, y, pars, deriv=False, nderiv=None):
     """ Gaussian core and Lorentzian wings, only Gaussian is tilted."""
-    pass
+    # Maybe Lorentzian wings need to be azimuthally symmetric.
+
+
+    xdiff = x - pars[1]
+    ydiff = y - pars[2]
+    amp = pars[0]
+    a = pars[3]
+    b = pars[4]
+    c = pars[5]
+    # Gaussian component
+    g = amp * np.exp(-0.5*((a * xdiff ** 2) + (b * xdiff * ydiff) +
+                           (c * ydiff ** 2)))
+    # Add Lorentzian wings
+    relamp = pars[6]
+    sigma = pars[7]
+    rr_gg = (xdiff ** 2 + ydiff ** 2) / sigma ** 2
+    l = amp * relamp / (1 + rr_gg)
+    # Sum of Gaussian + Lorentzian
+    f = g + l
+
+   
+    # Compute derivative as well
+    if deriv is True:
+
+        # How many derivative terms to return
+        if nderiv is not None:
+            if nderiv <=0:
+                nderiv = 8
+        else:
+            nderiv = 8
+            
+        derivative = []
+        if nderiv>=1:
+            df_dA = f / amp
+            derivative.append(df_dA)
+        if nderiv>=2:        
+            df_dx_mean = g * 0.5*((2. * a * xdiff) + (b * ydiff))
+            derivative.append(df_dx_mean)
+        if nderiv>=3:
+            df_dy_mean = g * 0.5*((b * xdiff) + (2. * c * ydiff))
+            derivative.append(df_dy_mean)
+        if nderiv>=4:       
+            df_da = g * (-0.5) * xdiff ** 2
+            derivative.append(df_da)
+        if nderiv>=5:       
+            df_db = g * (-0.5) * xdiff * ydiff
+            derivative.append(df_db)
+        if nderiv>=6:       
+            df_dc = g * (-0.5) * ydiff ** 2
+            derivative.append(df_dc)
+        if nderiv>=7:       
+            df_drelamp = l / relamp
+            derivative.append(df_drelamp)
+        if nderiv>=8:
+            df_dsigma= l / (1 + rr_gg) * 2*rr_gg/sigma  # CHECK THIS ONE!!!
+            derivative.append(df_dsigma)
+            
+        return g,derivative
+            
+    # No derivative
+    else:        
+        return g
+
+    
 
 def empirical(x, y, pars, deriv=False, nderiv=None):
     """Empirical look-up table"""
@@ -405,11 +501,45 @@ class PSFBase:
 
         return out
 
+
+    def model(xdata,*args,**kwargs):
+        """ Function to use with curve_fit() to fit a single stellar profile."""
+        ## curve_fit separates each parameter while
+        ## psf expects on pars array
+        pars = args2
+        print(pars)
+        return self(xdata[0],xdata[1],pars,**kwargs2)
+    
+    def modelall(xdata,*args,**kwargs):
+        """ Function to use with curve_fit() to fit all parameters of a single stellar profile."""
+        allpars = args2
+        print(allpars)
+        nmpars = len(func.params)
+        mpars = allpars[-nmpars:]
+        pars = allpars[0:-nmpars]
+        return self(xdata[0],xdata[1],pars,mpars=mpars,**kwargs2)
+
+    def fit(im,pars):
+        """ Convenience function to fit a single star model."""
+        cat = {'X':pars[1],'Y':pars[2]}
+        return getpsf.fitstar(im,cat,self)
+    
+    #def allpars(x,y,pars,**kwargs):
+    #    """" can input STELLAR + MODEL parameters in one array."""
+    #    nmpars = len(self.params)
+    #    pars = pars[0:-nmpars]
+    #    mpars = pars[-nmpars:]
+    #    return self(x,y,pars,mpars=mpars,**kwargs)
+    
     def __str__(self):
         return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+')'
 
     def __repr__(self):
         return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+')'        
+
+    def fwhm(self):
+        """ Return the FWHM of the model function. Must be defined by subclass"""
+        pass
     
     def evaluate(self):
         """ Evaluate the function.  Must be defined by subclass."""
@@ -438,6 +568,12 @@ class PSFGaussian(PSFBase):
         if mpars[0]<=0 or mpars[1]<=0:
             raise ValueError('sigma parameters must be >0')
         super().__init__(mpars,npix=npix,binned=binned)
+
+    def fwhm(self):
+        """ Return the FWHM of the model."""
+        # Mean of FWHM_X and FWHM_Y
+        # Calculate the "correct" FWHM of the 2D Gaussian!!
+        return np.mean(self.params[0:2]*2.355)
         
     def evaluate(self,x, y, pars, binned=None, deriv=False, nderiv=None):
         """Two dimensional Gaussian model function"""
@@ -476,6 +612,12 @@ class PSFMoffat(PSFBase):
         if mpars[1]<1 or mpars[1]>6:
             raise ValueError('alpha must be >1 and <6')
         super().__init__(mpars,npix=npix,binned=binned)
+
+    def fwhm(self):
+        """ Return the FWHM of the model."""
+        # https://nbviewer.jupyter.org/github/ysbach/AO_2017/blob/master/04_Ground_Based_Concept.ipynb#1.2.-Moffat
+        return 2.0 * np.abs(self.params[0]) * np.sqrt(2.0 ** (1.0 / self.params[1]) - 1.0)
+        #return self.params[0]*2.355
         
     def evaluate(self,x, y, pars, binned=None, deriv=False, nderiv=None):
         """Two dimensional Moffat model function"""
@@ -508,6 +650,10 @@ class PSFLorentz(PSFBase):
         if mpars[0]<=0:
             raise ValueError('sigma must be >0')
         super().__init__(mpars,npix=npix,binned=binned)
+
+    def fwhm(self):
+        """ Return the FWHM of the model."""
+        pass
         
     def evaluate(self,x, y, pars, binned=None, deriv=False, nderiv=None):
         """Two dimensional Lorentz model function"""
@@ -543,6 +689,10 @@ class PSFPenny(PSFBase):
         if mpars[0]<=0:
             raise ValueError('sigma must be >0')
         super().__init__(mpars,npix=npix,binned=binned)
+
+    def fwhm(self):
+        """ Return the FWHM of the model."""
+        pass
         
     def evaluate(self,x, y, pars=None, binned=None, deriv=False, nderiv=None):
         """Two dimensional Penny model function"""
@@ -570,6 +720,9 @@ class PSFEmpirical(PSFBase):
         nx,ny,npars = cube.shape
         super().__init__(mpars[0],npix=npix)        
 
+    def fwhm(self):
+        """ Return the FWHM of the model."""
+        pass
         
     def evaluate(self,x, y, pars=None, cube=None, deriv=False, nderiv=None):
         """Empirical look-up table"""
