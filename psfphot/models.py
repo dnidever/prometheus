@@ -34,19 +34,6 @@ import getpsf
 def gaussian2d(x,y,pars,deriv=False,nderiv=None):
     """Two dimensional Gaussian model function"""
     # pars = [amplitude, x0, y0, a, b, c]
-    #theta = np.deg2rad(pars[5])
-    #cost2 = np.cos(theta) ** 2
-    #sint2 = np.sin(theta) ** 2
-    #sin2t = np.sin(2. * theta)
-    #xstd2 = pars[3] ** 2
-    #ystd2 = pars[4] ** 2
-    #xdiff = x - pars[1]
-    #ydiff = y - pars[2]
-    #a = 0.5 * ((cost2 / xstd2) + (sint2 / ystd2))
-    #b = 0.5 * ((sin2t / xstd2) - (sin2t / ystd2))
-    #c = 0.5 * ((sint2 / xstd2) + (cost2 / ystd2))
-    #g = pars[0] * np.exp(-((a * xdiff ** 2) + (b * xdiff * ydiff) +
-    #                       (c * ydiff ** 2)))
 
     # Input A, B and C parameters instead
     # it will speed up the function since we don't have
@@ -100,6 +87,94 @@ def gaussian2d(x,y,pars,deriv=False,nderiv=None):
     else:        
         return g
 
+def gaussian2d_abc2sigtheta(a,b,c):
+    """ Convert 2D Gaussian a, b, c coefficients to sigma_x, sigma_y and theta."""
+    
+    # xdiff = x-x0
+    # ydiff = y-y0
+    # f(x,y) = A*exp(-0.5 * (a*xdiff**2 + b*ydiff**2 + c*xdiff*ydiff))
+    
+    # a is x**2 term
+    # b is y**2 term
+    # c is x*y term
+
+    #cost2 = np.cos(theta) ** 2
+    #sint2 = np.sin(theta) ** 2
+    #sin2t = np.sin(2. * theta)
+    #xstd2 = x_stddev ** 2
+    #ystd2 = y_stddev ** 2
+    #a = ((cost2 / xstd2) + (sint2 / ystd2))
+    #b = ((sint2 / xstd2) + (cost2 / ystd2))    
+    #c = ((sin2t / xstd2) - (sin2t / ystd2))
+
+    # a+b = 1/xstd2 + 1/ystd2
+    # c = sin2t * (1/xstd2 + 1/ystd2)
+    # tan 2*theta = c/(a-b)
+    theta = np.arctan2(c,a-b)/2.0
+
+    sin2t = np.sin(2.0*theta)
+    # c/sin2t + (a+b) = 2/xstd2
+    # xstd2 = 2.0/(c/sin2t + (a+b))
+    xstd = np.sqrt( 2.0/(c/sin2t + (a+b)) )
+
+    # a+b = 1/xstd2 + 1/ystd2
+    ystd = np.sqrt( 1/(a+b-1/xstd**2) )
+
+    return xstd,ystd,theta
+    
+def gaussian2d_fwhm(pars):
+    """ Return the FWHM of a 2D Gaussian."""
+    # pars = [amplitude, x0, y0, a, b, c]
+
+    # xdiff = x-x0
+    # ydiff = y-y0
+    # f(x,y) = A*exp(-0.5 * (a*xdiff**2 + b*ydiff**2 + c*xdiff*ydiff))
+    
+    # a is x**2 term
+    # b is y**2 term
+    # c is x*y term
+    
+    #cost2 = np.cos(theta) ** 2
+    #sint2 = np.sin(theta) ** 2
+    #sin2t = np.sin(2. * theta)
+    #xstd2 = x_stddev ** 2
+    #ystd2 = y_stddev ** 2
+    #a = ((cost2 / xstd2) + (sint2 / ystd2))
+    #b = ((sint2 / xstd2) + (cost2 / ystd2))    
+    #c = ((sin2t / xstd2) - (sin2t / ystd2))
+
+    a = pars[3]
+    b = pars[4]
+    c = pars[5]
+
+    xstd,ystd,theta = gaussian2d_abc2sigtheta(a,b,c)
+
+    # The mean radius of an ellipse is: (2a+b)/3
+    sig_major = np.max([xstd,ystd])
+    sig_minor = np.min([xstd,ystd])
+    mnsig = (2.0*sig_major+sig_minor)/3.0
+    # Convert sigma to FWHM
+    # FWHM = 2*sqrt(2*ln(2))*sig ~ 2.35482*sig
+    fwhm = mnsig*2.35482
+
+    return fwhm
+
+def gaussian2d_flux(pars):
+    """ Return the total Flux of a 2D Gaussian."""
+    # Volume is 2*pi*A*sigx*sigy
+
+    amp = pars[0]
+    a = pars[3]
+    b = pars[4]
+    c = pars[5]
+
+    xstd,ystd,theta = gaussian2d_abc2sigtheta(a,b,c)
+
+    volume = 2*np.pi*amp*xstd*ystd
+    
+    return volume
+    
+    
 def gaussian2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
     """ Two dimensional Gaussian model function integrated over the pixels."""
 
@@ -377,13 +452,13 @@ def penny2d(x, y, pars, deriv=False, nderiv=None):
         if nderiv>=1:
             df_dA = f / amp
             derivative.append(df_dA)
-        if nderiv>=2:        
+        if nderiv>=2:
             df_dx_mean = ( g * 0.5*((2 * a * xdiff) + (c * ydiff)) +
-                           2*f*xdiff/(sigma**2 * (1+rr_gg)) )
+                           2*l*xdiff/(sigma**2 * (1+rr_gg)) )
             derivative.append(df_dx_mean)
         if nderiv>=3:
             df_dy_mean = ( g * 0.5*((2 * b * ydiff) + (c * xdiff)) +
-                           2*f*ydiff/(sigma**2 * (1+rr_gg)) )
+                           2*l*ydiff/(sigma**2 * (1+rr_gg)) )
             derivative.append(df_dy_mean)
         if nderiv>=4:       
             df_da = g * (-0.5) * xdiff ** 2
@@ -424,6 +499,8 @@ def empirical(x, y, pars, deriv=False, nderiv=None):
 class PSFBase:
 
     def __init__(self,mpars,npix=101,binned=False):
+        # npix must be odd
+        if npix%2==1: npix += 1
         self._params = np.atleast_1d(mpars)
         self.binned = binned
         self.npix = npix
@@ -534,6 +611,16 @@ class PSFBase:
     def fwhm(self):
         """ Return the FWHM of the model function. Must be defined by subclass"""
         pass
+
+    def flux(self,pars=None):
+        """ Return the flux/volume of the model given the height.  Must be defined by subclass."""
+        if pars is None:
+            pars = np.hstack(([1.0, 0.0, 0.0], self.params))
+        else:
+            pars = np.atleast_1d(pars)
+            if pars.size==1:
+                pars = np.hstack(([pars[0], 0.0, 0.0], self.params))            
+        return gaussian2d_flux(pars)
     
     def evaluate(self):
         """ Evaluate the function.  Must be defined by subclass."""
@@ -563,11 +650,12 @@ class PSFGaussian(PSFBase):
             raise ValueError('sigma parameters must be >0')
         super().__init__(mpars,npix=npix,binned=binned)
 
-    def fwhm(self):
+    #@property
+    def fwhm(self,pars=None):
         """ Return the FWHM of the model."""
-        # Mean of FWHM_X and FWHM_Y
-        # Calculate the "correct" FWHM of the 2D Gaussian!!
-        return np.mean(self.params[0:2]*2.355)
+        if pars is None:
+            pars = np.hstack(([1.0,0.0,0.0],self.params))
+        return gaussian2d_fwhm(pars)
         
     def evaluate(self,x, y, pars, binned=None, deriv=False, nderiv=None):
         """Two dimensional Gaussian model function"""
