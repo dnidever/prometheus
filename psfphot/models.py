@@ -121,7 +121,8 @@ def gaussian2d_abc2sigtheta(a,b,c):
     ystd = np.sqrt( 1/(a+b-1/xstd**2) )
 
     return xstd,ystd,theta
-    
+
+
 def gaussian2d_fwhm(pars):
     """ Return the FWHM of a 2D Gaussian."""
     # pars = [amplitude, x0, y0, a, b, c]
@@ -158,6 +159,7 @@ def gaussian2d_fwhm(pars):
     fwhm = mnsig*2.35482
 
     return fwhm
+
 
 def gaussian2d_flux(pars):
     """ Return the total Flux of a 2D Gaussian."""
@@ -321,6 +323,50 @@ def moffat2d(x, y, pars, deriv=False, nderiv=None):
     # No derivative
     else:
         return g
+
+def moffat2d_fwhm(pars):
+    """ Return the FWHM of a 2D Moffat function."""
+    # [amplitude, x0, y0, a, b, c, beta]
+    # https://nbviewer.jupyter.org/github/ysbach/AO_2017/blob/master/04_Ground_Based_Concept.ipynb#1.2.-Moffat
+
+    a = pars[3]
+    b = pars[4]
+    c = pars[5]
+    beta = pars[6]
+    
+    xstd,ystd,theta = gaussian2d_abc2sigtheta(a,b,c)
+
+    # The mean radius of an ellipse is: (2a+b)/3
+    sig_major = np.max([xstd,ystd])
+    sig_minor = np.min([xstd,ystd])
+    mnsig = (2.0*sig_major+sig_minor)/3.0
+    
+    return 2.0 * np.abs(mnsig) * np.sqrt(2.0 ** (1.0/beta) - 1.0)
+
+
+def moffat2d_flux(pars):
+    """ Return the total Flux of a 2D Moffat."""
+    # [amplitude, x0, y0, a, b, c, beta]
+    # Volume is 2*pi*A*sigx*sigy
+    # area of 1D moffat function is pi*alpha**2 / (beta-1)
+    # maybe the 2D moffat volume is (xsig*ysig*pi**2/(beta-1))**2
+
+    amp = pars[0]
+    a = pars[3]
+    b = pars[4]
+    c = pars[5]
+    beta = pars[6]
+
+    xstd,ystd,theta = gaussian2d_abc2sigtheta(a,b,c)
+
+    # This worked for beta=2.5, but was too high by ~1.05-1.09 for beta=1.5
+    #volume = amp * xstd*ystd*np.pi/(beta-1)
+    volume = amp * xstd*ystd*np.pi/(beta-1)
+    # what is the beta dependence?? linear is very close!
+
+    # I think undersampling is becoming an issue at beta=3.5 with fwhm=2.78
+    
+    return volume
 
 
 def moffat2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
@@ -614,13 +660,7 @@ class PSFBase:
 
     def flux(self,pars=None):
         """ Return the flux/volume of the model given the height.  Must be defined by subclass."""
-        if pars is None:
-            pars = np.hstack(([1.0, 0.0, 0.0], self.params))
-        else:
-            pars = np.atleast_1d(pars)
-            if pars.size==1:
-                pars = np.hstack(([pars[0], 0.0, 0.0], self.params))            
-        return gaussian2d_flux(pars)
+        pass
     
     def evaluate(self):
         """ Evaluate the function.  Must be defined by subclass."""
@@ -656,7 +696,17 @@ class PSFGaussian(PSFBase):
         if pars is None:
             pars = np.hstack(([1.0,0.0,0.0],self.params))
         return gaussian2d_fwhm(pars)
-        
+
+    def flux(self,pars=None):
+        """ Return the flux/volume of the model given the height or parameters."""
+        if pars is None:
+            pars = np.hstack(([1.0, 0.0, 0.0], self.params))
+        else:
+            pars = np.atleast_1d(pars)
+            if pars.size==1:
+                pars = np.hstack(([pars[0], 0.0, 0.0], self.params))            
+        return gaussian2d_flux(pars)
+    
     def evaluate(self,x, y, pars, binned=None, deriv=False, nderiv=None):
         """Two dimensional Gaussian model function"""
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
@@ -684,23 +734,33 @@ class PSFMoffat(PSFBase):
     # Initalize the object
     def __init__(self,mpars=None,npix=101,binned=False):
         # MPARS are model parameters
+        # [a, b, c, beta]
         if mpars is None:
-            mpars = np.array([1.0,2.5])
-        if len(mpars)<5:
+            mpars = np.array([1.0,1.0,0.0,2.5])
+        if len(mpars)<4:
             raise ValueError('2 parameters required')
-        # pars = [sigma, beta]
-        if mpars[0]<=0:
+        if mpars[0]<=0 or mpars[1]<=0:
             raise ValueError('sigma must be >0')
-        if mpars[1]<1 or mpars[1]>6:
-            raise ValueError('alpha must be >1 and <6')
+        if mpars[3]<0 or mpars[3]>6:
+            raise ValueError('beta must be >0 and <6')
         super().__init__(mpars,npix=npix,binned=binned)
 
-    def fwhm(self):
+    def fwhm(self,pars=None):
         """ Return the FWHM of the model."""
-        # https://nbviewer.jupyter.org/github/ysbach/AO_2017/blob/master/04_Ground_Based_Concept.ipynb#1.2.-Moffat
-        return 2.0 * np.abs(self.params[0]) * np.sqrt(2.0 ** (1.0 / self.params[1]) - 1.0)
-        #return self.params[0]*2.355
-        
+        if pars is None:
+            pars = np.hstack(([1.0,0.0,0.0],self.params))
+        return moffat2d_fwhm(pars)
+
+    def flux(self,pars=None):
+        """ Return the flux/volume of the model given the height or parameters."""
+        if pars is None:
+            pars = np.hstack(([1.0, 0.0, 0.0], self.params))
+        else:
+            pars = np.atleast_1d(pars)
+            if pars.size==1:
+                pars = np.hstack(([pars[0], 0.0, 0.0], self.params))            
+        return moffat2d_flux(pars)
+    
     def evaluate(self,x, y, pars, binned=None, deriv=False, nderiv=None):
         """Two dimensional Moffat model function"""
         # pars = [amplitude, x0, y0, sigma, beta]
