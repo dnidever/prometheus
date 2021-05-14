@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python
 
 """PSF.PY - PSF photometry models
@@ -49,7 +48,6 @@ def gaussian2d(x,y,pars,deriv=False,nderiv=None):
     a = ((cost2 / xsig2) + (sint2 / ysig2))
     b = ((sin2t / xsig2) - (sin2t / ysig2))    
     c = ((sint2 / xsig2) + (cost2 / ysig2))
-
 
     g = amp * np.exp(-0.5*((a * xdiff**2) + (b * xdiff * ydiff) +
                            (c * ydiff**2)))
@@ -112,6 +110,39 @@ def gaussian2d(x,y,pars,deriv=False,nderiv=None):
     else:        
         return g
 
+
+def gaussian2d_fwhm(pars):
+    """ Return the FWHM of a 2D Gaussian."""
+    # pars = [amplitude, x0, y0, xsig, ysig, theta]
+
+    # xdiff = x-x0
+    # ydiff = y-y0
+    # f(x,y) = A*exp(-0.5 * (a*xdiff**2 + b*xdiff*ydiff + c*ydiff**2))
+
+    xsig = pars[3]
+    ysig = pars[4]
+
+    # The mean radius of an ellipse is: (2a+b)/3
+    sig_major = np.max([xsig,ysig])
+    sig_minor = np.min([xsig,ysig])
+    mnsig = (2.0*sig_major+sig_minor)/3.0
+    # Convert sigma to FWHM
+    # FWHM = 2*sqrt(2*ln(2))*sig ~ 2.35482*sig
+    fwhm = mnsig*2.35482
+
+    return fwhm
+
+
+def gaussian2d_flux(pars):
+    """ Return the total Flux of a 2D Gaussian."""
+    # Volume is 2*pi*A*sigx*sigy
+    amp = pars[0]
+    xsig = pars[3]
+    ysig = pars[4]
+    volume = 2*np.pi*amp*xsig*ysig
+    
+    return volume
+    
 
 def gaussian2d_sigtheta2abc(xstd,ystd,theta):
     """ Convert 2D Gaussian sigma_x, sigma_y and theta to a, b, c coefficients."""
@@ -192,39 +223,6 @@ def gaussian2d_abc2sigtheta(a,b,c):
 
     return xstd,ystd,theta
 
-
-def gaussian2d_fwhm(pars):
-    """ Return the FWHM of a 2D Gaussian."""
-    # pars = [amplitude, x0, y0, xsig, ysig, theta]
-
-    # xdiff = x-x0
-    # ydiff = y-y0
-    # f(x,y) = A*exp(-0.5 * (a*xdiff**2 + b*xdiff*ydiff + c*ydiff**2))
-
-    xsig = pars[3]
-    ysig = pars[4]
-
-    # The mean radius of an ellipse is: (2a+b)/3
-    sig_major = np.max([xsig,ysig])
-    sig_minor = np.min([xsig,ysig])
-    mnsig = (2.0*sig_major+sig_minor)/3.0
-    # Convert sigma to FWHM
-    # FWHM = 2*sqrt(2*ln(2))*sig ~ 2.35482*sig
-    fwhm = mnsig*2.35482
-
-    return fwhm
-
-
-def gaussian2d_flux(pars):
-    """ Return the total Flux of a 2D Gaussian."""
-    # Volume is 2*pi*A*sigx*sigy
-    amp = pars[0]
-    xsig = pars[3]
-    ysig = pars[4]
-    volume = 2*np.pi*amp*xsig*ysig
-    
-    return volume
-    
     
 def gaussian2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
     """ Two dimensional Gaussian model function integrated over the pixels."""
@@ -514,45 +512,36 @@ def moffat2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
             g = g.reshape(shape)
         return g
 
-
-# Don't need this!  Moffat with beta=1
-#def lorentz2d(x, y, pars, deriv=False, nderiv=None):
-#    """Two dimensional Lorentz model function"""
-#    # 1/(1+(r**2/alpha**2)**beta)
-#    alpha = pars[0]
-#    beta = pars[1]
-#
-#    amp = pars[0]
-#    xdiff = x - pars[1]
-#    ydiff = y - pars[2]
-#    a = pars[3]
-#    b = pars[4]
-#    c = pars[5]
-#    beta = pars[6]
-#
-#    rr_gg = (a * xdiff ** 2) + (b * xdiff * ydiff) + (c * ydiff ** 2)
-#    g = amp * (1 + rr_gg) ** (-beta)
-
     
 def penny2d(x, y, pars, deriv=False, nderiv=None):
-    """ Gaussian core and Lorentzian wings, only Gaussian is tilted."""
+    """ Gaussian core and Lorentzian-like wings, only Gaussian is tilted."""
     # Lorentzian are azimuthally symmetric.
+    # Lorentzian cannot be normalized, use Moffat beta=1.2 instead
     # pars = [amp,x0,y0,xsig,ysig,theta, relamp,sigma]
 
     xdiff = x - pars[1]
     ydiff = y - pars[2]
     amp = pars[0]
-    a = pars[3]
-    b = pars[4]
-    c = pars[5]
+    xsig = pars[3]
+    ysig = pars[4]
+    theta = pars[5]
+    cost2 = np.cos(theta) ** 2
+    sint2 = np.sin(theta) ** 2
+    sin2t = np.sin(2. * theta)
+    xsig2 = xsig ** 2
+    ysig2 = ysig ** 2
+    a = ((cost2 / xsig2) + (sint2 / ysig2))
+    b = ((sin2t / xsig2) - (sin2t / ysig2))    
+    c = ((sint2 / xsig2) + (cost2 / ysig2))
     relamp = pars[6]    
     # Gaussian component
-    g = amp * (1-relamp) * np.exp(-0.5*((a * xdiff ** 2) + (b * ydiff ** 2) +
-                                        (c * xdiff * ydiff)))
-    # Add Lorentzian wings
+    g = amp * (1-relamp) * np.exp(-0.5*((a * xdiff ** 2) + (b * xdiff*ydiff) +
+                                        (c * ydiff ** 2)))
+    # Add Lorentzian/Moffat beta=1.2 wings
     sigma = pars[7]
     rr_gg = (xdiff ** 2 + ydiff ** 2) / sigma ** 2
-    l = amp * relamp / (1 + rr_gg)
+    beta = 1.2
+    l = amp * relamp / (1 + rr_gg)**(beta)
     # Sum of Gaussian + Lorentzian
     f = g + l
 
@@ -572,27 +561,54 @@ def penny2d(x, y, pars, deriv=False, nderiv=None):
             df_dA = f / amp
             derivative.append(df_dA)
         if nderiv>=2:
-            df_dx_mean = ( g * 0.5*((2 * a * xdiff) + (c * ydiff)) +
-                           2*l*xdiff/(sigma**2 * (1+rr_gg)) )
+            #df_dx_mean = ( g * 0.5*((2 * a * xdiff) + (b * ydiff)) +
+            #               2*l*xdiff/(sigma**2 * (1+rr_gg)) )
+            df_dx_mean = ( g * 0.5*((2 * a * xdiff) + (b * ydiff)) +                           
+                           2*beta*l*xdiff/(sigma**2 * (1+rr_gg)) )            
             derivative.append(df_dx_mean)
         if nderiv>=3:
-            df_dy_mean = ( g * 0.5*((2 * b * ydiff) + (c * xdiff)) +
-                           2*l*ydiff/(sigma**2 * (1+rr_gg)) )
+            #df_dy_mean = ( g * 0.5*((2 * c * ydiff) + (b * xdiff)) +
+            #               2*l*ydiff/(sigma**2 * (1+rr_gg)) )
+            df_dy_mean = ( g * 0.5*((2 * c * ydiff) + (b * xdiff)) +
+                           2*beta*l*ydiff/(sigma**2 * (1+rr_gg)) )            
             derivative.append(df_dy_mean)
         if nderiv>=4:
-            df_da = g * (-0.5) * xdiff ** 2
-            derivative.append(df_da)
+            xdiff2 = xdiff ** 2
+            ydiff2 = ydiff ** 2
+            xsig3 = xsig ** 3
+            da_dxsig = -cost2 / xsig3
+            db_dxsig = -sin2t / xsig3            
+            dc_dxsig = -sint2 / xsig3            
+            df_dxsig = g * (-(da_dxsig * xdiff2 +
+                              db_dxsig * xdiff * ydiff +
+                              dc_dxsig * ydiff2))
+            derivative.append(df_dxsig)
         if nderiv>=5:
-            df_db = g * (-0.5) * ydiff ** 2
-            derivative.append(df_db)
+            ysig3 = ysig ** 3
+            da_dysig = -sint2 / ysig3
+            db_dysig = sin2t / ysig3            
+            dc_dysig = -cost2 / ysig3            
+            df_dysig = g * (-(da_dysig * xdiff2 +
+                              db_dysig * xdiff * ydiff +
+                              dc_dysig * ydiff2))
+            derivative.append(df_dysig)
         if nderiv>=6:
-            df_dc = g * (-0.5) * xdiff * ydiff
-            derivative.append(df_dc)
+            sint = np.sin(theta)
+            cost = np.cos(theta)
+            cos2t = np.cos(2.0*theta)
+            da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
+            db_dtheta = (cos2t / xsig2) - (cos2t / ysig2)            
+            dc_dtheta = -da_dtheta            
+            df_dtheta = g * (-(da_dtheta * xdiff2 +
+                               db_dtheta * xdiff * ydiff +
+                               dc_dtheta * ydiff2))
+            derivative.append(df_dtheta)
         if nderiv>=7:
-            df_drelamp = -g/(1+relamp) + l / relamp
+            df_drelamp = -g/(1-relamp) + l/relamp
             derivative.append(df_drelamp)
         if nderiv>=8:
-            df_dsigma = l/(1+rr_gg) * 2*rr_gg/sigma
+            #df_dsigma = l/(1+rr_gg) * 2*rr_gg/sigma
+            df_dsigma = beta*l/(1+rr_gg) * 2*(xdiff2+ydiff2)/sigma**3 
             derivative.append(df_dsigma)
             
         return f,derivative
@@ -601,7 +617,59 @@ def penny2d(x, y, pars, deriv=False, nderiv=None):
     else:        
         return f
 
+
+def penny2d_fwhm(pars):
+    """ Return the FWHM of a 2D Penny function."""
+    # [amplitude, x0, y0, xsig, ysig, theta, relative amplitude, sigma]
+
+    amp = pars[0]
+    xsig = pars[3]
+    ysig = pars[4]
+    relamp = pars[6]
+    sigma = pars[7]
+    beta = 1.2   # Moffat
     
+    # The mean radius of an ellipse is: (2a+b)/3
+    sig_major = np.max([xsig,ysig])
+    sig_minor = np.min([xsig,ysig])
+    mnsig = (2.0*sig_major+sig_minor)/3.0
+
+    # Moffat beta=1.2 FWHM
+
+    # Might have to actually calculate this based on a profile
+    # or something
+    import pdb; pdb.set_trace()
+    
+    return 2.0 * np.abs(mnsig) * np.sqrt(2.0 ** (1.0/beta) - 1.0)
+
+
+def penny2d_flux(pars):
+    """ Return the total Flux of a 2D Penny function."""
+    # [amplitude, x0, y0, xsig, ysig, theta, relative amplitude, sigma]    
+
+    # Volume is 2*pi*A*sigx*sigy
+    # area of 1D moffat function is pi*alpha**2 / (beta-1)
+    # maybe the 2D moffat volume is (xsig*ysig*pi**2/(beta-1))**2
+
+    amp = pars[0]
+    xsig = pars[3]
+    ysig = pars[4]
+    relamp = pars[6]
+    sigma = pars[7]
+    beta = 1.2   # Moffat
+
+    # Gaussian portion
+    # Volume is 2*pi*A*sigx*sigy
+    gvolume = 2*np.pi*amp*(1-relamp)*xsig*ysig
+
+    # Moffat beta=1.2 wings portion
+    lvolume = amp*relamp * sigma**2 * np.pi/(beta-1)
+    
+    # Sum
+    volume = gvolume + lvolume
+    
+    return volume
+
 
 def empirical(x, y, pars, deriv=False, nderiv=None):
     """Empirical look-up table"""
@@ -871,24 +939,43 @@ class PSFPenny(PSFBase):
             raise ValueError('relative amplitude must be >=0 and <=1')
         super().__init__(mpars,npix=npix,binned=binned)
 
-    def fwhm(self):
+    def fwhm(self,pars=None):
         """ Return the FWHM of the model."""
-        pass
+        if pars is None:
+            pars = np.hstack(([1.0,0.0,0.0],self.params))
+        return penny2d_fwhm(pars)
+
+    def flux(self,pars=None):
+        """ Return the flux/volume of the model given the height or parameters."""
+        if pars is None:
+            pars = np.hstack(([1.0, 0.0, 0.0], self.params))
+        else:
+            pars = np.atleast_1d(pars)
+            if pars.size==1:
+                pars = np.hstack(([pars[0], 0.0, 0.0], self.params))            
+        return penny2d_flux(pars)
         
     def evaluate(self,x, y, pars=None, binned=None, deriv=False, nderiv=None):
         """Two dimensional Penny model function"""
         # pars = [amplitude, x0, y0, xsig, ysig, theta, relamp, sigma]
         if pars is None: pars = self.params
         if binned is None: binned = self.binned
-        return penny2d(x, y, pars, binned=binned, deriv=deriv, nderiv=nderiv)
+        if binned is True:
+            return penny2d_integrate(x, y, pars, deriv=deriv, nderiv=nderiv)
+        else:
+            return penny2d(x, y, pars, deriv=deriv, nderiv=nderiv)
 
     def deriv(self,x, y, pars=None, binned=None, nderiv=None):
         """Two dimensional Penny model derivative with respect to parameters"""
         if pars is None: pars = self.params
-        if binned is None: binned = self.binned        
-        return penny2d_deriv(x, y, pars, binned=binned, nderiv=nderiv)
+        if binned is None: binned = self.binned
+        if binned is True:
+            g, derivative = penny2d_integrate(x, y, pars, deriv=True, nderiv=nderiv)
+        else:
+            g, derivative = penny2d(x, y, pars, deriv=True, nderiv=nderiv)
+        return derivative
 
-
+    
 class PSFEmpirical(PSFBase):
     """ Empirical look-up table PSF, can vary spatially."""
 
