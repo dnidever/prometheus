@@ -633,14 +633,22 @@ def penny2d_fwhm(pars):
     sig_major = np.max([xsig,ysig])
     sig_minor = np.min([xsig,ysig])
     mnsig = (2.0*sig_major+sig_minor)/3.0
-
-    # Moffat beta=1.2 FWHM
-
-    # Might have to actually calculate this based on a profile
-    # or something
-    import pdb; pdb.set_trace()
+    # Convert sigma to FWHM
+    # FWHM = 2*sqrt(2*ln(2))*sig ~ 2.35482*sig
+    gfwhm = mnsig*2.35482
+    if relamp==0:
+        return gfwhm
     
-    return 2.0 * np.abs(mnsig) * np.sqrt(2.0 ** (1.0/beta) - 1.0)
+    # Moffat beta=1.2 FWHM
+    mfwhm = 2.0 * np.abs(sigma) * np.sqrt(2.0 ** (1.0/beta) - 1.0)
+
+    # Generate a small profile
+    x = np.arange( np.min([gfwhm,mfwhm])/2.35/2, np.max([gfwhm,mfwhm]), 0.5)
+    f = (1-relamp)*np.exp(-0.5*(x/mnsig)**2) + relamp/(1+(x/sigma)**2)**beta
+    hwhm = np.interp(0.5,f[::-1],x[::-1])
+    fwhm = 2*hwhm
+    
+    return fwhm
 
 
 def penny2d_flux(pars):
