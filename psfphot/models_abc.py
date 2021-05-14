@@ -33,7 +33,7 @@ import getpsf
 
 def gaussian2d(x,y,pars,deriv=False,nderiv=None):
     """Two dimensional Gaussian model function"""
-    # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+    # pars = [amplitude, x0, y0, a, b, c]
 
     # Input A, B and C parameters instead
     # it will speed up the function since we don't have
@@ -44,20 +44,12 @@ def gaussian2d(x,y,pars,deriv=False,nderiv=None):
     xdiff = x - pars[1]
     ydiff = y - pars[2]
     amp = pars[0]
-    xsig = pars[3]
-    ysig = pars[4]
-    theta = pars[5]
-    cost2 = np.cos(theta) ** 2
-    sint2 = np.sin(theta) ** 2
-    sin2t = np.sin(2. * theta)
-    xsig2 = xsig ** 2
-    ysig2 = ysig ** 2
-    a = ((cost2 / xsig2) + (sint2 / ysig2))
-    b = ((sint2 / xsig2) + (cost2 / ysig2))
-    c = ((sin2t / xsig2) - (sin2t / ysig2))
-
-    g = amp * np.exp(-0.5*((a * xdiff**2) + (b * ydiff**2) +
-                           (c * xdiff*ydiff)))
+    a = pars[3]
+    b = pars[4]
+    c = pars[5]
+    if a==b: c = 0.0
+    g = pars[0] * np.exp(-0.5*((a * xdiff ** 2) + (b * ydiff ** 2) +
+                               (c * xdiff * ydiff)))
     
     # Compute derivative as well
     if deriv is True:
@@ -79,37 +71,15 @@ def gaussian2d(x,y,pars,deriv=False,nderiv=None):
         if nderiv>=3:
             dg_dy_mean = g * 0.5*((2 * b * ydiff) + (c * xdiff))
             derivative.append(dg_dy_mean)
-        if nderiv>=4:
-            xdiff2 = xdiff ** 2
-            ydiff2 = ydiff ** 2
-            xsig3 = xsig ** 3
-            da_dxsig = -cost2 / xsig3
-            db_dxsig = -sint2 / xsig3            
-            dc_dxsig = -sin2t / xsig3
-            dg_dxsig = g * (-(da_dxsig * xdiff2 +
-                              db_dxsig * ydiff2 +
-                              dc_dxsig * xdiff * ydiff))
-            derivative.append(dg_dxsig)
-        if nderiv>=5:
-            ysig3 = ysig ** 3
-            da_dysig = -sint2 / ysig3
-            db_dysig = -cost2 / ysig3            
-            dc_dysig = sin2t / ysig3
-            dg_dysig = g * (-(da_dysig * xdiff2 +
-                              db_dysig * ydiff2 +
-                              dc_dysig * xdiff * ydiff))
-            derivative.append(dg_dysig)
-        if nderiv>=6:
-            sint = np.sin(theta)
-            cost = np.cos(theta)
-            cos2t = np.cos(2.0*theta)
-            da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
-            db_dtheta = -da_dtheta            
-            dc_dtheta = (cos2t / xsig2) - (cos2t / ysig2)
-            dg_dtheta = g * (-(da_dtheta * xdiff2 +
-                               db_dtheta * ydiff2 +
-                               dc_dtheta * xdiff * ydiff))
-            derivative.append(dg_dtheta)
+        if nderiv>=4:       
+            dg_da = g * (-0.5) * xdiff ** 2
+            derivative.append(dg_da)
+        if nderiv>=5:       
+            dg_db = g * (-0.5) * ydiff ** 2
+            derivative.append(dg_db)
+        if nderiv>=6:       
+            dg_dc = g * (-0.5) * xdiff * ydiff
+            derivative.append(dg_dc)
 
         return g,derivative
             
@@ -199,18 +169,35 @@ def gaussian2d_abc2sigtheta(a,b,c):
 
 def gaussian2d_fwhm(pars):
     """ Return the FWHM of a 2D Gaussian."""
-    # pars = [amplitude, x0, y0, xsig, ysig, theta]
+    # pars = [amplitude, x0, y0, a, b, c]
 
     # xdiff = x-x0
     # ydiff = y-y0
     # f(x,y) = A*exp(-0.5 * (a*xdiff**2 + b*ydiff**2 + c*xdiff*ydiff))
+    
+    # a is x**2 term
+    # b is y**2 term
+    # c is x*y term
+    
+    #cost2 = np.cos(theta) ** 2
+    #sint2 = np.sin(theta) ** 2
+    #sin2t = np.sin(2. * theta)
+    #xstd2 = x_stddev ** 2
+    #ystd2 = y_stddev ** 2
+    #a = ((cost2 / xstd2) + (sint2 / ystd2))
+    #b = ((sint2 / xstd2) + (cost2 / ystd2))    
+    #c = ((sin2t / xstd2) - (sin2t / ystd2))
 
-    xsig = pars[3]
-    ysig = pars[4]
+    a = pars[3]
+    b = pars[4]
+    c = pars[5]
+    if a==b: c = 0.0
+    
+    xstd,ystd,theta = gaussian2d_abc2sigtheta(a,b,c)
 
     # The mean radius of an ellipse is: (2a+b)/3
-    sig_major = np.max([xsig,ysig])
-    sig_minor = np.min([xsig,ysig])
+    sig_major = np.max([xstd,ystd])
+    sig_minor = np.min([xstd,ystd])
     mnsig = (2.0*sig_major+sig_minor)/3.0
     # Convert sigma to FWHM
     # FWHM = 2*sqrt(2*ln(2))*sig ~ 2.35482*sig
@@ -222,9 +209,16 @@ def gaussian2d_fwhm(pars):
 def gaussian2d_flux(pars):
     """ Return the total Flux of a 2D Gaussian."""
     # Volume is 2*pi*A*sigx*sigy
-    xsig = pars[3]
-    ysig = pars[4]
-    volume = 2*np.pi*amp*xsig*ysig
+
+    amp = pars[0]
+    a = pars[3]
+    b = pars[4]
+    c = pars[5]
+    if a==b: c = 0.0
+    
+    xstd,ystd,theta = gaussian2d_abc2sigtheta(a,b,c)
+
+    volume = 2*np.pi*amp*xstd*ystd
     
     return volume
     
@@ -519,7 +513,6 @@ def moffat2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
 def penny2d(x, y, pars, deriv=False, nderiv=None):
     """ Gaussian core and Lorentzian wings, only Gaussian is tilted."""
     # Maybe Lorentzian wings need to be azimuthally symmetric.
-    # pars = [amp,x0,y0,xsig,ysig,theta, relamp,sigma]
 
 
     xdiff = x - pars[1]
@@ -879,7 +872,6 @@ class PSFPenny(PSFBase):
     
     # Initalize the object
     def __init__(self,mpars=None,npix=101,binned=False):
-        # pars = [amp,x0,y0,xsig,ysig,theta, relamp,sigma]
         if mpars is None:
             mpars = np.array([1.0,2.5])
         if len(mpars)<2:
@@ -887,8 +879,6 @@ class PSFPenny(PSFBase):
         # mpars = [sigma, beta]
         if mpars[0]<=0:
             raise ValueError('sigma must be >0')
-        if mpars[6]<0 or mpars[6]>1:
-            raise ValueError('relative amplitude must be >=0 and <=1')
         super().__init__(mpars,npix=npix,binned=binned)
 
     def fwhm(self):
