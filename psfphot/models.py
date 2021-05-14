@@ -218,6 +218,7 @@ def gaussian2d_fwhm(pars):
 def gaussian2d_flux(pars):
     """ Return the total Flux of a 2D Gaussian."""
     # Volume is 2*pi*A*sigx*sigy
+    amp = pars[0]
     xsig = pars[3]
     ysig = pars[4]
     volume = 2*np.pi*amp*xsig*ysig
@@ -409,7 +410,8 @@ def moffat2d_fwhm(pars):
 
     xsig = pars[3]
     ysig = pars[4]
-
+    beta = pars[6]
+    
     # The mean radius of an ellipse is: (2a+b)/3
     sig_major = np.max([xsig,ysig])
     sig_minor = np.min([xsig,ysig])
@@ -617,7 +619,7 @@ class PSFBase:
 
     def __init__(self,mpars,npix=101,binned=False):
         # npix must be odd
-        if npix%2==1: npix += 1
+        if npix%2==0: npix += 1
         self._params = np.atleast_1d(mpars)
         self.binned = binned
         self.npix = npix
@@ -754,7 +756,7 @@ class PSFGaussian(PSFBase):
         # MPARS are the model parameters
         if mpars is None:
             mpars = np.array([1.0,1.0,0.0])
-        if len(mpars)<3:
+        if len(mpars)!=3:
             raise ValueError('3 parameters required')
         # mpars = [xsigma, ysigma, theta]
         if mpars[0]<=0 or mpars[1]<=0:
@@ -808,8 +810,8 @@ class PSFMoffat(PSFBase):
         # mpars = [xsig, ysig, theta, beta]
         if mpars is None:
             mpars = np.array([1.0,1.0,0.0,2.5])
-        if len(mpars)<4:
-            raise ValueError('2 parameters required')
+        if len(mpars)!=4:
+            raise ValueError('4 parameters required')
         if mpars[0]<=0 or mpars[1]<=0:
             raise ValueError('sigma must be >0')
         if mpars[3]<0 or mpars[3]>6:
@@ -861,7 +863,7 @@ class PSFPenny(PSFBase):
         # mpars = [xsig,ysig,theta, relamp,sigma]
         if mpars is None:
             mpars = np.array([1.0,2.5,2.5,0.0,0.02,5.0])
-        if len(mpars)<5:
+        if len(mpars)!=5:
             raise ValueError('5 parameters required')
         if mpars[0]<=0:
             raise ValueError('sigma must be >0')
