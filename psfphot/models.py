@@ -35,12 +35,6 @@ def gaussian2d(x,y,pars,deriv=False,nderiv=None):
     """Two dimensional Gaussian model function"""
     # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
 
-    # Input A, B and C parameters instead
-    # it will speed up the function since we don't have
-    #  to compute anything
-    # We can always compute sigma_minor, sigma_major, theta later
-    #  if we want.
-
     xdiff = x - pars[1]
     ydiff = y - pars[2]
     amp = pars[0]
@@ -53,11 +47,12 @@ def gaussian2d(x,y,pars,deriv=False,nderiv=None):
     xsig2 = xsig ** 2
     ysig2 = ysig ** 2
     a = ((cost2 / xsig2) + (sint2 / ysig2))
-    b = ((sint2 / xsig2) + (cost2 / ysig2))
-    c = ((sin2t / xsig2) - (sin2t / ysig2))
+    b = ((sin2t / xsig2) - (sin2t / ysig2))    
+    c = ((sint2 / xsig2) + (cost2 / ysig2))
 
-    g = amp * np.exp(-0.5*((a * xdiff**2) + (b * ydiff**2) +
-                           (c * xdiff*ydiff)))
+
+    g = amp * np.exp(-0.5*((a * xdiff**2) + (b * xdiff * ydiff) +
+                           (c * ydiff**2)))
     
     # Compute derivative as well
     if deriv is True:
@@ -74,41 +69,41 @@ def gaussian2d(x,y,pars,deriv=False,nderiv=None):
             dg_dA = g / amp
             derivative.append(dg_dA)
         if nderiv>=2:        
-            dg_dx_mean = g * 0.5*((2 * a * xdiff) + (c * ydiff))
+            dg_dx_mean = g * 0.5*((2 * a * xdiff) + (b * ydiff))
             derivative.append(dg_dx_mean)
         if nderiv>=3:
-            dg_dy_mean = g * 0.5*((2 * b * ydiff) + (c * xdiff))
+            dg_dy_mean = g * 0.5*((2 * c * ydiff) + (b * xdiff))
             derivative.append(dg_dy_mean)
         if nderiv>=4:
             xdiff2 = xdiff ** 2
             ydiff2 = ydiff ** 2
             xsig3 = xsig ** 3
             da_dxsig = -cost2 / xsig3
-            db_dxsig = -sint2 / xsig3            
-            dc_dxsig = -sin2t / xsig3
+            db_dxsig = -sin2t / xsig3            
+            dc_dxsig = -sint2 / xsig3            
             dg_dxsig = g * (-(da_dxsig * xdiff2 +
-                              db_dxsig * ydiff2 +
-                              dc_dxsig * xdiff * ydiff))
+                              db_dxsig * xdiff * ydiff +
+                              dc_dxsig * ydiff2))
             derivative.append(dg_dxsig)
         if nderiv>=5:
             ysig3 = ysig ** 3
             da_dysig = -sint2 / ysig3
-            db_dysig = -cost2 / ysig3            
-            dc_dysig = sin2t / ysig3
+            db_dysig = sin2t / ysig3            
+            dc_dysig = -cost2 / ysig3            
             dg_dysig = g * (-(da_dysig * xdiff2 +
-                              db_dysig * ydiff2 +
-                              dc_dysig * xdiff * ydiff))
+                              db_dysig * xdiff * ydiff +
+                              dc_dysig * ydiff2))
             derivative.append(dg_dysig)
         if nderiv>=6:
             sint = np.sin(theta)
             cost = np.cos(theta)
             cos2t = np.cos(2.0*theta)
             da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
-            db_dtheta = -da_dtheta            
-            dc_dtheta = (cos2t / xsig2) - (cos2t / ysig2)
+            db_dtheta = (cos2t / xsig2) - (cos2t / ysig2)            
+            dc_dtheta = -da_dtheta            
             dg_dtheta = g * (-(da_dtheta * xdiff2 +
-                               db_dtheta * ydiff2 +
-                               dc_dtheta * xdiff * ydiff))
+                               db_dtheta * xdiff * ydiff +
+                               dc_dtheta * ydiff2))
             derivative.append(dg_dtheta)
 
         return g,derivative
@@ -123,7 +118,7 @@ def gaussian2d_sigtheta2abc(xstd,ystd,theta):
     
     # xdiff = x-x0
     # ydiff = y-y0
-    # f(x,y) = A*exp(-0.5 * (a*xdiff**2 + b*ydiff**2 + c*xdiff*ydiff))
+    # f(x,y) = A*exp(-0.5 * (a*xdiff**2 + b*xdiff*ydiff + c*ydiff2))
     
     # a is x**2 term
     # b is y**2 term
@@ -135,8 +130,9 @@ def gaussian2d_sigtheta2abc(xstd,ystd,theta):
     #xstd2 = x_stddev ** 2
     #ystd2 = y_stddev ** 2
     #a = ((cost2 / xstd2) + (sint2 / ystd2))
-    #b = ((sint2 / xstd2) + (cost2 / ystd2))    
-    #c = ((sin2t / xstd2) - (sin2t / ystd2))
+    #b = ((sin2t / xstd2) - (sin2t / ystd2))
+    #c = ((sint2 / xstd2) + (cost2 / ystd2))    
+
 
     cost2 = np.cos(theta) ** 2
     sint2 = np.sin(theta) ** 2
@@ -144,8 +140,8 @@ def gaussian2d_sigtheta2abc(xstd,ystd,theta):
     xstd2 = xstd ** 2
     ystd2 = ystd ** 2
     a = ((cost2 / xstd2) + (sint2 / ystd2))
-    b = ((sint2 / xstd2) + (cost2 / ystd2))    
-    c = ((sin2t / xstd2) - (sin2t / ystd2))
+    b = ((sin2t / xstd2) - (sin2t / ystd2))
+    c = ((sint2 / xstd2) + (cost2 / ystd2))    
 
     return a,b,c
 
@@ -155,44 +151,44 @@ def gaussian2d_abc2sigtheta(a,b,c):
     
     # xdiff = x-x0
     # ydiff = y-y0
-    # f(x,y) = A*exp(-0.5 * (a*xdiff**2 + b*ydiff**2 + c*xdiff*ydiff))
+    # f(x,y) = A*exp(-0.5 * (a*xdiff**2 + b*xdiff*ydiff + c*ydiff**2))
     
     # a is x**2 term
-    # b is y**2 term
-    # c is x*y term
-
+    # b is x*y term
+    # c is y**2 term
+    
     #cost2 = np.cos(theta) ** 2
     #sint2 = np.sin(theta) ** 2
     #sin2t = np.sin(2. * theta)
     #xstd2 = x_stddev ** 2
     #ystd2 = y_stddev ** 2
     #a = ((cost2 / xstd2) + (sint2 / ystd2))
-    #b = ((sint2 / xstd2) + (cost2 / ystd2))    
-    #c = ((sin2t / xstd2) - (sin2t / ystd2))
+    #b = ((sin2t / xstd2) - (sin2t / ystd2))
+    #c = ((sint2 / xstd2) + (cost2 / ystd2))    
 
-    # a+b = 1/xstd2 + 1/ystd2
-    # c = sin2t * (1/xstd2 + 1/ystd2)
-    # tan 2*theta = c/(a-b)
-    if a==b or c==0:
+    # a+c = 1/xstd2 + 1/ystd2
+    # b = sin2t * (1/xstd2 + 1/ystd2)
+    # tan 2*theta = b/(a-c)
+    if a==c or b==0:
         theta = 0.0
     else:
-        theta = np.arctan2(c,a-b)/2.0
+        theta = np.arctan2(b,a-c)/2.0
 
     if theta==0:
         # a = 1 / xstd2
-        # b = 1 / ystd2
-        # c = 0
+        # b = 0        
+        # c = 1 / ystd2
         xstd = 1/np.sqrt(a)
-        ystd = 1/np.sqrt(b)
+        ystd = 1/np.sqrt(c)
         return xstd,ystd,theta        
         
     sin2t = np.sin(2.0*theta)
-    # c/sin2t + (a+b) = 2/xstd2
-    # xstd2 = 2.0/(c/sin2t + (a+b))
-    xstd = np.sqrt( 2.0/(c/sin2t + (a+b)) )
+    # b/sin2t + (a+c) = 2/xstd2
+    # xstd2 = 2.0/(b/sin2t + (a+c))
+    xstd = np.sqrt( 2.0/(b/sin2t + (a+c)) )
 
-    # a+b = 1/xstd2 + 1/ystd2
-    ystd = np.sqrt( 1/(a+b-1/xstd**2) )
+    # a+c = 1/xstd2 + 1/ystd2
+    ystd = np.sqrt( 1/(a+c-1/xstd**2) )
 
     return xstd,ystd,theta
 
@@ -203,7 +199,7 @@ def gaussian2d_fwhm(pars):
 
     # xdiff = x-x0
     # ydiff = y-y0
-    # f(x,y) = A*exp(-0.5 * (a*xdiff**2 + b*ydiff**2 + c*xdiff*ydiff))
+    # f(x,y) = A*exp(-0.5 * (a*xdiff**2 + b*xdiff*ydiff + c*ydiff**2))
 
     xsig = pars[3]
     ysig = pars[4]
@@ -338,10 +334,10 @@ def moffat2d(x, y, pars, deriv=False, nderiv=None):
     xsig2 = xsig ** 2
     ysig2 = ysig ** 2
     a = ((cost2 / xsig2) + (sint2 / ysig2))
-    b = ((sint2 / xsig2) + (cost2 / ysig2))
-    c = ((sin2t / xsig2) - (sin2t / ysig2))
+    b = ((sin2t / xsig2) - (sin2t / ysig2))    
+    c = ((sint2 / xsig2) + (cost2 / ysig2))
 
-    rr_gg = (a * xdiff ** 2) + (b * ydiff ** 2) + (c * xdiff * ydiff)
+    rr_gg = (a * xdiff ** 2) + (b * xdiff * ydiff) + (c * ydiff ** 2)
     g = amp * (1 + rr_gg) ** (-beta)
     
     
@@ -360,41 +356,41 @@ def moffat2d(x, y, pars, deriv=False, nderiv=None):
             dg_dA = g / amp
             derivative.append(dg_dA)
         if nderiv>=2:
-            dg_dx_0 = beta*g/(1+rr_gg) * (2*a*xdiff + c*ydiff)
+            dg_dx_0 = beta*g/(1+rr_gg) * (2*a*xdiff + b*ydiff)
             derivative.append(dg_dx_0)            
         if nderiv>=3:
-            dg_dy_0 = beta*g/(1+rr_gg) * (2*b*ydiff + c*xdiff)
+            dg_dy_0 = beta*g/(1+rr_gg) * (2*c*ydiff + b*xdiff)
             derivative.append(dg_dy_0)
         if nderiv>=4:
             xdiff2 = xdiff ** 2
             ydiff2 = ydiff ** 2
             xsig3 = xsig ** 3
             da_dxsig = -cost2 / xsig3
-            db_dxsig = -sint2 / xsig3            
-            dc_dxsig = -sin2t / xsig3
+            db_dxsig = -sin2t / xsig3            
+            dc_dxsig = -sint2 / xsig3            
             dg_dxsig = (-beta)*g/(1+rr_gg) * 2*(da_dxsig * xdiff2 +
-                                                db_dxsig * ydiff2 +
-                                                dc_dxsig * xdiff * ydiff)
+                                                db_dxsig * xdiff * ydiff +
+                                                dc_dxsig * ydiff2)
             derivative.append(dg_dxsig)
         if nderiv>=5:
             ysig3 = ysig ** 3
             da_dysig = -sint2 / ysig3
-            db_dysig = -cost2 / ysig3            
-            dc_dysig = sin2t / ysig3
+            db_dysig = sin2t / ysig3            
+            dc_dysig = -cost2 / ysig3            
             dg_dysig = (-beta)*g/(1+rr_gg) * 2*(da_dysig * xdiff2 +
-                                                db_dysig * ydiff2 +
-                                                dc_dysig * xdiff * ydiff)
+                                                db_dysig * xdiff * ydiff +
+                                                dc_dysig * ydiff2)
             derivative.append(dg_dysig)            
         if nderiv>=6:
             sint = np.sin(theta)
             cost = np.cos(theta)
             cos2t = np.cos(2.0*theta)
             da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
-            db_dtheta = -da_dtheta            
-            dc_dtheta = (cos2t / xsig2) - (cos2t / ysig2)
+            db_dtheta = (cos2t / xsig2) - (cos2t / ysig2)
+            dc_dtheta = -da_dtheta            
             dg_dtheta = (-beta)*g/(1+rr_gg) * 2*(da_dtheta * xdiff2 +
-                                                 db_dtheta * ydiff2 +
-                                                 dc_dtheta * xdiff * ydiff)
+                                                 db_dtheta * xdiff * ydiff +
+                                                 dc_dtheta * ydiff2)
             derivative.append(dg_dtheta)
         if nderiv>=7:            
             dg_dbeta = -g * np.log(1 + rr_gg)
@@ -538,9 +534,8 @@ def moffat2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
     
 def penny2d(x, y, pars, deriv=False, nderiv=None):
     """ Gaussian core and Lorentzian wings, only Gaussian is tilted."""
-    # Maybe Lorentzian wings need to be azimuthally symmetric.
+    # Lorentzian are azimuthally symmetric.
     # pars = [amp,x0,y0,xsig,ysig,theta, relamp,sigma]
-
 
     xdiff = x - pars[1]
     ydiff = y - pars[2]
