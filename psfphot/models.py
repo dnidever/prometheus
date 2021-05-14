@@ -323,16 +323,23 @@ def gaussian2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
 
 def moffat2d(x, y, pars, deriv=False, nderiv=None):
     """Two dimensional Moffat model function"""
-    # pars = [amplitude, x0, y0, a, b, c, beta]
+    # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
 
-    amp = pars[0]
     xdiff = x - pars[1]
     ydiff = y - pars[2]
-    a = pars[3]
-    b = pars[4]
-    c = pars[5]
-    if a==b: c = 0.0    
+    amp = pars[0]
+    xsig = pars[3]
+    ysig = pars[4]
+    theta = pars[5]
     beta = pars[6]
+    cost2 = np.cos(theta) ** 2
+    sint2 = np.sin(theta) ** 2
+    sin2t = np.sin(2. * theta)
+    xsig2 = xsig ** 2
+    ysig2 = ysig ** 2
+    a = ((cost2 / xsig2) + (sint2 / ysig2))
+    b = ((sint2 / xsig2) + (cost2 / ysig2))
+    c = ((sin2t / xsig2) - (sin2t / ysig2))
 
     rr_gg = (a * xdiff ** 2) + (b * ydiff ** 2) + (c * xdiff * ydiff)
     g = amp * (1 + rr_gg) ** (-beta)
@@ -357,16 +364,38 @@ def moffat2d(x, y, pars, deriv=False, nderiv=None):
             derivative.append(dg_dx_0)            
         if nderiv>=3:
             dg_dy_0 = beta*g/(1+rr_gg) * (2*b*ydiff + c*xdiff)
-            derivative.append(dg_dy_0)            
+            derivative.append(dg_dy_0)
         if nderiv>=4:
-            dg_da = (-beta)*g/(1+rr_gg) * xdiff**2
-            derivative.append(dg_da)
+            xdiff2 = xdiff ** 2
+            ydiff2 = ydiff ** 2
+            xsig3 = xsig ** 3
+            da_dxsig = -cost2 / xsig3
+            db_dxsig = -sint2 / xsig3            
+            dc_dxsig = -sin2t / xsig3
+            dg_dxsig = (-beta)*g/(1+rr_gg) * 2*(da_dxsig * xdiff2 +
+                                                db_dxsig * ydiff2 +
+                                                dc_dxsig * xdiff * ydiff)
+            derivative.append(dg_dxsig)
         if nderiv>=5:
-            dg_db = (-beta)*g/(1+rr_gg) * ydiff**2
-            derivative.append(dg_db)            
+            ysig3 = ysig ** 3
+            da_dysig = -sint2 / ysig3
+            db_dysig = -cost2 / ysig3            
+            dc_dysig = sin2t / ysig3
+            dg_dysig = (-beta)*g/(1+rr_gg) * 2*(da_dysig * xdiff2 +
+                                                db_dysig * ydiff2 +
+                                                dc_dysig * xdiff * ydiff)
+            derivative.append(dg_dysig)            
         if nderiv>=6:
-            dg_dc = (-beta)*g/(1+rr_gg) * xdiff*ydiff
-            derivative.append(dg_dc)
+            sint = np.sin(theta)
+            cost = np.cos(theta)
+            cos2t = np.cos(2.0*theta)
+            da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
+            db_dtheta = -da_dtheta            
+            dc_dtheta = (cos2t / xsig2) - (cos2t / ysig2)
+            dg_dtheta = (-beta)*g/(1+rr_gg) * 2*(da_dtheta * xdiff2 +
+                                                 db_dtheta * ydiff2 +
+                                                 dc_dtheta * xdiff * ydiff)
+            derivative.append(dg_dtheta)
         if nderiv>=7:            
             dg_dbeta = -g * np.log(1 + rr_gg)
             derivative.append(dg_dbeta) 
@@ -379,20 +408,15 @@ def moffat2d(x, y, pars, deriv=False, nderiv=None):
 
 def moffat2d_fwhm(pars):
     """ Return the FWHM of a 2D Moffat function."""
-    # [amplitude, x0, y0, a, b, c, beta]
+    # [amplitude, x0, y0, xsig, ysig, theta, beta]
     # https://nbviewer.jupyter.org/github/ysbach/AO_2017/blob/master/04_Ground_Based_Concept.ipynb#1.2.-Moffat
 
-    a = pars[3]
-    b = pars[4]
-    c = pars[5]
-    if a==b: c = 0.0    
-    beta = pars[6]
-    
-    xstd,ystd,theta = gaussian2d_abc2sigtheta(a,b,c)
+    xsig = pars[3]
+    ysig = pars[4]
 
     # The mean radius of an ellipse is: (2a+b)/3
-    sig_major = np.max([xstd,ystd])
-    sig_minor = np.min([xstd,ystd])
+    sig_major = np.max([xsig,ysig])
+    sig_minor = np.min([xsig,ysig])
     mnsig = (2.0*sig_major+sig_minor)/3.0
     
     return 2.0 * np.abs(mnsig) * np.sqrt(2.0 ** (1.0/beta) - 1.0)
@@ -400,23 +424,19 @@ def moffat2d_fwhm(pars):
 
 def moffat2d_flux(pars):
     """ Return the total Flux of a 2D Moffat."""
-    # [amplitude, x0, y0, a, b, c, beta]
+    # [amplitude, x0, y0, xsig, ysig, theta, beta]
     # Volume is 2*pi*A*sigx*sigy
     # area of 1D moffat function is pi*alpha**2 / (beta-1)
     # maybe the 2D moffat volume is (xsig*ysig*pi**2/(beta-1))**2
 
     amp = pars[0]
-    a = pars[3]
-    b = pars[4]
-    c = pars[5]
-    if a==b: c = 0.0    
+    xsig = pars[3]
+    ysig = pars[4]
     beta = pars[6]
-
-    xstd,ystd,theta = gaussian2d_abc2sigtheta(a,b,c)
 
     # This worked for beta=2.5, but was too high by ~1.05-1.09 for beta=1.5
     #volume = amp * xstd*ystd*np.pi/(beta-1)
-    volume = amp * xstd*ystd*np.pi/(beta-1)
+    volume = amp * xsig*ysig*np.pi/(beta-1)
     # what is the beta dependence?? linear is very close!
 
     # I think undersampling is becoming an issue at beta=3.5 with fwhm=2.78
@@ -790,7 +810,7 @@ class PSFMoffat(PSFBase):
     # Initalize the object
     def __init__(self,mpars=None,npix=101,binned=False):
         # MPARS are model parameters
-        # [a, b, c, beta]
+        # mpars = [xsig, ysig, theta, beta]
         if mpars is None:
             mpars = np.array([1.0,1.0,0.0,2.5])
         if len(mpars)<4:
@@ -819,7 +839,7 @@ class PSFMoffat(PSFBase):
     
     def evaluate(self,x, y, pars, binned=None, deriv=False, nderiv=None):
         """Two dimensional Moffat model function"""
-        # pars = [amplitude, x0, y0, sigma, beta]
+        # pars = [amplitude, x0, y0, xsig, ysig, theta, beta]
         if binned is None: binned = self.binned
         if binned is True:
             return moffat2d_integrate(x, y, pars, deriv=deriv, nderiv=nderiv)
@@ -835,42 +855,6 @@ class PSFMoffat(PSFBase):
             g, derivative = moffat2d(x, y, pars, deriv=True, nderiv=nderiv)
         return derivative
 
-# PSF Lorentz class
-class PSFLorentz(PSFBase):
-       
-    # Initalize the object
-    def __init__(self,mpars=None,npix=101,binned=False):
-        if mpars is None:
-            mpars = np.array([1.0,2.5])
-        if len(mpars)<2:
-            raise ValueError('2 parameters required')
-        # mpars = [sigma, beta]
-        if mpars[0]<=0:
-            raise ValueError('sigma must be >0')
-        super().__init__(mpars,npix=npix,binned=binned)
-
-    def fwhm(self):
-        """ Return the FWHM of the model."""
-        pass
-        
-    def evaluate(self,x, y, pars, binned=None, deriv=False, nderiv=None):
-        """Two dimensional Lorentz model function"""
-        # pars = [amplitude, x0, y0, sigma, beta]
-        if binned is None: binned = self.binned
-        if binned is True:
-            return lorentz2d_integrate(x, y, pars, binned=binned, deriv=deriv, nderiv=nderiv)
-        else:
-            return lorentz2d(x, y, pars, binned=binned, deriv=deriv, nderiv=nderiv)        
-
-        
-    def deriv(self,x, y, pars, binned=None, nderiv=None):
-        """Two dimensional Lorentz model derivative with respect to parameters"""
-        if binned is None: binned = self.binned
-        if binned is True:
-            g, derivative = lorentz2d_integrate(x, y, pars, binned=binned, deriv=True, nderiv=nderiv)
-        else:
-            g, derivative = lorentz2d(x, y, pars, binned=binned, deriv=True, nderiv=nderiv)        
-        return derivative
     
 # PSF Penny class
 class PSFPenny(PSFBase):
@@ -879,15 +863,14 @@ class PSFPenny(PSFBase):
     
     # Initalize the object
     def __init__(self,mpars=None,npix=101,binned=False):
-        # pars = [amp,x0,y0,xsig,ysig,theta, relamp,sigma]
+        # mpars = [xsig,ysig,theta, relamp,sigma]
         if mpars is None:
-            mpars = np.array([1.0,2.5])
-        if len(mpars)<2:
-            raise ValueError('2 parameters required')
-        # mpars = [sigma, beta]
+            mpars = np.array([1.0,2.5,2.5,0.0,0.02,5.0])
+        if len(mpars)<5:
+            raise ValueError('5 parameters required')
         if mpars[0]<=0:
             raise ValueError('sigma must be >0')
-        if mpars[6]<0 or mpars[6]>1:
+        if mpars[3]<0 or mpars[3]>1:
             raise ValueError('relative amplitude must be >=0 and <=1')
         super().__init__(mpars,npix=npix,binned=binned)
 
@@ -897,7 +880,7 @@ class PSFPenny(PSFBase):
         
     def evaluate(self,x, y, pars=None, binned=None, deriv=False, nderiv=None):
         """Two dimensional Penny model function"""
-        # pars = [amplitude, x0, y0, sigma, beta]
+        # pars = [amplitude, x0, y0, xsig, ysig, theta, relamp, sigma]
         if pars is None: pars = self.params
         if binned is None: binned = self.binned
         return penny2d(x, y, pars, binned=binned, deriv=deriv, nderiv=nderiv)
