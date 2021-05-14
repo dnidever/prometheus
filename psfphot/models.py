@@ -47,9 +47,9 @@ def gaussian2d(x,y,pars,deriv=False,nderiv=None):
     a = pars[3]
     b = pars[4]
     c = pars[5]
+    if a==b: c = 0.0
     g = pars[0] * np.exp(-0.5*((a * xdiff ** 2) + (b * ydiff ** 2) +
                                (c * xdiff * ydiff)))
-
     
     # Compute derivative as well
     if deriv is True:
@@ -87,6 +87,39 @@ def gaussian2d(x,y,pars,deriv=False,nderiv=None):
     else:        
         return g
 
+
+def gaussian2d_sigtheta2abc(xstd,ystd,theta):
+    """ Convert 2D Gaussian sigma_x, sigma_y and theta to a, b, c coefficients."""
+    
+    # xdiff = x-x0
+    # ydiff = y-y0
+    # f(x,y) = A*exp(-0.5 * (a*xdiff**2 + b*ydiff**2 + c*xdiff*ydiff))
+    
+    # a is x**2 term
+    # b is y**2 term
+    # c is x*y term
+
+    #cost2 = np.cos(theta) ** 2
+    #sint2 = np.sin(theta) ** 2
+    #sin2t = np.sin(2. * theta)
+    #xstd2 = x_stddev ** 2
+    #ystd2 = y_stddev ** 2
+    #a = ((cost2 / xstd2) + (sint2 / ystd2))
+    #b = ((sint2 / xstd2) + (cost2 / ystd2))    
+    #c = ((sin2t / xstd2) - (sin2t / ystd2))
+
+    cost2 = np.cos(theta) ** 2
+    sint2 = np.sin(theta) ** 2
+    sin2t = np.sin(2. * theta)
+    xstd2 = xstd ** 2
+    ystd2 = ystd ** 2
+    a = ((cost2 / xstd2) + (sint2 / ystd2))
+    b = ((sint2 / xstd2) + (cost2 / ystd2))    
+    c = ((sin2t / xstd2) - (sin2t / ystd2))
+
+    return a,b,c
+
+    
 def gaussian2d_abc2sigtheta(a,b,c):
     """ Convert 2D Gaussian a, b, c coefficients to sigma_x, sigma_y and theta."""
     
@@ -110,8 +143,19 @@ def gaussian2d_abc2sigtheta(a,b,c):
     # a+b = 1/xstd2 + 1/ystd2
     # c = sin2t * (1/xstd2 + 1/ystd2)
     # tan 2*theta = c/(a-b)
-    theta = np.arctan2(c,a-b)/2.0
+    if a==b or c==0:
+        theta = 0.0
+    else:
+        theta = np.arctan2(c,a-b)/2.0
 
+    if theta==0:
+        # a = 1 / xstd2
+        # b = 1 / ystd2
+        # c = 0
+        xstd = 1/np.sqrt(a)
+        ystd = 1/np.sqrt(b)
+        return xstd,ystd,theta        
+        
     sin2t = np.sin(2.0*theta)
     # c/sin2t + (a+b) = 2/xstd2
     # xstd2 = 2.0/(c/sin2t + (a+b))
@@ -147,7 +191,8 @@ def gaussian2d_fwhm(pars):
     a = pars[3]
     b = pars[4]
     c = pars[5]
-
+    if a==b: c = 0.0
+    
     xstd,ystd,theta = gaussian2d_abc2sigtheta(a,b,c)
 
     # The mean radius of an ellipse is: (2a+b)/3
@@ -169,7 +214,8 @@ def gaussian2d_flux(pars):
     a = pars[3]
     b = pars[4]
     c = pars[5]
-
+    if a==b: c = 0.0
+    
     xstd,ystd,theta = gaussian2d_abc2sigtheta(a,b,c)
 
     volume = 2*np.pi*amp*xstd*ystd
@@ -279,6 +325,7 @@ def moffat2d(x, y, pars, deriv=False, nderiv=None):
     a = pars[3]
     b = pars[4]
     c = pars[5]
+    if a==b: c = 0.0    
     beta = pars[6]
 
     rr_gg = (a * xdiff ** 2) + (b * ydiff ** 2) + (c * xdiff * ydiff)
@@ -332,6 +379,7 @@ def moffat2d_fwhm(pars):
     a = pars[3]
     b = pars[4]
     c = pars[5]
+    if a==b: c = 0.0    
     beta = pars[6]
     
     xstd,ystd,theta = gaussian2d_abc2sigtheta(a,b,c)
@@ -355,6 +403,7 @@ def moffat2d_flux(pars):
     a = pars[3]
     b = pars[4]
     c = pars[5]
+    if a==b: c = 0.0    
     beta = pars[6]
 
     xstd,ystd,theta = gaussian2d_abc2sigtheta(a,b,c)
@@ -472,11 +521,11 @@ def penny2d(x, y, pars, deriv=False, nderiv=None):
     a = pars[3]
     b = pars[4]
     c = pars[5]
+    relamp = pars[6]    
     # Gaussian component
-    g = amp * np.exp(-0.5*((a * xdiff ** 2) + (b * ydiff ** 2) +
-                           (c * xdiff * ydiff)))
+    g = amp * (1-relamp) * np.exp(-0.5*((a * xdiff ** 2) + (b * ydiff ** 2) +
+                                        (c * xdiff * ydiff)))
     # Add Lorentzian wings
-    relamp = pars[6]
     sigma = pars[7]
     rr_gg = (xdiff ** 2 + ydiff ** 2) / sigma ** 2
     l = amp * relamp / (1 + rr_gg)
@@ -506,17 +555,17 @@ def penny2d(x, y, pars, deriv=False, nderiv=None):
             df_dy_mean = ( g * 0.5*((2 * b * ydiff) + (c * xdiff)) +
                            2*l*ydiff/(sigma**2 * (1+rr_gg)) )
             derivative.append(df_dy_mean)
-        if nderiv>=4:       
+        if nderiv>=4:
             df_da = g * (-0.5) * xdiff ** 2
             derivative.append(df_da)
-        if nderiv>=5:       
+        if nderiv>=5:
             df_db = g * (-0.5) * ydiff ** 2
             derivative.append(df_db)
-        if nderiv>=6:       
+        if nderiv>=6:
             df_dc = g * (-0.5) * xdiff * ydiff
             derivative.append(df_dc)
-        if nderiv>=7:       
-            df_drelamp = l / relamp
+        if nderiv>=7:
+            df_drelamp = -g/(1+relamp) + l / relamp
             derivative.append(df_drelamp)
         if nderiv>=8:
             df_dsigma = l/(1+rr_gg) * 2*rr_gg/sigma
