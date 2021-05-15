@@ -720,9 +720,17 @@ def empirical(x, y, pars, mpars, mcube, deriv=False, nderiv=None):
     
     
     if deriv is True:
-        deriv = np.gradient(g, axis=(0,1))
+        derivative = []
+        derivative.append( g/amp )
+        derivative.append( np.gradient(g, axis=(0,1)) )
 
+        return g,derivative
+            
+    # No derivative
+    else:        
+        return g
 
+    
 
 #######################
 # PSF classes
