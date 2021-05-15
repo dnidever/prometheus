@@ -679,15 +679,54 @@ def penny2d_flux(pars):
     return volume
 
 
-def empirical(x, y, pars, deriv=False, nderiv=None):
+def empirical(x, y, pars, mpars, mcube, deriv=False, nderiv=None):
     """Empirical look-up table"""
-    nx,ny,npars = pars.shape
+    npars = len(pars)
+    if mcube.ndim==2:
+        nxpsf,nypsf = mcube.shape
+        nel = 1
+    else:
+        nxpsf,nypsf,nel = mcube.shape
 
-    pass
+    # Parameters for the profile
+    amp = pars[0]
+    x0 = pars[1]
+    y0 = pars[2]
 
-
+    # Center of image
+    xcenter = mpars[0]
+    ycenter = mpars[1]
+        
+    # Relative positions
+    dx = x - x0
+    dy = y - y0
     
+    # Constant component
+    # Interpolate to the X/Y values
+    f_psf = RectBivariateSpline(np.arange(nxpsf)-nxpsf//2, np.arange(nypsf)-nypsf//2, mcube[:,:,0],kx=3,ky=3,s=0)
+    cterm = f_psf(dx,dy,grid=False)
+    g = cterm.copy()
+    
+    # Spatially-varying component
+    if nel>1:
+        reldeltax = (x0-xcenter)/(2*xcenter)
+        reldeltay = (y0-ycenter)/(2*ycenter) 
+        # X-term
+        
+        
+        # X*Y-term
+
+        # Y-term
+    
+    
+    if deriv is True:
+        deriv = np.gradient(g, axis=(0,1))
+
+
+
+#######################
 # PSF classes
+#######################
 
 
 # PSF base class
