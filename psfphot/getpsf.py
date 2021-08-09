@@ -37,7 +37,7 @@ def curvefit_psf(func,*args,**kwargs):
     """ Thin wrapper around curve_fit for PSFs."""
     def wrap_psf(xdata,*args2,**kwargs2):
         ## curve_fit separates each parameter while
-        ## psf expects on pars array
+        ## psf expects a pars array
         pars = args2
         print(pars)
         return func(xdata[0],xdata[1],pars,**kwargs2)
@@ -47,7 +47,7 @@ def curvefit_psfallpars(func,*args,**kwargs):
     """ Thin wrapper around curve_fit for PSFs and fitting ALL parameters."""
     def wrap_psf(xdata,*args2,**kwargs2):
         ## curve_fit separates each parameter while
-        ## psf expects on pars array
+        ## psf expects a pars array
         allpars = args2
         print(allpars)
         nmpars = len(func.params)
@@ -57,7 +57,7 @@ def curvefit_psfallpars(func,*args,**kwargs):
     return curve_fit(wrap_psf,*args,**kwargs)
 
 
-def fitstar(im,cat,psf,radius=None):
+def fitstar(im,cat,psf,radius=None,allpars=False):
     """ Fit a PSF model to a star in an image."""
 
     # IM should be an image with an uncertainty array as well
@@ -84,30 +84,36 @@ def fitstar(im,cat,psf,radius=None):
 
     nX = x1-x0+1
     nY = y1-y0+1
-    X = np.repeat(np.arange(x0,x1+1),nY).reshape(nX,nY)
-    Y = np.repeat(np.arange(y0,y1+1),nX).reshape(nY,nX).T
+    X = np.arange(x0,x1+1).reshape(-1,1)+np.zeros(nY)   # broadcasting is faster
+    Y = np.arange(y0,y1+1).reshape(1,-11)+np.zeros(nX).reshape(-1,1)
+    #X = np.repeat(np.arange(x0,x1+1),nY).reshape(nX,nY)
+    #Y = np.repeat(np.arange(y0,y1+1),nX).reshape(nY,nX).T
     xdata = np.vstack((X.ravel(), Y.ravel()))
 
     #import pdb; pdb.set_trace()
 
     # Just fit height, xc, yc, sky
-    #initpar = [height,xc,yc,sky]
-    #bounds = (-np.inf,np.inf)
-    #pars,cov = curvefit_psf(psf,xdata,flux.ravel(),sigma=err.ravel(),p0=initpar) #,bounds=bounds)
-    #return pars,cov
-
+    if allpars==False:
+        initpar = [height,xc,yc,sky]
+        bounds = (-np.inf,np.inf)
+        pars,cov = curve_fit(psf.model,xdata,flux.ravel(),sigma=err.ravel(),p0=initpar,jac=psf.jac)
+        perror = np.sqrt(np.diag(cov))
+        #pars,cov = curve_fit(psf.model,xdata,flux.ravel(),sigma=err.ravel(),p0=initpar) #,bounds=bounds)    
+        #pars,cov = curvefit_psf(psf,xdata,flux.ravel(),sigma=err.ravel(),p0=initpar) #,bounds=bounds)    
+        return pars,perror
+    
     # Fit all parameters
-    initpar = np.hstack(([height,xc,yc,sky],psf.params.copy()))
-    #bounds = (-np.inf,np.inf)
-    allpars,cov = curvefit_psfallpars(psf,xdata,flux.ravel(),sigma=err.ravel(),p0=initpar) #,bounds=bounds)
+    else:
+        initpar = np.hstack(([height,xc,yc,sky],psf.params.copy()))
+        #bounds = (-np.inf,np.inf)
+        allpars,cov = curvefit_psfallpars(psf,xdata,flux.ravel(),sigma=err.ravel(),p0=initpar) #,bounds=bounds)
 
-    bpsf = psf.copy()
-    bpsf.params = allpars[4:]
-    pars = allpars[0:4]
-    bmodel = bpsf(X,Y,pars)
+        bpsf = psf.copy()
+        bpsf.params = allpars[4:]
+        pars = allpars[0:4]
+        bmodel = bpsf(X,Y,pars)
     
+        return pars,cov,bpsf
+
     import pdb; pdb.set_trace()
-    
-    return pars,cov,bpsf
-    
 

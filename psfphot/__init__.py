@@ -1,1 +1,1 @@
-__all__ = ["psf","getpsf","psfphot"]
+__all__ = ["models","getpsf","psfphot"]
