@@ -58,6 +58,8 @@ def makeimage(nstars=1000,nx=1024,ny=1024,psf=None,cat=None,backgrnd=1000.0):
     if cat is None:
         cat = makecat(nstars=nstars,xr=[npsfpix/2.0+10,nx-npsfpix/2.0-10],
                       yr=[npsfpix/2.0+10,ny-npsfpix/2.0-10])
+    else:
+        nstars = len(cat)
 
     im = np.zeros((nx,ny),float)+backgrnd
     im += np.sqrt(backgrnd)*np.random.rand(nx,ny)
@@ -71,8 +73,8 @@ def makeimage(nstars=1000,nx=1024,ny=1024,psf=None,cat=None,backgrnd=1000.0):
         yhi = int(np.round(ycen)+npsfpix/2)-1
         im2 = psf(pars=[height,xcen,ycen],xy=[[xlo,xhi],[ylo,yhi]])
         im2noise = im2+np.maximum(np.sqrt(im2),1)*np.random.rand(*im2.shape)
-        im[xlo:xhi+1,ylo:yhi+1]+=im2noise    
+        im[xlo:xhi+1,ylo:yhi+1] += im2noise
     err = np.sqrt(im)
     image = CCDData(im,StdDevUncertainty(err),unit='adu')
-
+    
     return image

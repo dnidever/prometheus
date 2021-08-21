@@ -911,13 +911,6 @@ class PSFBase:
             cat = pars
         return getpsf.fitstar(im,cat,self,allpars=allpars)
     
-    #def allpars(x,y,pars,**kwargs):
-    #    """" can input STELLAR + MODEL parameters in one array."""
-    #    nmpars = len(self.params)
-    #    pars = pars[0:-nmpars]
-    #    mpars = pars[-nmpars:]
-    #    return self(x,y,pars,mpars=mpars,**kwargs)
-    
     def __str__(self):
         return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+')'
 
