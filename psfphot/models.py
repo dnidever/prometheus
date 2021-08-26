@@ -729,7 +729,6 @@ def empirical(x, y, pars, mpars, mcube, deriv=False, nderiv=None):
     # No derivative
     else:        
         return g
-
     
 
 #######################
@@ -741,6 +740,21 @@ def empirical(x, y, pars, mpars, mcube, deriv=False, nderiv=None):
 class PSFBase:
 
     def __init__(self,mpars,npix=101,binned=False,verbose=False):
+        """
+        Initialize the PSF model object.
+
+        Parameters
+        ----------
+        mpars : numpy array
+          PSF model parameters array.
+        npix : int, optional
+          Number of pixels to model [Npix,Npix].  Must be odd. Default is 101 pixels.
+        binned : boolean, optional
+        
+        verbose : boolean, optional
+          Verbose output when performing operations.  Default is False.
+
+        """
         # npix must be odd
         if npix%2==0: npix += 1
         self._params = np.atleast_1d(mpars)
@@ -750,21 +764,68 @@ class PSFBase:
 
     @property
     def params(self):
+        """ Return the PSF model parameters."""
         return self._params
 
     @params.setter
     def params(self,value):
         self._params = value
+
+    
+    def xylim2xy(self,xy):
+        """
+        Convenience method to convert 2x2 list of X/Y limits [[X0,X1],[Y0,Y1]]
+        to 2-D X and Y arrays.  The upper limits are inclusive.
+        """
+        x0,x1 = xy[0]
+        y0,y1 = xy[1]
+        dx = np.arange(x0,x1+1).astype(float)
+        nxpix = len(dx)
+        dy = np.arange(y0,y1+1).astype(float)
+        nypix = len(dy)
+        x = dx.reshape(-1,1)+np.zeros(nypix)   # broadcasting is faster
+        y = dy.reshape(1,-1)+np.zeros(nxpix).reshape(-1,1)     
+        return x,y
         
     def __call__(self,x=None,y=None,pars=None,mpars=None,xy=None,deriv=False,**kwargs):
-        # X/Y: the X and Y values for the images pixels for which you want to
-        #       generate the model. These can be 1D or 2D arrays.
-        # XY: Limits in X and Y for a rectangular region to generate the model.
-        #      XY = [[X0,X1],[Y0,Y1]]
-        # X/Y and XY are absolute pixel values NOT relative ones
-        # PARS are the stellar parameters [height, xcen, ycen]
-        # MPARS are the model parameters
-        
+        """
+        Generate a model PSF for the input X/Y value and parameters.  If no inputs
+        are given, then a postage stamp PSF image is returned.
+
+        Parameters
+        ----------
+        x and y: numpy array, optional
+            The X and Y values for the images pixels for which you want to
+            generate the model. These can be 1D or 2D arrays.
+            The "xy" parameter can be used instead of "x" and "y" if a rectangular
+            region is desired.
+        pars : numpy array
+            Model parameter values [height, xcen, ycen, sky].
+        xy: list
+            Limits in X and Y for a rectangular region to generate the model.
+              XY = [[X0,X1],[Y0,Y1]]
+            X/Y and XY are absolute pixel values, NOT relative ones.
+        mpars : numpy array, optional
+            PSF model parameters to use.  The default behavior is to use the
+            model pararmeters of the PSFobject.
+        deriv : boolean, optional
+            Return the derivative (Jacobian) as well as the model (model, deriv).
+        binned : boolean, optional
+            Sum the flux across a pixel.  This is normally set when the PSF
+            object is initialized, but can be modified directly in the call.
+
+        Returns
+        -------
+        model : numpy array
+          Array of (1-D) model values for the input xdata and parameters.
+
+        Example
+        -------
+
+        m = psf(x,y,pars)
+
+        """
+
         # Nothing input, PSF postage stamp
         if x is None and y is None and pars is None and xy is None:
             pars = [1.0, self.npix//2, self.npix//2]
@@ -776,16 +837,15 @@ class PSFBase:
 
         # Get coordinates from XY
         if x is None and y is None and xy is not None:
-            x0,x1 = xy[0]
-            y0,y1 = xy[1]
-            dx = np.arange(x0,x1+1).astype(float)
-            nxpix = len(dx)
-            dy = np.arange(y0,y1+1).astype(float)
-            nypix = len(dy)
-            x = dx.reshape(-1,1)+np.zeros(nypix)   # broadcasting is faster
-            y = dy.reshape(1,-1)+np.zeros(nxpix).reshape(-1,1) 
-            #x = np.repeat(dx,nypix).reshape(nxpix,nypix)
-            #y = np.repeat(dy,nxpix).reshape(nypix,nxpix).T 
+            x,y = self.xylim2xy(xy)
+            #x0,x1 = xy[0]
+            #y0,y1 = xy[1]
+            #dx = np.arange(x0,x1+1).astype(float)
+            #nxpix = len(dx)
+            #dy = np.arange(y0,y1+1).astype(float)
+            #nypix = len(dy)
+            #x = dx.reshape(-1,1)+np.zeros(nypix)   # broadcasting is faster
+            #y = dy.reshape(1,-1)+np.zeros(nxpix).reshape(-1,1) 
 
         if x is None or y is None:
             raise ValueError("X and Y or XY must be input")
@@ -826,42 +886,138 @@ class PSFBase:
         return out
 
 
-    def model(self,xdata,*args,**kwargs):
-        """ Function to use with curve_fit() to fit a single stellar profile."""
+    def model(self,xdata,*args,allpars=False,**kwargs):
+        """
+        Function to use with curve_fit() to fit a single stellar profile.
+
+        Parameters
+        ----------
+        xdata : numpy array
+          X and Y values in a [2,N] array.
+        args : float
+          Model parameter values as separate positional input parameters,
+          [height, xcen, ycen, sky].  If allpars=True, then the model
+          parameters are added at the end, i.e. 
+          [height, xcen, ycen, sky, model parameters].
+        allpars : boolean, optional
+          PSF model parameters have been input as well (behind the stellar
+          parameters).  Default is False.
+
+        Returns
+        -------
+        model : numpy array
+          Array of (1-D) model values for the input xdata and parameters.
+
+        Example
+        -------
+
+        m = psf.model(xdata,*pars)
+
+        """
         # PARS should be [height,x0,y0,sky]
         ## curve_fit separates each parameter while
         ## psf expects on pars array
+        
         pars = args
         if self.verbose: print('model: ',pars)
-        return self(xdata[0],xdata[1],pars,**kwargs)
 
-    def jac(self,xdata,*args,retmodel=False,**kwargs):
-        """ Jacobian function to use with curve_fit() to fit a single stellar profile."""
+        # Just stellar parameters
+        if not allpars:
+            return self(xdata[0],xdata[1],pars,**kwargs)
+        
+        # Stellar + Model parameters
+        #   PARS should be [height,x0,y0,sky, model parameters]
+        else:
+            allpars = args
+            nmpars = len(self.params)
+            npars = len(allpars)-nmpars
+            pars = allpars[0:npars]
+            mpars = allpars[-nmpars:]        
+            return self(xdata[0],xdata[1],pars,mpars=mpars,**kwargs)
+
+
+    def jac(self,xdata,*args,retmodel=False,allpars=False,**kwargs):
+        """
+        Method to return Jacobian matrix.
+
+        Parameters
+        ----------
+        xdata : numpy array
+          X and Y values in a [2,N] array.
+        args : float
+          Model parameter values as separate positional input parameters,
+          [height, xcen, ycen, sky]. If allpars=True, then the model
+          parameters are added at the end, i.e. 
+          [height, xcen, ycen, sky, model parameters].
+        retmodel : boolean, optional
+          Return the model as well.  Default is retmodel=False.
+        allpars : boolean, optional
+          PSF model parameters have been input as well (behind the stellar
+          parameters).  Default is False.
+
+        Returns
+        -------
+        if retmodel==False
+        jac : numpy array
+          Jacobian matrix of partial derivatives [N,Npars].
+        model : numpy array
+          Array of (1-D) model values for the input xdata and parameters.
+          If retmodel==True, then (model,jac) are returned.
+
+        Example
+        -------
+
+        jac = psf.jac(xdata,*pars)
+
+        """
+
         # PARS should be [height,x0,y0,sky]        
         ## curve_fit separates each parameter while
         ## psf expects on pars array
         pars = args
         if self.verbose: print('jac: ',pars)
         # Make parameters for the function, STELLAR + MODEL parameters
-        if len(pars)==3:
-            inpars = np.hstack((pars,self.params))
-        elif len(pars)==4:
-            # drop sky which is the fourth parameter
-            inpars = np.hstack((pars[0:3],self.params))
+        #   *without* sky
+        if not allpars:
+            if len(pars)==3:
+                inpars = np.hstack((pars,self.params))
+                sky = None
+            elif len(pars)==4:
+                # drop sky which is the fourth parameter
+                inpars = np.hstack((pars[0:3],self.params))
+                sky = pars[3]
+            else:
+                raise ValueError('PARS must have 3 or 4 parameters')
+            nderiv = 3
+        # All parameters
         else:
-            raise ValueError('PARS must have 3 or 4 parameters')
-        if retmodel:
-            m,deriv = self.evaluate(xdata[0],xdata[1],inpars,deriv=True,nderiv=3,**kwargs)
-            if len(args)>=4: m+=args[3]  # add sky
+            nmpars = len(self.params)
+            mpars = pars[-nmpars:]
+            npars = len(pars)-nmpars
+            if npars==4:  # sky input, drop it
+                sky = pars[3]
+                inpars = np.hstack((pars[0:3],mpars)) 
+            else:
+                inpars = pars.copy()
+                sky = None
+            nderiv = None  # want all the derivatives
+        # Get the derivatives
+        if retmodel:  # want model as well
+            m,deriv = self.evaluate(xdata[0],xdata[1],inpars,deriv=True,nderiv=nderiv,**kwargs)
+            m += sky  # add sky
         else:
-            deriv = self.deriv(xdata[0],xdata[1],inpars,nderiv=3,**kwargs)
+            deriv = self.deriv(xdata[0],xdata[1],inpars,nderiv=nderiv,**kwargs)
         deriv = np.array(deriv).T
         # Initialize jacobian matrix
-        # the parameters are [height,xmean,ymean,sky]
+        #   the parameters are [height,xmean,ymean,sky]
+        #   if allpars, parameters are [height,xmean,ymean,sky,model parameters]
         jac = np.zeros((len(xdata[0]),len(pars)),float)
-        jac[:,0:3] = deriv
-        if len(pars)==4:   # sky
-               jac[:,3] = 1
+        if sky is None:
+            jac[:,:] = deriv
+        else:  # add sky derivative in
+            jac[:,0:3] = deriv[:,0:3]
+            jac[:,3] = 1
+            jac[:,4:] = deriv[:,3:]
         # Return
         if retmodel:   # return model as well
             return m,jac
@@ -869,54 +1025,51 @@ class PSFBase:
             return jac
     
     def modelall(self,xdata,*args,**kwargs):
-        """ Function to use with curve_fit() to fit all parameters of a single stellar profile."""
+        """ Convenience function to use with curve_fit() to fit all parameters of a single stellar profile."""
         # PARS should be [height,x0,y0,sky, model parameters]
-        allpars = args
-        if self.verbose: print('modelall: ',allpars)
-        nmpars = len(self.params)
-        #pars = allpars[0:-nmpars]
-        npars = len(allpars)-nmpars
-        pars = allpars[0:3]  # don't include pars[3]=sky if it was input
-        mpars = allpars[-nmpars:]        
-        return self(xdata[0],xdata[1],pars,mpars=mpars,**kwargs)
-
-    def jacall(self,xdata,*args,retmodel=False,**kwargs):
-        """ Jacobian function to use with curve_fit() to fit all parameters of a single stellar profile."""
-        # PARS should be [height,x0,y0,sky, model parameters]        
-        ## curve_fit separates each parameter while
-        ## psf expects on pars array
-        allpars = args
-        if self.verbose: print('jacall: ',allpars)
-        # break up pars into stellar and model pars
-        nmpars = len(self.params)
-        #pars = allpars[0:-nmpars]
-        npars = len(allpars)-nmpars
-        pars = allpars[0:3]  # don't include pars[3]=sky if it was input
-        mpars = allpars[-nmpars:]
-        inpars = np.concatenate([np.array(pars),np.array(mpars)])
-        if retmodel:
-            m,deriv = self.evaluate(xdata[0],xdata[1],inpars,deriv=True,**kwargs)
-            if len(allpars)>=4: m+=allpars[3]    # add sky
-        else:
-            deriv = self.deriv(xdata[0],xdata[1],inpars,**kwargs)            
-        deriv = np.array(deriv).T
-        # Initialize jacobian matrix
-        # the parameters are [height,xmean,ymean,sky]
-        jac = np.zeros((len(xdata[0]),len(allpars)),float)
-        if npars==3:  # no sky
-            jac[:,:] = deriv[:,:]
-        else: # with sky
-            jac[:,0:3] = deriv[:,0:3]
-            jac[:,3] = 1
-            jac[:,4:] = deriv[:,3:]
-        # Return
-        if retmodel:  # return model as well
-            return m,jac
-        else:
-            return jac
+        return self.model(xdata,*args,allpars=True,**kwargs)
         
+    def jacall(self,xdata,*args,retmodel=False,**kwargs):
+        """ Convenience function to use with curve_fit() to fit all parameters of a single stellar profile."""
+        # PARS should be [height,x0,y0,sky, model parameters]        
+        return self.jac(xdata,*args,allpars=True,**kwargs)
+
+    
     def fit(self,im,pars,niter=1,radius=None,allpars=False,method='qr',weight=True):
-        """ Convenience function to fit a single star model."""
+        """
+        Method to fit a single star using the PSF model.
+
+        Parameters
+        ----------
+        im : CCDData object
+          Image to use for fitting.
+        pars : numpy array, list or catalog
+          Initial parameters.  If numpy array or list the values should be [height, xcen, ycen].
+          If a catalog is input then it must at least the "x" and "y" columns.
+        niter : int, optional
+          Number of iterations to perform.  Default is 1.
+        radius : float, optional
+          Fitting radius in pixels.  Default is to use the PSF FWHM.
+        allpars : boolean, optional
+          Fit PSF model parameters as well.  Default is to only fit the stellar parameters
+          of [height, xcen, ycen, sky].
+        method : str, optional
+          Method to use to solve the system of equations: "QR" or "SVD".  Default is "QR".
+        weight : boolean, optional
+          Weight the data by 1/error**2.  Default is weight=True.
+
+        Returns
+        -------
+        bestpars : numpy array
+          Array of best-fit values [height, xcen, ycen, sky].
+
+        Example
+        -------
+
+        pars = psf.fit(image[1002.0,520.0,734.0])
+
+
+        """
         # PARS: initial guesses for Xo and Yo parameters.
         if isinstance(pars,dict)==False:
             if len(pars)<3:
@@ -936,11 +1089,7 @@ class PSFBase:
         x1 = int(np.minimum(np.ceil(xc+radius),nx-1))
         y0 = int(np.maximum(0,np.floor(yc-radius)))
         y1 = int(np.minimum(np.ceil(yc+radius),ny-1))
-
-        nX = x1-x0+1
-        nY = y1-y0+1
-        X = np.arange(x0,x1+1).reshape(-1,1)+np.zeros(nY)   # broadcasting is faster
-        Y = np.arange(y0,y1+1).reshape(1,-11)+np.zeros(nX).reshape(-1,1)
+        X,Y = self.xylim2xy([[x0,x1],[y0,y1]])
         xdata = np.vstack((X.ravel(), Y.ravel()))
         
         flux = im.data[x0:x1+1,y0:y1+1]
@@ -963,7 +1112,7 @@ class PSFBase:
         while (count<niter):
             # Use Singular Value Decomposition (SVD) to solve
             if allpars:
-                m,jac = self.jacall(xdata,*bestpar,retmodel=True)
+                m,jac = self.jac(xdata,*bestpar,allpars=True,retmodel=True)
             else:
                 m,jac = self.jac(xdata,*bestpar,retmodel=True)            
             dy = flux.flatten()-m.flatten()
