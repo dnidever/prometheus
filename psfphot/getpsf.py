@@ -35,7 +35,7 @@ class PSFFitter(object):
         self.psf = psf
         self.image = image
         self.cat = cat
-        self.nstars = len(cat)
+        self.nstars = np.size(cat)
         self.niter = 0
         self.npsfpix = psf.npix
         nx,ny = image.data.shape
@@ -45,17 +45,20 @@ class PSFFitter(object):
             fitradius = psf.fwhm()
         self.fitradius = fitradius
         self.nfitpix = int(np.ceil(fitradius))  # +/- nfitpix
-        self.starheight = cat['height'].copy()
-        self.starxcen = cat['x'].copy()
-        self.starycen = cat['y'].copy()
+        self.starheight = np.zeros(self.nstars,float)
+        self.starheight[:] = cat['height'].copy()
+        self.starxcen = np.zeros(self.nstars,float)
+        self.starxcen[:] = cat['x'].copy()
+        self.starycen = np.zeros(self.nstars,float)
+        self.starycen[:] = cat['y'].copy()
         
         # Get xdata, ydata, error
         imdata = []
         xydata = []
         ntotpix = 0
         for i in range(self.nstars):
-            xcen = cat['x'][i]
-            ycen = cat['y'][i]
+            xcen = self.starxcen[i]
+            ycen = self.starycen[i]
             xlo = np.maximum(int(np.round(xcen)-self.nfitpix),0)
             xhi = np.minimum(int(np.round(xcen)+self.nfitpix),nx-1)
             ylo = np.maximum(int(np.round(ycen)-self.nfitpix),0)
@@ -74,8 +77,8 @@ class PSFFitter(object):
         count = 0
         for i in range(self.nstars):
             npix = imdata[i].size
-            xcen = cat['x'][i]
-            ycen = cat['y'][i]
+            xcen = self.starxcen[i]
+            ycen = self.starycen[i]
             im = imdata[i].data.copy()
             err = imdata[i].uncertainty.array.copy()
             xy = xydata[i]
@@ -101,8 +104,8 @@ class PSFFitter(object):
         psf = self.psf.copy()
         psf._params = list(args)
         # Loop over the stars and generate the model image
-        out = np.zeros(self.ntotpix,float)
-        count = 0
+        allim = np.zeros(self.ntotpix,float)
+        pixcnt = 0
         for i in range(self.nstars):
             image = self.imdata[i]
             height = self.starheight[i]
@@ -112,13 +115,14 @@ class PSFFitter(object):
             x = np.arange(xy[0][0],xy[0][1]+1).astype(float)
             y = np.arange(xy[1][0],xy[1][1]+1).astype(float)
             rr = np.sqrt( (x-xcen).reshape(-1,1)**2 + (y-ycen).reshape(1,-1)**2 )
-            mask = rr>self.fitradius            
+            mask = rr>self.fitradius
+
+            x0 = xcen-xy[0][0]
+            y0 = ycen-xy[1][0]
+            
             # Fit height/xcen/ycen if niter=1
             if self.niter<=1:
-                x0 = xcen-xy[0][0]
-                y0 = ycen-xy[1][0]
-                pars,perror = psf.fit(image,[height,x0,y0])
-                # this is returning background as well
+                pars = psf.fit(image,[height,x0,y0],nosky=True)
                 xcen += (pars[1]-x0)
                 ycen += (pars[2]-y0)
                 height = pars[0]
@@ -129,27 +133,55 @@ class PSFFitter(object):
             #   do it empirically
             else:
                 im1 = psf(pars=[1.0,xcen,ycen],xy=xy)
+                wt = 1/image.uncertainty.array**2
                 height = np.median(image.data[mask]/im1[mask])
+                pars2 = psf.fit(image,[height,x0,y0],nosky=True)
+                height = pars2[0]
+                
                 self.starheight[i] = height
+                #self.starxcen[i] = pars2[1]+xy[0][0]
+                #self.starycen[i] = pars2[2]+xy[1][0]       
+                #print(count,self.starxcen[i],self.starycen[i])
+                # updating the X/Y values after the first iteration
+                #  causes problems.  bounces around too much
                 
             im = psf(pars=[height,xcen,ycen],xy=xy)
             # Zero-out anything beyond the fitting radius
             im[mask] = 0.0
             npix = im.size
-            out[count:count+npix] = im.flatten()
-            count += npix
-
-        # Still need to FIT individual star Height, Xcen, Ycen
+            allim[pixcnt:pixcnt+npix] = im.flatten()
+            pixcnt += npix
             
         self.niter += 1
             
-        return out
+        return allim
 
     
     def jac(self,x,*args):
         """ jacobian."""
 
-        pass
+        if self.verbose:
+            print(self.niter,args)
+        
+        psf = self.psf.copy()
+        psf._params = list(args)
+        # Loop over the stars and generate the derivatives
+        allderiv = np.zeros((self.ntotpix,len(psf.params)),float)
+        pixcnt = 0
+        for i in range(self.nstars):
+            height = self.starheight[i]
+            xcen = self.starxcen[i]            
+            ycen = self.starycen[i]
+            xy = self.xydata[i]
+            x2,y2 = psf.xylim2xy(xy)
+            xdata = np.vstack((x2.ravel(),y2.ravel()))
+            allpars = np.concatenate((np.array([height,xcen,ycen]),np.array(args)))
+            deriv = psf.jac(xdata,*allpars,allpars=True)
+            deriv = np.delete(deriv,[0,1,2],axis=1)  # remove stellar ht/xc/yc columns
+            npix,dum = deriv.shape
+            allderiv[pixcnt:pixcnt+npix,:] = deriv
+            pixcnt += npix
+        return allderiv
     
     
 def getpsf(psf,image,cat,verbose=False):
@@ -172,14 +204,14 @@ def getpsf(psf,image,cat,verbose=False):
 
     # Perform the fitting
     pars,cov = curve_fit(psffitter.model,xdata,psffitter.imflatten,
-                         sigma=psffitter.errflatten,p0=initpar) # jac=psffitter.jac
+                         sigma=psffitter.errflatten,p0=initpar,jac=psffitter.jac)
     perror = np.sqrt(np.diag(cov))
 
     if verbose:
         print('Best-fitting parameters: ',pars)
         print('Errors: ',perror)
     
-    # create the best-fitting PSf
+    # create the best-fitting PSF
     newpsf = psf.copy()
     newpsf._params = pars
 

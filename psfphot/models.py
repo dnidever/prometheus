@@ -893,15 +893,15 @@ class PSFBase:
         Parameters
         ----------
         xdata : numpy array
-          X and Y values in a [2,N] array.
+            X and Y values in a [2,N] array.
         args : float
-          Model parameter values as separate positional input parameters,
-          [height, xcen, ycen, sky].  If allpars=True, then the model
-          parameters are added at the end, i.e. 
-          [height, xcen, ycen, sky, model parameters].
+            Model parameter values as separate positional input parameters,
+            [height, xcen, ycen, sky].  If allpars=True, then the model
+            parameters are added at the end, i.e. 
+            [height, xcen, ycen, sky, model parameters].
         allpars : boolean, optional
-          PSF model parameters have been input as well (behind the stellar
-          parameters).  Default is False.
+            PSF model parameters have been input as well (behind the stellar
+            parameters).  Default is False.
 
         Returns
         -------
@@ -943,17 +943,17 @@ class PSFBase:
         Parameters
         ----------
         xdata : numpy array
-          X and Y values in a [2,N] array.
+            X and Y values in a [2,N] array.
         args : float
-          Model parameter values as separate positional input parameters,
-          [height, xcen, ycen, sky]. If allpars=True, then the model
-          parameters are added at the end, i.e. 
-          [height, xcen, ycen, sky, model parameters].
+            Model parameter values as separate positional input parameters,
+            [height, xcen, ycen, sky]. If allpars=True, then the model
+            parameters are added at the end, i.e. 
+            [height, xcen, ycen, sky, model parameters].
         retmodel : boolean, optional
-          Return the model as well.  Default is retmodel=False.
+            Return the model as well.  Default is retmodel=False.
         allpars : boolean, optional
-          PSF model parameters have been input as well (behind the stellar
-          parameters).  Default is False.
+            PSF model parameters have been input as well (behind the stellar
+            parameters).  Default is False.
 
         Returns
         -------
@@ -974,7 +974,7 @@ class PSFBase:
         # PARS should be [height,x0,y0,sky]        
         ## curve_fit separates each parameter while
         ## psf expects on pars array
-        pars = args
+        pars = np.array(args)
         if self.verbose: print('jac: ',pars)
         # Make parameters for the function, STELLAR + MODEL parameters
         #   *without* sky
@@ -1004,7 +1004,7 @@ class PSFBase:
         # Get the derivatives
         if retmodel:  # want model as well
             m,deriv = self.evaluate(xdata[0],xdata[1],inpars,deriv=True,nderiv=nderiv,**kwargs)
-            m += sky  # add sky
+            if sky is not None: m += sky  # add sky
         else:
             deriv = self.deriv(xdata[0],xdata[1],inpars,nderiv=nderiv,**kwargs)
         deriv = np.array(deriv).T
@@ -1035,28 +1035,31 @@ class PSFBase:
         return self.jac(xdata,*args,allpars=True,**kwargs)
 
     
-    def fit(self,im,pars,niter=1,radius=None,allpars=False,method='qr',weight=True):
+    def fit(self,im,pars,niter=1,radius=None,allpars=False,method='qr',nosky=False,weight=True):
         """
         Method to fit a single star using the PSF model.
 
         Parameters
         ----------
         im : CCDData object
-          Image to use for fitting.
+            Image to use for fitting.
         pars : numpy array, list or catalog
-          Initial parameters.  If numpy array or list the values should be [height, xcen, ycen].
-          If a catalog is input then it must at least the "x" and "y" columns.
+            Initial parameters.  If numpy array or list the values should be [height, xcen, ycen].
+            If a catalog is input then it must at least the "x" and "y" columns.
         niter : int, optional
-          Number of iterations to perform.  Default is 1.
+            Number of iterations to perform.  Default is 1.
         radius : float, optional
-          Fitting radius in pixels.  Default is to use the PSF FWHM.
+            Fitting radius in pixels.  Default is to use the PSF FWHM.
         allpars : boolean, optional
-          Fit PSF model parameters as well.  Default is to only fit the stellar parameters
-          of [height, xcen, ycen, sky].
+            Fit PSF model parameters as well.  Default is to only fit the stellar parameters
+            of [height, xcen, ycen, sky].
         method : str, optional
-          Method to use to solve the system of equations: "QR" or "SVD".  Default is "QR".
+            Method to use to solve the system of equations: "qr", "svd", or "curve_fit".
+            Default is "QR".
+        nosky : boolean, optional
+            Do not fit the sky, only [height, xcen, and ycen].  Default is False.
         weight : boolean, optional
-          Weight the data by 1/error**2.  Default is weight=True.
+            Weight the data by 1/error**2.  Default is weight=True.
 
         Returns
         -------
@@ -1095,13 +1098,18 @@ class PSFBase:
         flux = im.data[x0:x1+1,y0:y1+1]
         err = im.uncertainty.array[x0:x1+1,y0:y1+1]
         sky = np.median(im.data[x0:x1+1,y0:y1+1])
+        if nosky: sky=0.0
         height = im.data[int(np.round(xc)),int(np.round(yc))]-sky
-        initpar = [height,xc,yc,sky]
-
+        initpar = [height,xc,yc,sky]            
+        
         # Fit PSF parameters as well
         if allpars:
             initpar = np.hstack(([height,xc,yc,sky],self.params.copy()))
 
+        # Remove sky column
+        if nosky:
+            initpar = np.delete(initpar,3,axis=0)
+            
         # Use weights
         if weight:
             wt = 1.0/np.maximum(err,1)**2
@@ -1110,11 +1118,11 @@ class PSFBase:
         count = 0
         bestpar = initpar.copy()
         while (count<niter):
-            # Use Singular Value Decomposition (SVD) to solve
+            # Use QR or SVD to solve linear system of equations
             if allpars:
                 m,jac = self.jac(xdata,*bestpar,allpars=True,retmodel=True)
             else:
-                m,jac = self.jac(xdata,*bestpar,retmodel=True)            
+                m,jac = self.jac(xdata,*bestpar,retmodel=True)
             dy = flux.flatten()-m.flatten()
             # Multipy by weights dy and jac by weights
             if weight:
@@ -1136,8 +1144,20 @@ class PSFBase:
                 sinv[s!=0] = 1/s[s!=0]
                 npars = len(s)
                 dbeta = vt.T @ ((u.T @ dy)[0:npars]*sinv)
+            # Curve_fit
+            elif str(method).lower()=='curve_fit':
+                if allpars==False:
+                    outpars,cov = curve_fit(self.model,xdata,flux.ravel(),sigma=err.ravel(),p0=bestpar,jac=self.jac)
+                    perror = np.sqrt(np.diag(cov))
+                    return outpars,perror
+                # Fit all parameters
+                else:
+                    outpars,cov = curve_fit(self.modelall,xdata,flux.ravel(),sigma=err.ravel(),p0=bestpar,jac=self.jacall)
+                    perror = np.sqrt(np.diag(cov))
+                    return outpars,perror
             else:
                 raise ValueError('Only SVD or QR methods currently supported')
+            
             oldpar = bestpar.copy()
             bestpar += dbeta
             count += 1
