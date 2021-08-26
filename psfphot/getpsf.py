@@ -99,7 +99,7 @@ class PSFFitter(object):
         """ model function."""
 
         if self.verbose:
-            print(self.niter,args)
+            print('model: ',self.niter,args)
         
         psf = self.psf.copy()
         psf._params = list(args)
@@ -157,16 +157,18 @@ class PSFFitter(object):
         return allim
 
     
-    def jac(self,x,*args):
+    def jac(self,x,*args,retmodel=False):
         """ jacobian."""
 
         if self.verbose:
-            print(self.niter,args)
+            print('jac: ',self.niter,args)
         
         psf = self.psf.copy()
         psf._params = list(args)
         # Loop over the stars and generate the derivatives
         allderiv = np.zeros((self.ntotpix,len(psf.params)),float)
+        if retmodel:
+            allim = np.zeros(self.ntotpix,float)
         pixcnt = 0
         for i in range(self.nstars):
             height = self.starheight[i]
@@ -176,16 +178,62 @@ class PSFFitter(object):
             x2,y2 = psf.xylim2xy(xy)
             xdata = np.vstack((x2.ravel(),y2.ravel()))
             allpars = np.concatenate((np.array([height,xcen,ycen]),np.array(args)))
-            deriv = psf.jac(xdata,*allpars,allpars=True)
+            if retmodel:
+                m,deriv = psf.jac(xdata,*allpars,allpars=True,retmodel=True)
+            else:
+                deriv = psf.jac(xdata,*allpars,allpars=True)                
             deriv = np.delete(deriv,[0,1,2],axis=1)  # remove stellar ht/xc/yc columns
             npix,dum = deriv.shape
             allderiv[pixcnt:pixcnt+npix,:] = deriv
+            if retmodel:
+                allim[pixcnt:pixcnt+npix] = m
             pixcnt += npix
-        return allderiv
+        if retmodel:
+            return allim,allderiv
+        else:
+            return allderiv
     
     
-def getpsf(psf,image,cat,verbose=False):
-    """ PSF model, image object, catalog of sources to fit."""
+def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
+    """
+    Fit PSF model to stars in an image.
+
+    Parameters
+    ----------
+    psf : PSF object
+       PSF object with initial parameters to use.
+    image : CCDData object
+       Image to use to fit PSF model to stars.
+    cat : table
+       Catalog with initial height/x/y values for the stars to use to fit the PSF.
+    method : str, optional
+       Method to use for solving the non-linear least squares problem: "qr",
+       "svd", and "curve_fit".  Default is "qr".
+    maxiter : int, optional
+       Maximum number of iterations to allow.  Only for methods "qr" or "svd".
+       Default is 10.
+    minpercdiff : float, optional
+       Minimum percent change in the parameters to allow until the solution is
+       considered converged and the iteration loop is stopped.  Only for methods
+       "qr" and "svd".  Default is 1.0.
+    verbose : boolean, optional
+       Verbose output.
+
+    Returns
+    -------
+    pars : numpy array
+       Array of best-fit model parameters
+    perror : numpy array
+       Uncertainties in "pars".
+    newpsf : PSF object
+       New PSF object with the best-fit model parameters.
+
+    Example
+    -------
+
+    pars,perror,newpsf = getpsf(psf,image,cat)
+
+    """
 
     nx,ny = image.data.shape
     
@@ -202,11 +250,54 @@ def getpsf(psf,image,cat,verbose=False):
     #initpar = psf.params.copy()
     initpar = [3.0,4.0,0.1]
 
-    # Perform the fitting
-    pars,cov = curve_fit(psffitter.model,xdata,psffitter.imflatten,
-                         sigma=psffitter.errflatten,p0=initpar,jac=psffitter.jac)
-    perror = np.sqrt(np.diag(cov))
+    method = 'qr'
+    
+    # Iterate
+    count = 0
+    maxiter = 10
+    minpercdiff = 1.0
+    percdiff = 1e10
+    bestpar = initpar.copy()
+    while (count<maxiter and percdiff>minpercdiff):
+        m,jac = psffitter.jac(xdata,*bestpar,retmodel=True)
+        dy = psffitter.imflatten-m
+        # QR decomposition
+        if str(method).lower()=='qr':
+            q,r = np.linalg.qr(jac)
+            rinv = np.linalg.inv(r)
+            dbeta = rinv @ (q.T @ dy)
+        # SVD:
+        elif str(method).lower()=='svd':
+            u,s,vt = np.linalg.svd(jac)
+            # u: [Npix,Npix]
+            # s: [Npars]
+            # vt: [Npars,Npars]
+            # dy: [Npix]
+            sinv = s.copy()*0  # pseudo-inverse
+            sinv[s!=0] = 1/s[s!=0]
+            npars = len(s)
+            dbeta = vt.T @ ((u.T @ dy)[0:npars]*sinv)
+        # Curve_fit
+        elif str(method).lower()=='curve_fit':
+            # Perform the fitting
+            bestpars,cov = curve_fit(psffitter.model,xdata,psffitter.imflatten,
+                                     sigma=psffitter.errflatten,p0=bestpar,jac=psffitter.jac)
+            perror = np.sqrt(np.diag(cov))
+            break
+        else:
+            raise ValueError('Only SVD or QR methods currently supported')
+            
+        oldpar = bestpar.copy()
+        bestpar += dbeta
+        diff = np.abs(bestpar-oldpar)
+        percdiff = np.max(diff/oldpar*100)
+        perror = diff  # rough estimate
+        count += 1
 
+        if verbose:
+            print(count,bestpar,percdiff)
+
+    pars = bestpar
     if verbose:
         print('Best-fitting parameters: ',pars)
         print('Errors: ',perror)
