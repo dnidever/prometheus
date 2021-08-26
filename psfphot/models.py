@@ -915,7 +915,7 @@ class PSFBase:
         else:
             return jac
         
-    def fit(self,im,pars,niter=1,radius=None,allpars=False):
+    def fit(self,im,pars,niter=1,radius=None,allpars=False,method='qr',weight=True):
         """ Convenience function to fit a single star model."""
         # PARS: initial guesses for Xo and Yo parameters.
         if isinstance(pars,dict)==False:
@@ -952,6 +952,10 @@ class PSFBase:
         # Fit PSF parameters as well
         if allpars:
             initpar = np.hstack(([height,xc,yc,sky],self.params.copy()))
+
+        # Use weights
+        if weight:
+            wt = 1.0/np.maximum(err,1)**2
         
         # Iterate
         count = 0
@@ -962,16 +966,29 @@ class PSFBase:
                 m,jac = self.jacall(xdata,*bestpar,retmodel=True)
             else:
                 m,jac = self.jac(xdata,*bestpar,retmodel=True)            
-            dy = flux.flatten()-m.flatten()            
-            u,s,vt = np.linalg.svd(jac)
-            # u: [Npix,Npix]
-            # s: [Npars]
-            # vt: [Npars,Npars]
-            # dy: [Npix]
-            sinv = s.copy()*0  # pseudo-inverse
-            sinv[s!=0] = 1/s[s!=0]
-            npars = len(s)
-            dbeta = vt.T @ ((u.T @ dy)[0:npars]*sinv)
+            dy = flux.flatten()-m.flatten()
+            # Multipy by weights dy and jac by weights
+            if weight:
+                dy *= wt.flatten()
+                jac = jac * wt.flatten().reshape(-1,1)
+            # QR decomposition
+            if str(method).lower()=='qr':
+                q,r = np.linalg.qr(jac)
+                rinv = np.linalg.inv(r)
+                dbeta = rinv @ (q.T @ dy)
+            # SVD:
+            elif str(method).lower()=='svd':
+                u,s,vt = np.linalg.svd(jac)
+                # u: [Npix,Npix]
+                # s: [Npars]
+                # vt: [Npars,Npars]
+                # dy: [Npix]
+                sinv = s.copy()*0  # pseudo-inverse
+                sinv[s!=0] = 1/s[s!=0]
+                npars = len(s)
+                dbeta = vt.T @ ((u.T @ dy)[0:npars]*sinv)
+            else:
+                raise ValueError('Only SVD or QR methods currently supported')
             oldpar = bestpar.copy()
             bestpar += dbeta
             count += 1
