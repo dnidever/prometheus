@@ -835,7 +835,7 @@ class PSFBase:
         if self.verbose: print('model: ',pars)
         return self(xdata[0],xdata[1],pars,**kwargs)
 
-    def jac(self,xdata,*args,**kwargs):
+    def jac(self,xdata,*args,retmodel=False,**kwargs):
         """ Jacobian function to use with curve_fit() to fit a single stellar profile."""
         # PARS should be [height,x0,y0,sky]        
         ## curve_fit separates each parameter while
@@ -850,7 +850,11 @@ class PSFBase:
             inpars = np.hstack((pars[0:3],self.params))
         else:
             raise ValueError('PARS must have 3 or 4 parameters')
-        deriv = self.deriv(xdata[0],xdata[1],inpars,nderiv=3,**kwargs)
+        if retmodel:
+            m,deriv = self.evaluate(xdata[0],xdata[1],inpars,deriv=True,nderiv=3,**kwargs)
+            if len(args)>=4: m+=args[3]  # add sky
+        else:
+            deriv = self.deriv(xdata[0],xdata[1],inpars,nderiv=3,**kwargs)
         deriv = np.array(deriv).T
         # Initialize jacobian matrix
         # the parameters are [height,xmean,ymean,sky]
@@ -858,36 +862,43 @@ class PSFBase:
         jac[:,0:3] = deriv
         if len(pars)==4:   # sky
                jac[:,3] = 1
-        return jac
-    
+        # Return
+        if retmodel:   # return model as well
+            return m,jac
+        else:
+            return jac
     
     def modelall(self,xdata,*args,**kwargs):
         """ Function to use with curve_fit() to fit all parameters of a single stellar profile."""
         # PARS should be [height,x0,y0,sky, model parameters]
         allpars = args
         if self.verbose: print('modelall: ',allpars)
-        nmpars = len(func.params)
+        nmpars = len(self.params)
         #pars = allpars[0:-nmpars]
         npars = len(allpars)-nmpars
         pars = allpars[0:3]  # don't include pars[3]=sky if it was input
         mpars = allpars[-nmpars:]        
         return self(xdata[0],xdata[1],pars,mpars=mpars,**kwargs)
 
-    def jacall(self,xdata,*args,**kwargs):
+    def jacall(self,xdata,*args,retmodel=False,**kwargs):
         """ Jacobian function to use with curve_fit() to fit all parameters of a single stellar profile."""
         # PARS should be [height,x0,y0,sky, model parameters]        
         ## curve_fit separates each parameter while
         ## psf expects on pars array
-        pars = args
-        if self.verbose: print('jacall: ',pars)
+        allpars = args
+        if self.verbose: print('jacall: ',allpars)
         # break up pars into stellar and model pars
-        nmpars = len(func.params)
+        nmpars = len(self.params)
         #pars = allpars[0:-nmpars]
         npars = len(allpars)-nmpars
         pars = allpars[0:3]  # don't include pars[3]=sky if it was input
         mpars = allpars[-nmpars:]
-        inpars = np.append([pars,mpars])
-        deriv = self.deriv(xdata[0],xdata[1],inpars,**kwargs)
+        inpars = np.concatenate([np.array(pars),np.array(mpars)])
+        if retmodel:
+            m,deriv = self.evaluate(xdata[0],xdata[1],inpars,deriv=True,**kwargs)
+            if len(allpars)>=4: m+=allpars[3]    # add sky
+        else:
+            deriv = self.deriv(xdata[0],xdata[1],inpars,**kwargs)            
         deriv = np.array(deriv).T
         # Initialize jacobian matrix
         # the parameters are [height,xmean,ymean,sky]
@@ -898,18 +909,75 @@ class PSFBase:
             jac[:,0:3] = deriv[:,0:3]
             jac[:,3] = 1
             jac[:,4:] = deriv[:,3:]
-        return jac
+        # Return
+        if retmodel:  # return model as well
+            return m,jac
+        else:
+            return jac
         
-    def fit(self,im,pars,allpars=False):
+    def fit(self,im,pars,niter=1,radius=None,allpars=False):
         """ Convenience function to fit a single star model."""
         # PARS: initial guesses for Xo and Yo parameters.
         if isinstance(pars,dict)==False:
-            cat = {'X':pars[1],'Y':pars[2]}
+            if len(pars)<3:
+                raise ValueError('PARS must have [HEIGHT, XCEN, YCEN]')
+            cat = {'height':pars[0],'x':pars[1],'y':pars[2]}
         else:
-            if 'X' in pars.keys()==False or 'Y' in pars.keys() is False:
-                raise ValueError('PARS dictionary must have X and Y')
+            if 'x' in pars.keys()==False or 'y' in pars.keys() is False:
+                raise ValueError('PARS dictionary must have x and y')
             cat = pars
-        return getpsf.fitstar(im,cat,self,allpars=allpars)
+
+        nx,ny = im.shape
+        xc = cat['x']
+        yc = cat['y']
+        if radius is None:
+            radius = self.fwhm()
+        x0 = int(np.maximum(0,np.floor(xc-radius)))
+        x1 = int(np.minimum(np.ceil(xc+radius),nx-1))
+        y0 = int(np.maximum(0,np.floor(yc-radius)))
+        y1 = int(np.minimum(np.ceil(yc+radius),ny-1))
+
+        nX = x1-x0+1
+        nY = y1-y0+1
+        X = np.arange(x0,x1+1).reshape(-1,1)+np.zeros(nY)   # broadcasting is faster
+        Y = np.arange(y0,y1+1).reshape(1,-11)+np.zeros(nX).reshape(-1,1)
+        xdata = np.vstack((X.ravel(), Y.ravel()))
+        
+        flux = im.data[x0:x1+1,y0:y1+1]
+        err = im.uncertainty.array[x0:x1+1,y0:y1+1]
+        sky = np.median(im.data[x0:x1+1,y0:y1+1])
+        height = im.data[int(np.round(xc)),int(np.round(yc))]-sky
+        initpar = [height,xc,yc,sky]
+
+        # Fit PSF parameters as well
+        if allpars:
+            initpar = np.hstack(([height,xc,yc,sky],self.params.copy()))
+        
+        # Iterate
+        count = 0
+        bestpar = initpar.copy()
+        while (count<niter):
+            # Use Singular Value Decomposition (SVD) to solve
+            if allpars:
+                m,jac = self.jacall(xdata,*bestpar,retmodel=True)
+            else:
+                m,jac = self.jac(xdata,*bestpar,retmodel=True)            
+            dy = flux.flatten()-m.flatten()            
+            u,s,vt = np.linalg.svd(jac)
+            # u: [Npix,Npix]
+            # s: [Npars]
+            # vt: [Npars,Npars]
+            # dy: [Npix]
+            sinv = s.copy()*0  # pseudo-inverse
+            sinv[s!=0] = 1/s[s!=0]
+            npars = len(s)
+            dbeta = vt.T @ ((u.T @ dy)[0:npars]*sinv)
+            oldpar = bestpar.copy()
+            bestpar += dbeta
+            count += 1
+                
+        return bestpar
+
     
     def __str__(self):
         return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+')'

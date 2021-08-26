@@ -17,11 +17,13 @@ from astropy.table import Table
 import astropy.units as u
 from scipy.optimize import curve_fit, least_squares
 from scipy.interpolate import interp1d
+from astropy.nddata import CCDData,StdDevUncertainty
 from dlnpyutils import utils as dln, bindata
 import copy
 import logging
 import time
 import matplotlib
+import sep
 
 # Fit a PSF model to multiple stars in an image
 
@@ -49,7 +51,6 @@ class PSFFitter(object):
         
         # Get xdata, ydata, error
         imdata = []
-        errdata = []
         xydata = []
         ntotpix = 0
         for i in range(self.nstars):
@@ -59,16 +60,13 @@ class PSFFitter(object):
             xhi = np.minimum(int(np.round(xcen)+self.nfitpix),nx-1)
             ylo = np.maximum(int(np.round(ycen)-self.nfitpix),0)
             yhi = np.minimum(int(np.round(ycen)+self.nfitpix),ny-1)
-            im = image.data[xlo:xhi,ylo:yhi]
-            err = image.uncertainty.array[xlo:xhi,ylo:yhi]
+            im = image[xlo:xhi,ylo:yhi]
             ntotpix += im.size            
             imdata.append(im)
-            errdata.append(err)
             xydata.append([[xlo,xhi-1],[ylo,yhi-1]])
  
         self.ntotpix = ntotpix
         self.imdata = imdata
-        self.errdata = errdata
         self.xydata = xydata
         # flatten the image and error arrays
         imflatten = np.zeros(ntotpix,float)
@@ -78,8 +76,8 @@ class PSFFitter(object):
             npix = imdata[i].size
             xcen = cat['x'][i]
             ycen = cat['y'][i]
-            im = imdata[i].copy()
-            err = errdata[i].copy()
+            im = imdata[i].data.copy()
+            err = imdata[i].uncertainty.array.copy()
             xy = xydata[i]
             # Zero-out anything beyond the fitting radius
             x = np.arange(xy[0][0],xy[0][1]+1).astype(float)
@@ -106,32 +104,66 @@ class PSFFitter(object):
         out = np.zeros(self.ntotpix,float)
         count = 0
         for i in range(self.nstars):
+            image = self.imdata[i]
             height = self.starheight[i]
             xcen = self.starxcen[i]            
             ycen = self.starycen[i]
             xy = self.xydata[i]
-            im = psf(pars=[height,xcen,ycen],xy=xy)
-            # Zero-out anything beyond the fitting radius
             x = np.arange(xy[0][0],xy[0][1]+1).astype(float)
             y = np.arange(xy[1][0],xy[1][1]+1).astype(float)
             rr = np.sqrt( (x-xcen).reshape(-1,1)**2 + (y-ycen).reshape(1,-1)**2 )
-            im[rr>self.fitradius] = 0.0
+            mask = rr>self.fitradius            
+            # Fit height/xcen/ycen if niter=1
+            if self.niter<=1:
+                x0 = xcen-xy[0][0]
+                y0 = ycen-xy[1][0]
+                pars,perror = psf.fit(image,[height,x0,y0])
+                # this is returning background as well
+                xcen += (pars[1]-x0)
+                ycen += (pars[2]-y0)
+                height = pars[0]
+                self.starheight[i] = height
+                self.starxcen[i] = xcen
+                self.starycen[i] = ycen                
+            # Only fit height if niter>1
+            #   do it empirically
+            else:
+                im1 = psf(pars=[1.0,xcen,ycen],xy=xy)
+                height = np.median(image.data[mask]/im1[mask])
+                self.starheight[i] = height
+                
+            im = psf(pars=[height,xcen,ycen],xy=xy)
+            # Zero-out anything beyond the fitting radius
+            im[mask] = 0.0
             npix = im.size
             out[count:count+npix] = im.flatten()
             count += npix
 
+        # Still need to FIT individual star Height, Xcen, Ycen
+            
         self.niter += 1
             
         return out
 
     
+    def jac(self,x,*args):
+        """ jacobian."""
+
+        pass
+    
+    
 def getpsf(psf,image,cat,verbose=False):
     """ PSF model, image object, catalog of sources to fit."""
 
+    nx,ny = image.data.shape
+    
+    # Get the background using SEP
+    bkg = sep.Background(image.data, bw=int(nx/10), bh=int(ny/10), fw=3, fh=3)
+    bkg_image = bkg.back()
+    
     # Subtract the background
-    backgrnd = np.median(image.data)
     image0 = image.copy()
-    image.data -= backgrnd
+    image.data -= bkg_image
     
     psffitter = PSFFitter(psf,image,cat,verbose=verbose)
     xdata = np.arange(psffitter.ntotpix)
@@ -185,8 +217,8 @@ def fitstar(im,cat,psf,radius=None,allpars=False):
     # IM should be an image with an uncertainty array as well
     nx,ny = im.data.shape
 
-    xc = cat['X']
-    yc = cat['Y']
+    xc = cat['x']
+    yc = cat['y']
     # use FWHM of PSF for the fitting radius
     #box = 20
     if radius is None:
