@@ -235,6 +235,9 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
 
     """
 
+
+    # MAKE SURE THE PSF STARS AREN'T TOO CLOSE TO EACH OTHER!!!
+    
     nx,ny = image.data.shape
     
     # Get the background using SEP
@@ -247,15 +250,10 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
     
     psffitter = PSFFitter(psf,image,cat,verbose=verbose)
     xdata = np.arange(psffitter.ntotpix)
-    #initpar = psf.params.copy()
-    initpar = [3.0,4.0,0.1]
-
-    method = 'qr'
+    initpar = psf.params.copy()
     
     # Iterate
     count = 0
-    maxiter = 10
-    minpercdiff = 1.0
     percdiff = 1e10
     bestpar = initpar.copy()
     while (count<maxiter and percdiff>minpercdiff):

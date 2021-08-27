@@ -762,6 +762,8 @@ class PSFBase:
         self.npix = npix
         self.verbose = verbose
 
+        # add a precomputed circular mask here to mask out the corners??
+        
     @property
     def params(self):
         """ Return the PSF model parameters."""
@@ -779,12 +781,12 @@ class PSFBase:
         """
         x0,x1 = xy[0]
         y0,y1 = xy[1]
-        dx = np.arange(x0,x1+1).astype(float)
+        dx = np.arange(x0,x1+1)
         nxpix = len(dx)
-        dy = np.arange(y0,y1+1).astype(float)
+        dy = np.arange(y0,y1+1)
         nypix = len(dy)
-        x = dx.reshape(-1,1)+np.zeros(nypix)   # broadcasting is faster
-        y = dy.reshape(1,-1)+np.zeros(nxpix).reshape(-1,1)     
+        x = dx.reshape(-1,1)+np.zeros(nypix,int)   # broadcasting is faster
+        y = dy.reshape(1,-1)+np.zeros(nxpix,int).reshape(-1,1)     
         return x,y
         
     def __call__(self,x=None,y=None,pars=None,mpars=None,xy=None,deriv=False,**kwargs):
@@ -971,6 +973,10 @@ class PSFBase:
 
         """
 
+        # CAN WE MODIFY THIS TO ALLOW FOR MULTIPLE STAR PARAMETERS
+        # TO BE INPUT AS A CATALOG
+        # So produce a model for a group of stars?
+        
         # PARS should be [height,x0,y0,sky]        
         ## curve_fit separates each parameter while
         ## psf expects on pars array
@@ -1069,7 +1075,7 @@ class PSFBase:
         Example
         -------
 
-        pars = psf.fit(image[1002.0,520.0,734.0])
+        pars = psf.fit(image,[1002.0,520.0,734.0])
 
 
         """
@@ -1164,6 +1170,59 @@ class PSFBase:
                 
         return bestpar
 
+    def sub(self,im,cat,sky=False,radius=None):
+        """
+        Method to fit a single star using the PSF model.
+
+        Parameters
+        ----------
+        im : CCDData object
+            Image to use for fitting.
+        cat : catalog
+            Catalog of stellar parameters.  Columns must include height, x, y and sky.
+        sky : boolean, optional
+            Include sky in the model that is subtracted.  Default is False.
+        radius : float, optional
+            PSF radius to use.  The default is to use the full size of the PSF.
+
+        Returns
+        -------
+        subim : CCDData object
+            Image with stellar models subtracted.
+
+        Example
+        -------
+
+        subim = psf.sub(image,cat)
+
+
+        """
+
+        for n in ['height','x','y','sky']:
+            if n in pars.keys()==False:
+                raise ValueError('Catalog must have height, x, y and sky columns')
+
+        nx,ny = image.shape
+        nstars = cat.size
+        hpix = self.npix//2
+        if radius is None:
+            radius = hpix
+        else:
+            radius = np.minimum(hpix,radius)
+        subim = image.data.copy()
+        for i in range(nstars):
+            pars = [cat['height'][i],cat['x'][i],cat['y'][i]]
+            if sky is False:
+                pars.append(cat['sky'][i])
+            x0 = int(np.maximum(0,np.floor(pars[1]-radius)))
+            x1 = int(np.minimum(np.ceil(pars[1]+radius),nx-1))
+            y0 = int(np.maximum(0,np.floor(pars[2]-radius)))
+            y1 = int(np.minimum(np.ceil(pars[2]+radius),ny-1))
+            xy = [[x0,x1],[y0,y1]]
+            im1 = self(pars=pars,xy=xy)
+            subim[x0:x1+1,y0:y1-1] -= im1
+        return subim
+                    
     
     def __str__(self):
         return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+')'
