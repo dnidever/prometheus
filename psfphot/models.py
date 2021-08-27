@@ -760,6 +760,7 @@ class PSFBase:
         self._params = np.atleast_1d(mpars)
         self.binned = binned
         self.npix = npix
+        self.radius = npix//2
         self.verbose = verbose
 
         # add a precomputed circular mask here to mask out the corners??
@@ -875,6 +876,10 @@ class PSFBase:
         # Evaluate
         out = self.evaluate(x,y,inpars,deriv=deriv,**kwargs)
 
+        # Mask any corner pixels
+        rr = np.sqrt((x-inpars[1])**2+(y-inpars[2])**2)
+        out[rr>self.radius] = 0
+        
         # Add sky to model
         if sky is not None:
             # With derivative
@@ -1198,21 +1203,30 @@ class PSFBase:
 
         """
 
-        for n in ['height','x','y','sky']:
-            if n in pars.keys()==False:
-                raise ValueError('Catalog must have height, x, y and sky columns')
+        if isinstance(cat,np.ndarray):
+            columns = cat.dtype.names
+        elif isinstance(cat,dict):
+            columns = cat.keys()
+        elif isinstance(cat,Table):
+            columns = cat.columns
+        else:
+            raise ValueError('Only ndarray, astropy Table or dictionaries supported for catalogs')
 
-        nx,ny = image.shape
-        nstars = cat.size
+        for n in ['height','x','y','sky']:
+            if not n in columns:
+                raise ValueError('Catalog must have height, x, y and sky columns')
+            
+        nx,ny = im.shape
+        nstars = np.array(cat).size
         hpix = self.npix//2
         if radius is None:
-            radius = hpix
+            radius = self.radius
         else:
-            radius = np.minimum(hpix,radius)
-        subim = image.data.copy()
+            radius = np.minimum(self.radius,radius)
+        subim = im.data.copy()
         for i in range(nstars):
             pars = [cat['height'][i],cat['x'][i],cat['y'][i]]
-            if sky is False:
+            if sky:
                 pars.append(cat['sky'][i])
             x0 = int(np.maximum(0,np.floor(pars[1]-radius)))
             x1 = int(np.minimum(np.ceil(pars[1]+radius),nx-1))
@@ -1220,7 +1234,7 @@ class PSFBase:
             y1 = int(np.minimum(np.ceil(pars[2]+radius),ny-1))
             xy = [[x0,x1],[y0,y1]]
             im1 = self(pars=pars,xy=xy)
-            subim[x0:x1+1,y0:y1-1] -= im1
+            subim[x0:x1+1,y0:y1+1] -= im1
         return subim
                     
     

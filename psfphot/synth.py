@@ -43,7 +43,7 @@ def makecat(nstars=1000,heightr=[100.0,1e5],xr=[50.0,950.0],yr=[50.0,950.0]):
         cat['height'][i] = height
     return cat
 
-def makeimage(nstars=1000,nx=1024,ny=1024,psf=None,cat=None,backgrnd=1000.0):
+def makeimage(nstars=1000,nx=1024,ny=1024,psf=None,cat=None,noise=True,backgrnd=1000.0):
     """
     Make synthetic image
     """
@@ -62,7 +62,8 @@ def makeimage(nstars=1000,nx=1024,ny=1024,psf=None,cat=None,backgrnd=1000.0):
         nstars = len(cat)
 
     im = np.zeros((nx,ny),float)+backgrnd
-    im += np.sqrt(backgrnd)*np.random.rand(nx,ny)
+    if noise:
+        im += np.sqrt(backgrnd)*np.random.rand(nx,ny)
     for i in range(nstars):
         height = cat['height'][i]
         xcen = cat['x'][i]
@@ -72,8 +73,11 @@ def makeimage(nstars=1000,nx=1024,ny=1024,psf=None,cat=None,backgrnd=1000.0):
         ylo = int(np.round(ycen)-npsfpix/2)
         yhi = int(np.round(ycen)+npsfpix/2)-1
         im2 = psf(pars=[height,xcen,ycen],xy=[[xlo,xhi],[ylo,yhi]])
-        im2noise = im2+np.maximum(np.sqrt(im2),1)*np.random.rand(*im2.shape)
-        im[xlo:xhi+1,ylo:yhi+1] += im2noise
+        if noise:
+            im2noise = im2+np.maximum(np.sqrt(im2),1)*np.random.rand(*im2.shape)
+            im[xlo:xhi+1,ylo:yhi+1] += im2noise
+        else:
+            im[xlo:xhi+1,ylo:yhi+1] += im2
     err = np.sqrt(im)
     image = CCDData(im,StdDevUncertainty(err),unit='adu')
     

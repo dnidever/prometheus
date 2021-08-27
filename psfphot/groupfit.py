@@ -348,7 +348,7 @@ def fit(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
         print('Errors: ',perror)
 
         
-    #import pdb; pdb.set_trace()
+    import pdb; pdb.set_trace()
 
         
     # Put in catalog
