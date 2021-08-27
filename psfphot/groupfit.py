@@ -325,7 +325,7 @@ def fit(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
         # Curve_fit
         elif str(method).lower()=='curve_fit':
             # Perform the fitting
-            bestpars,cov = curve_fit(grpfitter.model,xdata,grpfitter.imflatten,
+            bestpar,cov = curve_fit(grpfitter.model,xdata,grpfitter.imflatten,
                                      sigma=grpfitter.errflatten,p0=bestpar,jac=grpfitter.jac)
             perror = np.sqrt(np.diag(cov))
             break
@@ -341,16 +341,12 @@ def fit(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
 
         if verbose:
             print(count,bestpar,percdiff)
-
+            
     pars = bestpar
     if verbose:
         print('Best-fitting parameters: ',pars)
         print('Errors: ',perror)
 
-        
-    import pdb; pdb.set_trace()
-
-        
     # Put in catalog
     dt = np.dtype([('id',int),('height',float),('height_error',float),('x',float),
                    ('x_error',float),('y',float),('y_error',float),('sky',float),('sky_error',float)])

@@ -278,7 +278,7 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
         # Curve_fit
         elif str(method).lower()=='curve_fit':
             # Perform the fitting
-            bestpars,cov = curve_fit(psffitter.model,xdata,psffitter.imflatten,
+            bestpar,cov = curve_fit(psffitter.model,xdata,psffitter.imflatten,
                                      sigma=psffitter.errflatten,p0=bestpar,jac=psffitter.jac)
             perror = np.sqrt(np.diag(cov))
             break
