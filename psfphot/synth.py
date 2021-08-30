@@ -62,23 +62,20 @@ def makeimage(nstars=1000,nx=1024,ny=1024,psf=None,cat=None,noise=True,backgrnd=
         nstars = len(cat)
 
     im = np.zeros((nx,ny),float)+backgrnd
-    if noise:
-        im += np.sqrt(backgrnd)*np.random.rand(nx,ny)
     for i in range(nstars):
         height = cat['height'][i]
         xcen = cat['x'][i]
         ycen = cat['y'][i]
-        xlo = int(np.round(xcen)-npsfpix/2)
-        xhi = int(np.round(xcen)+npsfpix/2)-1
-        ylo = int(np.round(ycen)-npsfpix/2)
-        yhi = int(np.round(ycen)+npsfpix/2)-1
+        xlo = np.maximum(int(np.round(xcen)-npsfpix/2),0)
+        xhi = np.minimum(int(np.round(xcen)+npsfpix/2)-1,nx-1)
+        ylo = np.maximum(int(np.round(ycen)-npsfpix/2),0)
+        yhi = np.minimum(int(np.round(ycen)+npsfpix/2)-1,ny-1)
         im2 = psf(pars=[height,xcen,ycen],xy=[[xlo,xhi],[ylo,yhi]])
-        if noise:
-            im2noise = im2+np.maximum(np.sqrt(im2),1)*np.random.rand(*im2.shape)
-            im[xlo:xhi+1,ylo:yhi+1] += im2noise
-        else:
-            im[xlo:xhi+1,ylo:yhi+1] += im2
-    err = np.sqrt(im)
+        im[xlo:xhi+1,ylo:yhi+1] += im2
+    err = np.maximum(np.sqrt(im),1)
+    if noise:
+        im += err*np.random.randn(*im.shape)
+
     image = CCDData(im,StdDevUncertainty(err),unit='adu')
     
     return image
