@@ -218,9 +218,8 @@ class GroupFitter(object):
     def unfreeze(self):
         """ Unfreeze all parameters and stars."""
         self.freezestars = np.zeros(self.nstars,bool)
-        #self.nfreezestars = 0
         self.freezepars = np.zeros(self.nstars*4,bool)
-        #self.nfreezepars = 0
+        self.resflatten = self.imflatten.copy()
     
     def model(self,x,*args,trim=False):
         """ model function."""
@@ -462,7 +461,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=1.0,nofr
         outcat['id'] = np.arange(nstars)+1
 
     # Freeze the sky parameters to zero
-    if freezesky:
+    if freezesky and method!='curve_fit':
         print('Freezing sky parameters to zero')
         initpar[3::4] = 0
         bestpar = initpar.copy()
@@ -507,8 +506,10 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=1.0,nofr
             bounds[1][1::4] = cat['x']+2
             bounds[0][2::4] = cat['y']-2
             bounds[1][2::4] = cat['y']+2
-            bounds[0][3::4] = -1e-7  # freeze sky to zero
-            bounds[1][3::4] = 1e-7            
+            if freezesky:
+                bestpar[3::4] = 0.0
+                bounds[0][3::4] = -1e-7  # freeze sky to zero
+                bounds[1][3::4] = 1e-7            
             bestpar,cov = curve_fit(grpfitter.model,xdata,grpfitter.imflatten,bounds=bounds,
                                      sigma=grpfitter.errflatten,p0=bestpar,jac=grpfitter.jac)
             perror = np.sqrt(np.diag(cov))
