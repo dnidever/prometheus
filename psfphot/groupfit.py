@@ -431,7 +431,7 @@ class GroupFitter(object):
             return jac
 
     
-def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,nofreeze=False,
+def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,reskyiter=2,nofreeze=False,
         verbose=False):
     """
     Fit PSF to group of stars in an image.
@@ -454,22 +454,23 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,nofr
        Minimum percent change in the parameters to allow until the solution is
        considered converged and the iteration loop is stopped.  Only for methods
        "qr" and "svd".  Default is 0.5.
+    reskyiter : int, optional
+       After how many iterations to re-calculate the sky background. Default is 2.
     verbose : boolean, optional
        Verbose output.
 
     Returns
     -------
-    pars : numpy array
-       Array of best-fit model parameters
-    perror : numpy array
-       Uncertainties in "pars".
-    newpsf : PSF object
-       New PSF object with the best-fit model parameters.
+    out : table
+       Table of best-fitting parameters for each star.
+       id, height, height_error, x, x_err, y, y_err, sky
+    model : numpy array
+       Best-fitting model of the stars and sky background.
 
     Example
     -------
 
-    pars,perror,newpsf = getpsf(psf,image,cat)
+    outcat,model = fit(psf,image,cat)
 
     """
 
@@ -482,11 +483,9 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,nofr
     # jac will be [Npix,Npars]
     # where Npars = 3*nstars for height,xcen,ycen,sky
 
-
     # SPARSE MATRIX OPERATIONS!!!!
 
     nstars = np.array(cat).size
-    
     nx,ny = image.data.shape
 
     # Start the Group Fitter
@@ -494,22 +493,13 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,nofr
     xdata = np.arange(gf.ntotpix)
 
     # Perform the fitting
+    #  initial estimates
     initpar = np.zeros(nstars*3,float)
     initpar[0::3] = cat['height']
     initpar[1::3] = cat['x']
     initpar[2::3] = cat['y']
 
-    # Initialize catalog
-    dt = np.dtype([('id',int),('height',float),('height_error',float),('x',float),
-                   ('x_error',float),('y',float),('y_error',float),('sky',float)])
-    outcat = np.zeros(nstars,dtype=dt)
-    if 'id' in cat.keys():
-        outcat['id'] = cat['id']
-    else:
-        outcat['id'] = np.arange(nstars)+1
-
     # Iterate
-    reskyiter = 2
     count = 0
     maxpercdiff = 1e10
     bestpar = initpar.copy()
@@ -608,11 +598,6 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,nofr
         # and just solve for heights as crowdsource does?
         # can tweak positions and sky after that
 
-        # WHAT'S THE BEST WAY TO ESTIMATE ERRORS IN LEAST-SQUARED PROBLEMS!!
-        # use chi-squared for each parameter
-        # jacobian?
-
-
     # Make final model
     gf.unfreeze()
     model = gf.modelim+gf.skyim
@@ -641,6 +626,14 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,nofr
 
         
     # Put in catalog
+    # Initialize catalog
+    dt = np.dtype([('id',int),('height',float),('height_error',float),('x',float),
+                   ('x_error',float),('y',float),('y_error',float),('sky',float)])
+    outcat = np.zeros(nstars,dtype=dt)
+    if 'id' in cat.keys():
+        outcat['id'] = cat['id']
+    else:
+        outcat['id'] = np.arange(nstars)+1
     outcat['height'] = pars[0::3]
     outcat['height_error'] = perror[0::3]
     outcat['x'] = pars[1::3]
