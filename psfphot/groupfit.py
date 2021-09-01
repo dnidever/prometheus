@@ -275,9 +275,13 @@ class GroupFitter(object):
     def modelim(self):
         """ This returns the full image of the current best model (no sky)
             using the PARS values."""
-        im = np.zeros(self.image.size,float)
-        im[self.ind1] = self.modelflatten
-        im = im.reshape(self.image.shape)
+        im = np.zeros(self.image.shape,float)
+        for i in range(self.nstars):
+            pars = self.pars[i*3:(i+1)*3]
+            fxind = self.fxlist[i]
+            fyind = self.fylist[i]
+            im1 = self.psf(fxind,fyind,pars)
+            im[fxind,fyind] += im1
         return im
         
     @property
@@ -604,9 +608,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=1.0,nofr
 
     # Make final model
     gf.unfreeze()
-    model1 = gf.model(xdata,*pars)
-    model = image.data.copy()*0
-    model[gf.x,gf.y] = model1
+    model = gf.modelim+gf.skyim
         
     # Put in catalog
     outcat['height'] = pars[0::3]
@@ -619,4 +621,4 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=1.0,nofr
 
     print('dt = ',time.time()-start)
     
-    return outcat,model,gf
+    return outcat,model
