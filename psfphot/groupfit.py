@@ -55,10 +55,12 @@ class GroupFitter(object):
         pars[2::3] = cat['y']
         self.pars = pars
         self.starsky = np.zeros(self.nstars,float)
+        self.starniter = np.zeros(self.nstars,int)
         self.njaciter = 0
         self.freezestars = np.zeros(self.nstars,bool)
         self.freezepars = np.zeros(self.nstars*3,bool)
         self.pixused = None
+        self.niter = 0
         
         # Get xdata, ydata
         xydata = []
@@ -247,6 +249,8 @@ class GroupFitter(object):
             # add models to a full image
             newmodel = self.image.data.copy()*0
             for i in newfreezestars:
+                # Save on what iteration this star was frozen
+                self.starniter[i] = self.niter+1
                 print('freeze: subtracting model for star ',i)
                 pars1 = self.pars[i*3:(i+1)*3]
                 #xind = self.xlist[i]
@@ -431,8 +435,8 @@ class GroupFitter(object):
             return jac
 
     
-def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,reskyiter=2,nofreeze=False,
-        verbose=False):
+def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,reskyiter=2,
+        nofreeze=False,verbose=False):
     """
     Fit PSF to group of stars in an image.
 
@@ -475,13 +479,12 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     """
 
     start = time.time()
-    
+
+    # Check input catalog
     for n in ['height','x','y']:
         if n not in cat.keys():
             raise ValueError('Cat must have height, x, and y columns')
     
-    # jac will be [Npix,Npars]
-    # where Npars = 3*nstars for height,xcen,ycen,sky
 
     # SPARSE MATRIX OPERATIONS!!!!
 
@@ -500,11 +503,11 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     initpar[2::3] = cat['y']
 
     # Iterate
-    count = 0
+    gf.niter = 0
     maxpercdiff = 1e10
     bestpar = initpar.copy()
     npars = len(bestpar)
-    while (count<maxiter and maxpercdiff>minpercdiff):
+    while (gf.niter<maxiter and maxpercdiff>minpercdiff):
         start0 = time.time()
         m,jac = gf.jac(xdata,*bestpar,retmodel=True,trim=True)
         dy = gf.resflatten[gf.usepix]-gf.skyflatten[gf.usepix]-m
@@ -541,12 +544,14 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
             perror = np.sqrt(np.diag(cov))
             chisq = np.sum((gf.imflatten-gf.skyflatten-bestmodel)**2/gf.errflatten**2)
             gf.pars = bestpar
-            break
+            break  # no iteration
         else:
             raise ValueError('Only SVD, QR or curve_fit methods currently supported')
-        
+
+        # Update parameters
         oldpar = bestpar.copy()
         bestpar += dbeta
+        # Check differences and changes
         diff = np.abs(bestpar-oldpar)
         percdiff = diff.copy()*0
         percdiff[0::3] = diff[0::3]/oldpar[0::3]*100  # height
@@ -565,8 +570,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
             print('Nfrozen stars = ',gf.nfreezestars)
             print('Nfree pars = ',npar)
         else:
-            gf.pars = bestpar
-            
+            gf.pars = bestpar            
         maxpercdiff = np.max(percdiff)
 
         # Get model and chisq
@@ -575,21 +579,23 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
             resid = gf.imflatten-gf.skyflatten-bestmodel
             chisq = np.sum(resid**2/gf.errflatten**2)
             
-        count += 1        
+
         
         if verbose:
-            print(count,bestpar,percdiff,chisq)
+            print(gf.niter,bestpar,percdiff,chisq)
 
         print('min/max X: ',np.min(gf.pars[1::3]),np.max(gf.pars[1::3]))
         print('min/max Y: ',np.min(gf.pars[2::3]),np.max(gf.pars[2::3]))        
 
         # Re-estimate the sky
-        if count % reskyiter == 0:
+        if gf.niter % reskyiter == 0:
             print('Re-estimating the sky')
             gf.sky()
         
         print('iter dt = ',time.time()-start0)
-            
+
+        gf.niter += 1     # increment counter
+        
         #import pdb; pdb.set_trace()
 
         # Maybe fit height of each star separately using just the central 4-9 pixels?
@@ -598,6 +604,11 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
         # and just solve for heights as crowdsource does?
         # can tweak positions and sky after that
 
+    # Check that all starniter are set properly
+    #  if we stopped "prematurely" then not all star were frozen
+    #  and didn't have starniter set
+    gf.starniter[gf.starniter==0] = gf.niter
+        
     # Make final model
     gf.unfreeze()
     model = gf.modelim+gf.skyim
@@ -628,7 +639,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     # Put in catalog
     # Initialize catalog
     dt = np.dtype([('id',int),('height',float),('height_error',float),('x',float),
-                   ('x_error',float),('y',float),('y_error',float),('sky',float)])
+                   ('x_error',float),('y',float),('y_error',float),('sky',float),('niter',int)])
     outcat = np.zeros(nstars,dtype=dt)
     if 'id' in cat.keys():
         outcat['id'] = cat['id']
@@ -641,6 +652,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     outcat['y'] = pars[2::3]
     outcat['y_error'] = perror[2::3]
     outcat['sky'] = gf.starsky
+    outcat['niter'] = gf.starniter  # what iteration it converged on
 
     print('dt = ',time.time()-start)
     
