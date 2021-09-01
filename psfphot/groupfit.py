@@ -25,6 +25,8 @@ import logging
 import time
 import matplotlib
 import sep
+from photutils.aperture import CircularAnnulus
+from astropy.stats import sigma_clipped_stats
 
 # Fit a PSF model to multiple stars in an image
 
@@ -46,21 +48,17 @@ class GroupFitter(object):
             fitradius = psf.fwhm()
         self.fitradius = fitradius
         self.nfitpix = int(np.ceil(fitradius))  # +/- nfitpix
-        self.starheight = np.zeros(self.nstars,float)
-        self.starheight[:] = cat['height'].copy()
-        self.starxcen = np.zeros(self.nstars,float)
-        self.starxcen[:] = cat['x'].copy()
-        self.starycen = np.zeros(self.nstars,float)
-        self.starycen[:] = cat['y'].copy()
+        # Initialize the parameter array
+        pars = np.zeros(self.nstars*3,float) # height, xcen, ycen
+        pars[0::3] = cat['height']
+        pars[1::3] = cat['x']
+        pars[2::3] = cat['y']
+        self.pars = pars
+        self.perror = pars.copy()*0
         self.starsky = np.zeros(self.nstars,float)
-        self.starsky[:] = cat['sky'].copy()        
         self.njaciter = 0
         self.freezestars = np.zeros(self.nstars,bool)
-        #self.nfreezestars = 0
-        self.freezepars = np.zeros(self.nstars*4,bool)
-        #self.nfreezepars = 0
-        self.pars = np.zeros(self.nstars*4,float)
-        self.perror = np.zeros(self.nstars*4,float)
+        self.freezepars = np.zeros(self.nstars*3,bool)
         self.pixused = None
         
         # Get xdata, ydata
@@ -150,6 +148,58 @@ class GroupFitter(object):
         self.xylim = [[np.min(x),np.max(x)],[np.min(y),np.max(y)]]
         self.xydata = xydata
 
+        # Create initial sky image
+        self.sky()
+        
+    @property
+    def starheight(self):
+        return self.pars[0::3]
+
+    @property
+    def starxcen(self):
+        return self.pars[1::3]
+
+    @property
+    def starycen(self):
+        return self.pars[2::3]    
+        
+    def sky(self,method='annulus',rin=None,rout=None):
+        """ (Re)calculate the sky."""
+        resid = self.image.data-self.modelim  # remove model
+        #  get the background using SEP
+        if method=='sep':
+            bw = np.maximum(int(self.nx/10),64)
+            bh = np.maximum(int(self.ny/10),64)
+            bkg = sep.Background(resid, mask=None, bw=bw, bh=bh, fw=3, fh=3)
+            self.skyim = bkg.back()
+            # Calculate sky value for each star
+            #  use center position
+            self.starsky[:] = self.skyim[np.round(self.starxcen).astype(int),np.round(self.starycen).astype(int)]
+        elif method=='annulus':
+            if rin is None:
+                rin = self.psf.fwhm()*1.5
+            if rout is None:
+                rout = self.psf.fwhm()*2.5
+            positions = list(zip(self.starxcen,self.starycen))
+            annulus = CircularAnnulus(positions,r_in=rin,r_out=rout)
+            for i in range(self.nstars):
+                annulus_mask = annulus[i].to_mask(method='center')
+                annulus_data = annulus_mask.multiply(resid,fill_value=np.nan)
+                data = annulus_data[(annulus_mask.data>0) & np.isfinite(annulus_data)]
+                mean_sigclip, median_sigclip, _ = sigma_clipped_stats(data,stdfunc=dln.mad)
+                self.starsky[i] = mean_sigclip
+            if hasattr(self,'skyim') is False:
+                self.skyim = np.zeros(self.image.shape,float)
+            if self.skyim is None:
+                self.skyim = np.zeros(self.image.shape,float)
+            self.skyim += np.median(self.starsky)
+        else:
+            raise ValueError("Sky method "+method+" not supported")
+
+    @property
+    def skyflatten(self):
+        return self.skyim.ravel()[self.ind1]
+        
     @property
     def nfreezepars(self):
         return np.sum(self.freezepars)
@@ -186,7 +236,7 @@ class GroupFitter(object):
 
         # Freeze new stars
         oldfreezestars = self.freezestars.copy()
-        self.freezestars = np.sum(self.freezepars.reshape(self.nstars,4),axis=1)==4
+        self.freezestars = np.sum(self.freezepars.reshape(self.nstars,3),axis=1)==3
         #self.nfreezestars = np.sum(self.freezestars)
         # Subtract model for newly frozen stars
         newfreezestars, = np.where((oldfreezestars==False) & (self.freezestars==True))
@@ -195,7 +245,7 @@ class GroupFitter(object):
             newmodel = self.image.data.copy()*0
             for i in newfreezestars:
                 print('freeze: subtracting model for star ',i)
-                pars1 = self.pars[i*4:(i+1)*4]
+                pars1 = self.pars[i*3:(i+1)*3]
                 #xind = self.xlist[i]
                 #yind = self.ylist[i]
                 #invindex = self.invindexlist[i]
@@ -218,23 +268,39 @@ class GroupFitter(object):
     def unfreeze(self):
         """ Unfreeze all parameters and stars."""
         self.freezestars = np.zeros(self.nstars,bool)
-        self.freezepars = np.zeros(self.nstars*4,bool)
+        self.freezepars = np.zeros(self.nstars*3,bool)
         self.resflatten = self.imflatten.copy()
-    
-    def model(self,x,*args,trim=False):
-        """ model function."""
 
-        if self.verbose:
+    @property
+    def modelim(self):
+        """ This returns the full image of the current best model (no sky)
+            using the PARS values."""
+        im = np.zeros(self.image.size,float)
+        im[self.ind1] = self.modelflatten
+        im = im.reshape(self.image.shape)
+        return im
+        
+    @property
+    def modelflatten(self):
+        """ This returns the current best model (no sky) for only the "flatten" pixels
+            using the PARS values."""
+        return self.model(np.arange(10),*self.pars,allparams=True,verbose=False)
+        
+    def model(self,x,*args,trim=False,allparams=False,verbose=None):
+        """ model function."""
+        # ALLPARAMS:  all of the parameters were input
+
+        if verbose is None and self.verbose:
             print('model: ',self.niter,args)
 
         # Args are [height,xcen,ycen,sky] for all Nstars
-        # so 4*Nstars parameters
+        # so 3*Nstars parameters
 
         psf = self.psf
 
         # Figure out the parameters of ALL the stars
         #  some stars and parameters are FROZEN
-        if self.nfreezepars>0:
+        if self.nfreezepars>0 and allparams is False:
             allpars = self.pars
             allpars[~self.freezepars] = args
         else:
@@ -250,17 +316,16 @@ class GroupFitter(object):
 
         # Loop over the stars and generate the model image        
         # ONLY LOOP OVER UNFROZEN STARS
-        for i in np.arange(self.nstars)[~self.freezestars]:
-            pars = allpars[i*4:(i+1)*4]
-            #height,xcen,ycen,sky = pars
-            #xy = self.xydata[i]
+        if allparams is False:
+            dostars = np.arange(self.nstars)[~self.freezestars]
+        else:
+            dostars = np.arange(self.nstars)
+        for i in dostars:
+            pars = allpars[i*3:(i+1)*3]
             xind = self.xlist[i]
             yind = self.ylist[i]
             invindex = self.invindexlist[i]
             im1 = psf(xind,yind,pars)
-            #xindrel = xind-x0
-            #yindrel = yind-y0
-            #im[xindrel,yindrel] += im1
             allim[invindex] += im1
             usepix[invindex] = True
 
@@ -283,7 +348,7 @@ class GroupFitter(object):
             print('jac: ',self.njaciter,args)
 
         # Args are [height,xcen,ycen,sky] for all Nstars
-        # so 4*Nstars parameters
+        # so 3*Nstars parameters
         
         psf = self.psf
 
@@ -311,7 +376,7 @@ class GroupFitter(object):
         # Loop over the stars and generate the model image        
         # ONLY LOOP OVER UNFROZEN STARS
         for i in np.arange(self.nstars)[~self.freezestars]:
-            pars = allpars[i*4:(i+1)*4]
+            pars = allpars[i*3:(i+1)*3]
             xy = self.xydata[i]
             xind = self.xlist[i]
             yind = self.ylist[i]
@@ -321,10 +386,10 @@ class GroupFitter(object):
                 m,jac1 = psf.jac(xdata,*pars,retmodel=True)
             else:
                 jac1 = psf.jac(xdata,*pars)
-            jac[invindex,i*4] = jac1[:,0]
-            jac[invindex,i*4+1] = jac1[:,1]
-            jac[invindex,i*4+2] = jac1[:,2]
-            jac[invindex,i*4+3] = jac1[:,3]
+            jac[invindex,i*3] = jac1[:,0]
+            jac[invindex,i*3+1] = jac1[:,1]
+            jac[invindex,i*3+2] = jac1[:,2]
+            #jac[invindex,i*4+3] = jac1[:,3]
             if retmodel:
                 im[invindex] += m
             usepix[invindex] = True
@@ -360,7 +425,7 @@ class GroupFitter(object):
 
     
 def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=1.0,nofreeze=False,
-        nobacksub=False,freezesky=False,verbose=False):
+        verbose=False):
     """
     Fit PSF to group of stars in an image.
 
@@ -382,10 +447,6 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=1.0,nofr
        Minimum percent change in the parameters to allow until the solution is
        considered converged and the iteration loop is stopped.  Only for methods
        "qr" and "svd".  Default is 1.0.
-    freezesky : boolean, optional
-       Do not fit the sky parameters for each star.  Default is False.
-    nobacksub : boolean, optional
-       Do not subtract a background.  Default is False.
     verbose : boolean, optional
        Verbose output.
 
@@ -407,18 +468,13 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=1.0,nofr
 
     start = time.time()
     
-    for n in ['height','x','y','sky']:
+    for n in ['height','x','y']:
         if n not in cat.keys():
-            raise ValueError('Cat must have height, x, y and sky columns')
+            raise ValueError('Cat must have height, x, and y columns')
     
     # jac will be [Npix,Npars]
-    # where Npars = 4*nstars for height,xcen,ycen,sky
+    # where Npars = 3*nstars for height,xcen,ycen,sky
 
-    # once a star's parameters have stopped varying below some threshold, hold that
-    #  star fixed and remove it from the variables/parameters being fit.
-    #  basically just subtract the best-fit model from the image and continue with the other stars
-
-    # should I use sparse matrix operations???
 
     # SPARSE MATRIX OPERATIONS!!!!
 
@@ -426,59 +482,35 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=1.0,nofr
     
     nx,ny = image.data.shape
 
-    # Local copy of image
-    im = image.copy()
-    
-    # Subtract the background
-    if not nobacksub:
-        # Get the background using SEP
-        bw = np.maximum(int(nx/10),64)
-        bh = np.maximum(int(ny/10),64)
-        bkg = sep.Background(im.data, bw=bw, bh=bh, fw=3, fh=3)
-        bkg_image = bkg.back()
-        # Subtract the background
-        im.data -= bkg_image
-        
-    grpfitter = GroupFitter(psf,im,cat,fitradius=fitradius,verbose=verbose)
-    xdata = np.arange(grpfitter.ntotpix)
+    # Start the Group Fitter
+    gf = GroupFitter(psf,image,cat,fitradius=fitradius,verbose=verbose)
+    xdata = np.arange(gf.ntotpix)
 
     # Perform the fitting
-    initpar = np.zeros(nstars*4,float)
-    initpar[0::4] = cat['height']
-    initpar[1::4] = cat['x']
-    initpar[2::4] = cat['y']
-    initpar[3::4] = cat['sky']
-    if not nobacksub:
-        initpar[3::4] = 0.0
+    initpar = np.zeros(nstars*3,float)
+    initpar[0::3] = cat['height']
+    initpar[1::3] = cat['x']
+    initpar[2::3] = cat['y']
 
     # Initialize catalog
     dt = np.dtype([('id',int),('height',float),('height_error',float),('x',float),
-                   ('x_error',float),('y',float),('y_error',float),('sky',float),('sky_error',float)])
+                   ('x_error',float),('y',float),('y_error',float),('sky',float)])
     outcat = np.zeros(nstars,dtype=dt)
     if 'id' in cat.keys():
         outcat['id'] = cat['id']
     else:
         outcat['id'] = np.arange(nstars)+1
 
-    # Freeze the sky parameters to zero
-    if freezesky and method!='curve_fit':
-        print('Freezing sky parameters to zero')
-        initpar[3::4] = 0
-        bestpar = initpar.copy()
-        frzpars = np.zeros(len(initpar),bool)
-        frzpars[3::4] = True
-        bestpar = grpfitter.freeze(bestpar,frzpars)
-    else:
-        bestpar = initpar.copy()
-        
     # Iterate
+    reskyiter = 2
     count = 0
     maxpercdiff = 1e10
+    bestpar = initpar.copy()
     npars = len(bestpar)
     while (count<maxiter and maxpercdiff>minpercdiff):
         start0 = time.time()
-        m,jac = grpfitter.jac(xdata,*bestpar,retmodel=True,trim=True)
-        dy = grpfitter.resflatten[grpfitter.usepix]-m
+        m,jac = gf.jac(xdata,*bestpar,retmodel=True,trim=True)
+        dy = gf.resflatten[gf.usepix]-gf.skyflatten[gf.usepix]-m
         # QR decomposition
         if str(method).lower()=='qr':
             q,r = np.linalg.qr(jac)
@@ -499,22 +531,18 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=1.0,nofr
         # Curve_fit
         elif str(method).lower()=='curve_fit':
             # Perform the fitting
-            bounds = [np.zeros(grpfitter.nstars*4,float)-np.inf,
-                      np.zeros(grpfitter.nstars*4,float)+np.inf]
-            bounds[0][0::4] = 0
-            bounds[0][1::4] = cat['x']-2
-            bounds[1][1::4] = cat['x']+2
-            bounds[0][2::4] = cat['y']-2
-            bounds[1][2::4] = cat['y']+2
-            if freezesky:
-                bestpar[3::4] = 0.0
-                bounds[0][3::4] = -1e-7  # freeze sky to zero
-                bounds[1][3::4] = 1e-7            
-            bestpar,cov = curve_fit(grpfitter.model,xdata,grpfitter.imflatten,bounds=bounds,
-                                     sigma=grpfitter.errflatten,p0=bestpar,jac=grpfitter.jac)
+            bounds = [np.zeros(gf.nstars*3,float)-np.inf,
+                      np.zeros(gf.nstars*3,float)+np.inf]
+            bounds[0][0::3] = 0
+            bounds[0][1::3] = cat['x']-2
+            bounds[1][1::3] = cat['x']+2
+            bounds[0][2::3] = cat['y']-2
+            bounds[1][2::3] = cat['y']+2
+            bestpar,cov = curve_fit(gf.model,xdata,gf.imflatten-gf.skyflatten,bounds=bounds,
+                                     sigma=gf.errflatten,p0=bestpar,jac=gf.jac)
             perror = np.sqrt(np.diag(cov))
-            grpfitter.pars = bestpar
-            grpfitter.perror = perror
+            gf.pars = bestpar
+            gf.perror = perror
             break
         else:
             raise ValueError('Only SVD, QR or curve_fit methods currently supported')
@@ -523,28 +551,25 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=1.0,nofr
         bestpar += dbeta
         diff = np.abs(bestpar-oldpar)
         percdiff = diff.copy()*0
-        percdiff[0::4] = diff[0::4]/oldpar[0::4]*100  # height
-        percdiff[1::4] = diff[1::4]*100               # x
-        percdiff[2::4] = diff[2::4]*100               # y
-        percdiff[3::4] = diff[3::4]/oldpar[3::4]*100  # height
-        #percdiff = diff/oldpar*100
-        #starmaxpercdiff = np.max(percdiff.reshape(nstars,4),axis=1)
+        percdiff[0::3] = diff[0::3]/oldpar[0::3]*100  # height
+        percdiff[1::3] = diff[1::3]*100               # x
+        percdiff[2::3] = diff[2::3]*100               # y
 
         # Freeze parameters/stars that converged
         #  also subtract models of fixed stars
         #  also return new free parameters
         if not nofreeze:
             frzpars = percdiff<=minpercdiff
-            freeparsind, = np.where(~grpfitter.freezepars)
-            grpfitter.perror[freeparsind[diff>0]] = diff[diff>0]
-            bestpar = grpfitter.freeze(bestpar,frzpars)
+            freeparsind, = np.where(~gf.freezepars)
+            gf.perror[freeparsind[diff>0]] = diff[diff>0]
+            bestpar = gf.freeze(bestpar,frzpars)
             npar = len(bestpar)
-            print('Nfrozen pars = ',grpfitter.nfreezepars)
-            print('Nfrozen stars = ',grpfitter.nfreezestars)
+            print('Nfrozen pars = ',gf.nfreezepars)
+            print('Nfrozen stars = ',gf.nfreezestars)
             print('Nfree pars = ',npar)
         else:
-            grpfitter.pars = bestpar
-            grpfitter.perror = diff
+            gf.pars = bestpar
+            gf.perror = diff
             
         maxpercdiff = np.max(percdiff)
         #perror = diff  # rough estimate
@@ -553,15 +578,17 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=1.0,nofr
         if verbose:
             print(count,bestpar,percdiff)
 
-        print('min/max X: ',np.min(grpfitter.pars[1::4]),np.max(grpfitter.pars[1::4]))
-        print('min/max Y: ',np.min(grpfitter.pars[2::4]),np.max(grpfitter.pars[2::4]))        
-            
+        print('min/max X: ',np.min(gf.pars[1::3]),np.max(gf.pars[1::3]))
+        print('min/max Y: ',np.min(gf.pars[2::3]),np.max(gf.pars[2::3]))        
+
+        # Re-estimate the sky
+        if count % reskyiter == 0:
+            print('Re-estimating the sky')
+            gf.sky()
+        
         print('iter dt = ',time.time()-start0)
             
         #import pdb; pdb.set_trace()
-            
-
-        # MAYBE DON'T SOLVE ALL FOUR (HEIGHT/X/Y/SKY) SIMULTANEOUSLY!?
 
         # Maybe fit height of each star separately using just the central 4-9 pixels?
 
@@ -569,28 +596,27 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=1.0,nofr
         # and just solve for heights as crowdsource does?
         # can tweak positions and sky after that
         
-    pars = grpfitter.pars
-    perror = grpfitter.perror
+    pars = gf.pars
+    perror = gf.perror
     if verbose:
         print('Best-fitting parameters: ',pars)
         print('Errors: ',perror)
 
     # Make final model
-    grpfitter.unfreeze()
-    model1 = grpfitter.model(xdata,*pars)
-    model = im.data.copy()*0
-    model[grpfitter.x,grpfitter.y] = model1
+    gf.unfreeze()
+    model1 = gf.model(xdata,*pars)
+    model = image.data.copy()*0
+    model[gf.x,gf.y] = model1
         
     # Put in catalog
-    outcat['height'] = pars[0::4]
-    outcat['height_error'] = perror[0::4]
-    outcat['x'] = pars[1::4]
-    outcat['x_error'] = perror[1::4]
-    outcat['y'] = pars[2::4]
-    outcat['y_error'] = perror[2::4]
-    outcat['sky'] = pars[3::4]
-    outcat['sky_error'] = perror[3::4]        
+    outcat['height'] = pars[0::3]
+    outcat['height_error'] = perror[0::3]
+    outcat['x'] = pars[1::3]
+    outcat['x_error'] = perror[1::3]
+    outcat['y'] = pars[2::3]
+    outcat['y_error'] = perror[2::3]
+    outcat['sky'] = gf.starsky
 
     print('dt = ',time.time()-start)
     
-    return outcat,model,grpfitter
+    return outcat,model,gf
