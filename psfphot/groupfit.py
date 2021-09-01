@@ -54,7 +54,6 @@ class GroupFitter(object):
         pars[1::3] = cat['x']
         pars[2::3] = cat['y']
         self.pars = pars
-        self.perror = pars.copy()*0
         self.starsky = np.zeros(self.nstars,float)
         self.njaciter = 0
         self.freezestars = np.zeros(self.nstars,bool)
@@ -153,20 +152,24 @@ class GroupFitter(object):
         
     @property
     def starheight(self):
+        """ Return the best-fit heights for all stars."""
         return self.pars[0::3]
 
     @property
     def starxcen(self):
+        """ Return the best-fit X centers for all stars."""        
         return self.pars[1::3]
 
     @property
     def starycen(self):
+        """ Return the best-fit Y centers for all stars."""        
         return self.pars[2::3]    
         
-    def sky(self,method='annulus',rin=None,rout=None):
+    def sky(self,method='sep',rin=None,rout=None):
         """ (Re)calculate the sky."""
+        # Remove the current best-fit model
         resid = self.image.data-self.modelim  # remove model
-        #  get the background using SEP
+        # SEP smoothly varying background
         if method=='sep':
             bw = np.maximum(int(self.nx/10),64)
             bh = np.maximum(int(self.ny/10),64)
@@ -175,6 +178,7 @@ class GroupFitter(object):
             # Calculate sky value for each star
             #  use center position
             self.starsky[:] = self.skyim[np.round(self.starxcen).astype(int),np.round(self.starycen).astype(int)]
+        # Annulus aperture
         elif method=='annulus':
             if rin is None:
                 rin = self.psf.fwhm()*1.5
@@ -225,15 +229,14 @@ class GroupFitter(object):
         # Update all the free parameters
         self.pars[~self.freezepars] = pars
 
+        # Update freeze values for "free" parameters
+        self.freezepars[~self.freezepars] = frzpars   # stick in the new values for the "free" parameters
+        
         # Check if we need to freeze any new parameters
         nfrz = np.sum(frzpars)
         if nfrz==0:
-            return
+            return pars
         
-        # Update freeze values for "free" parameters
-        self.freezepars[~self.freezepars] = frzpars   # stick in the new values for the "free" parameters
-        #self.nfreezepars = np.sum(self.freezepars)
-
         # Freeze new stars
         oldfreezestars = self.freezestars.copy()
         self.freezestars = np.sum(self.freezepars.reshape(self.nstars,3),axis=1)==3
@@ -428,7 +431,7 @@ class GroupFitter(object):
             return jac
 
     
-def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=1.0,nofreeze=False,
+def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,nofreeze=False,
         verbose=False):
     """
     Fit PSF to group of stars in an image.
@@ -450,7 +453,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=1.0,nofr
     minpercdiff : float, optional
        Minimum percent change in the parameters to allow until the solution is
        considered converged and the iteration loop is stopped.  Only for methods
-       "qr" and "svd".  Default is 1.0.
+       "qr" and "svd".  Default is 0.5.
     verbose : boolean, optional
        Verbose output.
 
@@ -544,13 +547,14 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=1.0,nofr
             bounds[1][2::3] = cat['y']+2
             bestpar,cov = curve_fit(gf.model,xdata,gf.imflatten-gf.skyflatten,bounds=bounds,
                                      sigma=gf.errflatten,p0=bestpar,jac=gf.jac)
+            bestmodel = gf.model(xdata,*bestpar)
             perror = np.sqrt(np.diag(cov))
+            chisq = np.sum((gf.imflatten-gf.skyflatten-bestmodel)**2/gf.errflatten**2)
             gf.pars = bestpar
-            gf.perror = perror
             break
         else:
             raise ValueError('Only SVD, QR or curve_fit methods currently supported')
-            
+        
         oldpar = bestpar.copy()
         bestpar += dbeta
         diff = np.abs(bestpar-oldpar)
@@ -565,7 +569,6 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=1.0,nofr
         if not nofreeze:
             frzpars = percdiff<=minpercdiff
             freeparsind, = np.where(~gf.freezepars)
-            gf.perror[freeparsind[diff>0]] = diff[diff>0]
             bestpar = gf.freeze(bestpar,frzpars)
             npar = len(bestpar)
             print('Nfrozen pars = ',gf.nfreezepars)
@@ -573,14 +576,19 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=1.0,nofr
             print('Nfree pars = ',npar)
         else:
             gf.pars = bestpar
-            gf.perror = diff
             
         maxpercdiff = np.max(percdiff)
-        #perror = diff  # rough estimate
+
+        # Get model and chisq
+        if method != 'curve_fit':
+            bestmodel = gf.model(xdata,*gf.pars,allparams=True)
+            resid = gf.imflatten-gf.skyflatten-bestmodel
+            chisq = np.sum(resid**2/gf.errflatten**2)
+            
         count += 1        
         
         if verbose:
-            print(count,bestpar,percdiff)
+            print(count,bestpar,percdiff,chisq)
 
         print('min/max X: ',np.min(gf.pars[1::3]),np.max(gf.pars[1::3]))
         print('min/max Y: ',np.min(gf.pars[2::3]),np.max(gf.pars[2::3]))        
@@ -599,16 +607,38 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=1.0,nofr
         # Maybe assume that the initial positions and sky subtraction are pretty good
         # and just solve for heights as crowdsource does?
         # can tweak positions and sky after that
-        
-    pars = gf.pars
-    perror = gf.perror
-    if verbose:
-        print('Best-fitting parameters: ',pars)
-        print('Errors: ',perror)
+
+        # WHAT'S THE BEST WAY TO ESTIMATE ERRORS IN LEAST-SQUARED PROBLEMS!!
+        # use chi-squared for each parameter
+        # jacobian?
+
 
     # Make final model
     gf.unfreeze()
     model = gf.modelim+gf.skyim
+        
+    # Estimate uncertainties
+    if method != 'curve_fit':
+        # https://stats.stackexchange.com/questions/93316/parameter-uncertainty-after-non-linear-least-squares-estimation
+        # more background here, too: http://ceres-solver.org/nnls_covariance.html
+        # Hessian = J.T * T, Hessian Matrix
+        jac = gf.jac(xdata,*gf.pars)
+        hess = jac.T @ jac
+        # cov = H-1, covariance matrix is inverse of Hessian matrix
+        cov_orig = np.linalg.inv(hess)
+        # Rescale to get an unbiased estimate
+        # cov_scaled = cov * (RSS/(m-n)), where m=number of measurements, n=number of parameters
+        # RSS = residual sum of squares
+        #  using rss gives values consistent with what curve_fit returns
+        cov = cov_orig * (np.sum(resid**2)/(gf.ntotpix-len(gf.pars)))
+        #cov = cov_orig * (chisq/(gf.ntotpix-len(gf.pars)))  # what MPFITFUN suggests, but very small
+        perror = np.sqrt(np.diag(cov))
+        
+    pars = gf.pars
+    if verbose:
+        print('Best-fitting parameters: ',pars)
+        print('Errors: ',perror)
+
         
     # Put in catalog
     outcat['height'] = pars[0::3]
