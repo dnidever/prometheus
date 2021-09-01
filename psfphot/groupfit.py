@@ -34,17 +34,18 @@ from astropy.stats import sigma_clipped_stats
 class GroupFitter(object):
 
     def __init__(self,psf,image,cat,fitradius=None,verbose=False):
+        # Save the input values
         self.verbose = verbose
         self.psf = psf
         self.image = image
         self.cat = cat
-        self.nstars = np.size(cat)
-        self.niter = 0
-        self.npsfpix = psf.npix
-        nx,ny = image.data.shape
+        self.nstars = np.size(cat)  # number of stars
+        self.niter = 0              # number of iterations in the solver
+        self.npsfpix = psf.npix     # shape of PSF
+        nx,ny = image.data.shape    # save image dimensions
         self.nx = nx
         self.ny = ny
-        if fitradius is None:
+        if fitradius is None:       # PSF fitting radius
             fitradius = psf.fwhm()
         self.fitradius = fitradius
         self.nfitpix = int(np.ceil(fitradius))  # +/- nfitpix
@@ -54,13 +55,14 @@ class GroupFitter(object):
         pars[1::3] = cat['x']
         pars[2::3] = cat['y']
         self.pars = pars
+        # Sky and Niter arrays for the stars
         self.starsky = np.zeros(self.nstars,float)
         self.starniter = np.zeros(self.nstars,int)
-        self.njaciter = 0
+        self.njaciter = 0  # initialize njaciter
+        # Initialize the freezepars and freezestars arrays
         self.freezestars = np.zeros(self.nstars,bool)
         self.freezepars = np.zeros(self.nstars*3,bool)
-        self.pixused = None
-        self.niter = 0
+        self.pixused = None   # initialize pixused
         
         # Get xdata, ydata
         xydata = []
@@ -130,7 +132,7 @@ class GroupFitter(object):
         
         imflatten = image.data.ravel()[uind1]
         errflatten = image.uncertainty.array.ravel()[uind1]
-            
+        # Save information on the "flattened" arrays
         self.ntotpix = ntotpix
         self.imflatten = imflatten
         self.resflatten = imflatten.copy()
@@ -352,10 +354,10 @@ class GroupFitter(object):
         return allim
 
     
-    def jac(self,x,*args,retmodel=False,trim=False):
+    def jac(self,x,*args,retmodel=False,trim=False,allparams=False,verbose=None):
         """ jacobian."""
 
-        if self.verbose:
+        if verbose is None and self.verbose:
             print('jac: ',self.njaciter,args)
 
         # Args are [height,xcen,ycen,sky] for all Nstars
@@ -365,7 +367,7 @@ class GroupFitter(object):
 
         # Figure out the parameters of ALL the stars
         #  some stars and parameters are FROZEN
-        if self.nfreezepars>0:
+        if self.nfreezepars>0 and allparams is False:
             allpars = self.pars
             if len(args) != (len(self.pars)-self.nfreezepars):
                 print('problem')
@@ -386,7 +388,11 @@ class GroupFitter(object):
 
         # Loop over the stars and generate the model image        
         # ONLY LOOP OVER UNFROZEN STARS
-        for i in np.arange(self.nstars)[~self.freezestars]:
+        if allparams is False:
+            dostars = np.arange(self.nstars)[~self.freezestars]
+        else:
+            dostars = np.arange(self.nstars)
+        for i in dostars:
             pars = allpars[i*3:(i+1)*3]
             xy = self.xydata[i]
             xind = self.xlist[i]
@@ -404,16 +410,9 @@ class GroupFitter(object):
             if retmodel:
                 im[invindex] += m
             usepix[invindex] = True
-            
-            #xindrel = xind-x0
-            #yindrel = yind-y0
-            #jac[xindrel,yindrel,i*4] = jac1[:,0]
-            #jac[xindrel,yindrel,i*4+1] = jac1[:,1]
-            #jac[xindrel,yindrel,i*4+2] = jac1[:,2]
-            #jac[xindrel,yindrel,i*4+3] = jac1[:,3]            
 
         # Remove frozen columns
-        if self.nfreezepars>0:
+        if self.nfreezepars>0 and allparams is False:
             jac = np.delete(jac,np.arange(len(self.pars))[self.freezepars],axis=1)
 
 
@@ -434,6 +433,31 @@ class GroupFitter(object):
         else:
             return jac
 
+        
+    def cov(self):
+        """ Determine the covariance matrix."""
+
+        # https://stats.stackexchange.com/questions/93316/parameter-uncertainty-after-non-linear-least-squares-estimation
+        # more background here, too: http://ceres-solver.org/nnls_covariance.html        
+        xdata = np.arange(self.ntotpix)
+        # Hessian = J.T * T, Hessian Matrix
+        mjac = self.jac(xdata,*self.pars,allparams=True,trim=False,verbose=False)
+        hess = mjac.T @ mjac
+        # cov = H-1, covariance matrix is inverse of Hessian matrix
+        cov_orig = np.linalg.inv(hess)
+        # Rescale to get an unbiased estimate
+        # cov_scaled = cov * (RSS/(m-n)), where m=number of measurements, n=number of parameters
+        # RSS = residual sum of squares
+        #  using rss gives values consistent with what curve_fit returns
+        bestmodel = self.model(xdata,*self.pars,allparams=True,trim=False,verbose=False)
+        resid = self.imflatten-self.skyflatten-bestmodel
+        cov = cov_orig * (np.sum(resid**2)/(self.ntotpix-len(self.pars)))
+        #chisq = np.sum(resid**2/self.errflatten**2)        
+        #cov = cov_orig * (chisq/(self.ntotpix-len(self.pars)))  # what MPFITFUN suggests, but very small
+        
+        return cov
+
+        
     
 def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,reskyiter=2,
         nofreeze=False,verbose=False):
@@ -544,6 +568,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
             perror = np.sqrt(np.diag(cov))
             chisq = np.sum((gf.imflatten-gf.skyflatten-bestmodel)**2/gf.errflatten**2)
             gf.pars = bestpar
+            gf.chisq = chisq
             break  # no iteration
         else:
             raise ValueError('Only SVD, QR or curve_fit methods currently supported')
@@ -578,7 +603,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
             bestmodel = gf.model(xdata,*gf.pars,allparams=True)
             resid = gf.imflatten-gf.skyflatten-bestmodel
             chisq = np.sum(resid**2/gf.errflatten**2)
-            
+            gf.chisq = chisq
 
         
         if verbose:
@@ -608,26 +633,15 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     #  if we stopped "prematurely" then not all star were frozen
     #  and didn't have starniter set
     gf.starniter[gf.starniter==0] = gf.niter
-        
+    
     # Make final model
     gf.unfreeze()
     model = gf.modelim+gf.skyim
         
     # Estimate uncertainties
     if method != 'curve_fit':
-        # https://stats.stackexchange.com/questions/93316/parameter-uncertainty-after-non-linear-least-squares-estimation
-        # more background here, too: http://ceres-solver.org/nnls_covariance.html
-        # Hessian = J.T * T, Hessian Matrix
-        jac = gf.jac(xdata,*gf.pars)
-        hess = jac.T @ jac
-        # cov = H-1, covariance matrix is inverse of Hessian matrix
-        cov_orig = np.linalg.inv(hess)
-        # Rescale to get an unbiased estimate
-        # cov_scaled = cov * (RSS/(m-n)), where m=number of measurements, n=number of parameters
-        # RSS = residual sum of squares
-        #  using rss gives values consistent with what curve_fit returns
-        cov = cov_orig * (np.sum(resid**2)/(gf.ntotpix-len(gf.pars)))
-        #cov = cov_orig * (chisq/(gf.ntotpix-len(gf.pars)))  # what MPFITFUN suggests, but very small
+        # Calculate covariance matrix
+        cov = gf.cov()
         perror = np.sqrt(np.diag(cov))
         
     pars = gf.pars
