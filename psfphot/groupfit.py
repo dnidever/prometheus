@@ -11,6 +11,7 @@ __version__ = '20210826'  # yyyymmdd
 import os
 import sys
 import numpy as np
+import scipy
 import warnings
 from astropy.io import fits
 from astropy.table import Table
@@ -206,22 +207,27 @@ class GroupFitter(object):
 
     @property
     def skyflatten(self):
+        """ Return the sky values for the pixels that we are fitting."""
         return self.skyim.ravel()[self.ind1]
         
     @property
     def nfreezepars(self):
+        """ Return the number of frozen parameters."""
         return np.sum(self.freezepars)
 
     @property
     def nfreepars(self):
+        """ Return the number of free parameters."""
         return np.sum(~self.freezepars)
 
     @property
     def nfreezestars(self):
+        """ Return the number of frozen stars."""
         return np.sum(self.freezestars)
 
     @property
     def nfreestars(self):
+        """ Return the number of free stars."""
         return np.sum(~self.freezestars)    
         
     def freeze(self,pars,frzpars):
@@ -300,7 +306,7 @@ class GroupFitter(object):
         return self.model(np.arange(10),*self.pars,allparams=True,verbose=False)
         
     def model(self,x,*args,trim=False,allparams=False,verbose=None):
-        """ model function."""
+        """ Calculate the model for the pixels we are fitting."""
         # ALLPARAMS:  all of the parameters were input
 
         if verbose is None and self.verbose:
@@ -355,7 +361,7 @@ class GroupFitter(object):
 
     
     def jac(self,x,*args,retmodel=False,trim=False,allparams=False,verbose=None):
-        """ jacobian."""
+        """ Calculate the jacobian for the pixels and parameters we are fitting"""
 
         if verbose is None and self.verbose:
             print('jac: ',self.njaciter,args)
@@ -473,8 +479,8 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     cat : table
        Catalog with initial height/x/y values for the stars to use to fit the PSF.
     method : str, optional
-       Method to use for solving the non-linear least squares problem: "qr",
-       "svd", and "curve_fit".  Default is "qr".
+       Method to use for solving the non-linear least squares problem: "cholesky",
+       "qr", "svd", and "curve_fit".  Default is "cholesky".
     maxiter : int, optional
        Maximum number of iterations to allow.  Only for methods "qr" or "svd".
        Default is 10.
@@ -533,14 +539,17 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     npars = len(bestpar)
     while (gf.niter<maxiter and maxpercdiff>minpercdiff):
         start0 = time.time()
+        # Get the Jacobian and model
+        #  only for pixels that are affected by the "free" parameters
         m,jac = gf.jac(xdata,*bestpar,retmodel=True,trim=True)
+        # Residuals
         dy = gf.resflatten[gf.usepix]-gf.skyflatten[gf.usepix]-m
         # QR decomposition
         if str(method).lower()=='qr':
             q,r = np.linalg.qr(jac)
             rinv = np.linalg.inv(r)
             dbeta = rinv @ (q.T @ dy)
-        # SVD:
+        # Singular Value decomposition (SVD)
         elif str(method).lower()=='svd':
             u,s,vt = np.linalg.svd(jac)
             #u,s,vt = sparse.linalg.svds(jac)
@@ -552,6 +561,28 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
             sinv[s!=0] = 1/s[s!=0]
             npars = len(s)
             dbeta = vt.T @ ((u.T @ dy)[0:npars]*sinv)
+
+        # Cholesky decomposition
+        elif str(method).lower()=='cholesky':
+            # J * x = resid
+            # J.T J x = J.T resid
+            # A = (J.T @ J)
+            # b = np.dot(J.T*dy)
+
+            # Now solve linear least squares with cholesky decomposition
+            # Ax = b
+            # decompose A into L L* using cholesky decomposition
+            #  L and L* are triangular matrices
+            #  L* is conjugate transpose
+            # solve Ly=b (where L*x=y) for y by forward substitution
+            # finally solve L*x = y for x by back substitution
+            A = jac.T @ jac
+            b = np.dot(jac.T,dy)
+            L = np.linalg.cholesky(A)
+            Lstar = L.T.conj()   # Lstar is conjugate transpose
+            y = scipy.linalg.solve_triangular(L,b)
+            dbeta = scipy.linalg.solve_triangular(Lstar,y)
+            
         # Curve_fit
         elif str(method).lower()=='curve_fit':
             # Perform the fitting
@@ -571,7 +602,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
             gf.chisq = chisq
             break  # no iteration
         else:
-            raise ValueError('Only SVD, QR or curve_fit methods currently supported')
+            raise ValueError('Only cholesky, svd, qr or curve_fit methods currently supported')
 
         # Update parameters
         oldpar = bestpar.copy()
@@ -630,7 +661,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
         # can tweak positions and sky after that
 
     # Check that all starniter are set properly
-    #  if we stopped "prematurely" then not all star were frozen
+    #  if we stopped "prematurely" then not all stars were frozen
     #  and didn't have starniter set
     gf.starniter[gf.starniter==0] = gf.niter
     
