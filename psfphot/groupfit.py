@@ -31,7 +31,99 @@ from astropy.stats import sigma_clipped_stats
 
 # Fit a PSF model to multiple stars in an image
 
+def qr_jac_solve(jac,resid):
+    """ Solve part of a non-linear least squares equation using QR decomposition
+        using the Jacobian."""
+    # jac: Jacobian matrix, first derivatives, [Npix, Npars]
+    # resid: residuals [Npix]
+    
+    # QR decomposition
+    q,r = np.linalg.qr(jac)
+    rinv = np.linalg.inv(r)
+    dbeta = rinv @ (q.T @ resid)
+    return dbeta
 
+def svd_jac_solve(jac,resid):
+    """ Solve part of a non-linear least squares equation using Single Value
+        Decomposition (SVD) using the Jacobian."""
+    # jac: Jacobian matrix, first derivatives, [Npix, Npars]
+    # resid: residuals [Npix]
+    
+    # Singular Value decomposition (SVD)
+    u,s,vt = np.linalg.svd(jac)
+    #u,s,vt = sparse.linalg.svds(jac)
+    # u: [Npix,Npix]
+    # s: [Npars]
+    # vt: [Npars,Npars]
+    # dy: [Npix]
+    sinv = s.copy()*0  # pseudo-inverse
+    sinv[s!=0] = 1/s[s!=0]
+    npars = len(s)
+    dbeta = vt.T @ ((u.T @ resid)[0:npars]*sinv)
+    return dbeta
+
+def cholesky_jac_sparse_solve(jac,resid):
+    """ Solve part a non-linear least squares equation using Cholesky decomposition
+        using the Jacobian, with sparse matrices."""
+    # jac: Jacobian matrix, first derivatives, [Npix, Npars]
+    # resid: residuals [Npix]
+
+    # J * x = resid
+    # J.T J x = J.T resid
+    # A = (J.T @ J)
+    # b = np.dot(J.T*dy)
+    # J is [3*Nstar,Npix]
+    # A is [3*Nstar,3*Nstar]
+    from scipy import sparse
+    jac = sparse.csc_matrix(jac)  # make it sparse
+    A = jac.T @ jac
+    b = jac.T.dot(resid)
+    # Now solve linear least squares with sparse
+    # Ax = b
+    from sksparse.cholmod import cholesky
+    factor = cholesky(A)
+    dbeta = factor(b)
+    
+    # Precondition?
+
+    return dbeta
+    
+def cholesky_jac_solve(jac,resid):
+    """ Solve part a non-linear least squares equation using Cholesky decomposition
+        using the Jacobian."""
+    # jac: Jacobian matrix, first derivatives, [Npix, Npars]
+    # resid: residuals [Npix]
+    
+    # J * x = resid
+    # J.T J x = J.T resid
+    # A = (J.T @ J)
+    # b = np.dot(J.T*dy)
+    A = jac.T @ jac
+    b = np.dot(jac.T,resid)
+
+    # Now solve linear least squares with cholesky decomposition
+    # Ax = b    
+    return cholesky_solve(A,b)
+
+
+def cholesky_solve(A,b):
+    """ Solve linear least squares problem with Cholesky decomposition."""
+
+    # Now solve linear least squares with cholesky decomposition
+    # Ax = b
+    # decompose A into L L* using cholesky decomposition
+    #  L and L* are triangular matrices
+    #  L* is conjugate transpose
+    # solve Ly=b (where L*x=y) for y by forward substitution
+    # finally solve L*x = y for x by back substitution
+
+    L = np.linalg.cholesky(A)
+    Lstar = L.T.conj()   # Lstar is conjugate transpose
+    y = scipy.linalg.solve_triangular(L,b)
+    x = scipy.linalg.solve_triangular(Lstar,y)
+    return x
+
+    
 class GroupFitter(object):
 
     def __init__(self,psf,image,cat,fitradius=None,verbose=False):
@@ -154,22 +246,47 @@ class GroupFitter(object):
 
         # Create initial sky image
         self.sky()
-        
+
+    @property
+    def starpars(self):
+        """ Return the [height,xcen,ycen] parameters in [Nstars,3] array.
+            You can GET a star's parameters like this:
+            pars = self.starpars[4]
+            You can also SET a star's parameters a similar way:
+            self.starpars[4] = pars
+        """
+        return self.pars.reshape(self.nstars,3)
+    
     @property
     def starheight(self):
         """ Return the best-fit heights for all stars."""
         return self.pars[0::3]
 
+    @starheight.setter
+    def starheight(self,val):
+        """ Set starheight values."""
+        self.pars[0::3] = val
+    
     @property
     def starxcen(self):
         """ Return the best-fit X centers for all stars."""        
         return self.pars[1::3]
 
+    @starxcen.setter
+    def starxcen(self,val):
+        """ Set starxcen values."""
+        self.pars[1::3] = val
+    
     @property
     def starycen(self):
         """ Return the best-fit Y centers for all stars."""        
         return self.pars[2::3]    
-        
+
+    @starycen.setter
+    def starycen(self,val):
+        """ Set starycen values."""
+        self.pars[2::3] = val
+    
     def sky(self,method='sep',rin=None,rout=None):
         """ (Re)calculate the sky."""
         # Remove the current best-fit model
@@ -216,20 +333,30 @@ class GroupFitter(object):
         return np.sum(self.freezepars)
 
     @property
+    def freepars(self):
+        """ Return the free parameters."""
+        return ~self.freezepars
+    
+    @property
     def nfreepars(self):
         """ Return the number of free parameters."""
-        return np.sum(~self.freezepars)
-
+        return np.sum(self.freepars)
+    
     @property
     def nfreezestars(self):
         """ Return the number of frozen stars."""
         return np.sum(self.freezestars)
 
     @property
+    def freestars(self):
+        """ Return the free stars."""
+        return ~self.freezestars
+    
+    @property
     def nfreestars(self):
         """ Return the number of free stars."""
-        return np.sum(~self.freezestars)    
-        
+        return np.sum(self.freestars)    
+    
     def freeze(self,pars,frzpars):
         """ Freeze stars and parameters"""
         # PARS: best-fit values of free parameters
@@ -237,10 +364,10 @@ class GroupFitter(object):
         #            should now be frozen
 
         # Update all the free parameters
-        self.pars[~self.freezepars] = pars
+        self.pars[self.freepars] = pars
 
         # Update freeze values for "free" parameters
-        self.freezepars[~self.freezepars] = frzpars   # stick in the new values for the "free" parameters
+        self.freezepars[self.freepars] = frzpars   # stick in the new values for the "free" parameters
         
         # Check if we need to freeze any new parameters
         nfrz = np.sum(frzpars)
@@ -321,7 +448,7 @@ class GroupFitter(object):
         #  some stars and parameters are FROZEN
         if self.nfreezepars>0 and allparams is False:
             allpars = self.pars
-            allpars[~self.freezepars] = args
+            allpars[self.freepars] = args
         else:
             allpars = args
         
@@ -336,7 +463,7 @@ class GroupFitter(object):
         # Loop over the stars and generate the model image        
         # ONLY LOOP OVER UNFROZEN STARS
         if allparams is False:
-            dostars = np.arange(self.nstars)[~self.freezestars]
+            dostars = np.arange(self.nstars)[self.freestars]
         else:
             dostars = np.arange(self.nstars)
         for i in dostars:
@@ -378,7 +505,7 @@ class GroupFitter(object):
             if len(args) != (len(self.pars)-self.nfreezepars):
                 print('problem')
                 import pdb; pdb.set_trace()
-            allpars[~self.freezepars] = args
+            allpars[self.freepars] = args
         else:
             allpars = args
         
@@ -395,7 +522,7 @@ class GroupFitter(object):
         # Loop over the stars and generate the model image        
         # ONLY LOOP OVER UNFROZEN STARS
         if allparams is False:
-            dostars = np.arange(self.nstars)[~self.freezestars]
+            dostars = np.arange(self.nstars)[self.freestars]
         else:
             dostars = np.arange(self.nstars)
         for i in dostars:
@@ -439,13 +566,57 @@ class GroupFitter(object):
         else:
             return jac
 
-    def htfit(self):
+    def heightfit(self,trim=True):
         """ Fit the heights only for the stars."""
 
+        # linear least squares problem
+        # Ax = b
+        # A is the set of models pixel values for height, [Npix, Nstar]
+        # x is heights [Nstar] we are solving for
+        # b is pixel values, oru residflatten values
         
+        # All parameters
+        allpars = self.pars
+        
+        A = np.zeros((self.ntotpix,self.nstars),float)
+        usepix = np.zeros(self.ntotpix,bool)
 
-        import pdb; pdb.set_trace()
+        # Loop over the stars and generate the model image        
+        # ONLY LOOP OVER UNFROZEN STARS
+        dostars = np.arange(self.nstars)[self.freestars]
+        guess = np.zeros(self.nfreestars,float)
+        for count,i in enumerate(dostars):
+            pars = allpars[i*3:(i+1)*3].copy()
+            guess[count] = pars[0]
+            pars[0] = 1.0  # unit height
+            xind = self.xlist[i]
+            yind = self.ylist[i]
+            invindex = self.invindexlist[i]
+            im1 = self.psf(xind,yind,pars)
+            A[invindex,i] = im1
+            usepix[invindex] = True
 
+        nusepix = np.sum(usepix)
+
+        # Residual data
+        dy = self.resflatten-self.skyflatten
+        
+        if trim and nusepix<self.ntotpix:
+            unused = np.arange(self.ntotpix)[~usepix]
+            A = np.delete(A,unused,axis=0)
+            dy = dy[usepix]
+
+        from scipy import sparse
+        A = sparse.csc_matrix(A)   # make sparse
+
+        # Use guess to get close to the solution
+        dy2 = dy - A.dot(guess)
+        par = sparse.linalg.lsqr(A,dy2,atol=1e-4,btol=1e-4)
+        dheight = par[0]
+        height = guess+dheight
+        
+        # preconditioning!
+        
         return height
 
     
@@ -455,9 +626,96 @@ class GroupFitter(object):
         # Start with the residual image and all stars subtracted.
         # Then add in the model of one star at a time and centroid it with the best-fitting model.
 
-        import pdb; pdb.set_trace()
+        # All parameters
+        allpars = self.pars
 
-        return xcen,ycen
+        resid = self.image.data.copy()-self.skyim
+        
+        # Generate full models 
+        # Loop over the stars and generate the model image        
+        # ONLY LOOP OVER UNFROZEN STARS
+        fmodels = []
+        #fjac = []
+        models = []
+        jac = []
+        dostars = np.arange(self.nstars)[self.freestars]
+        usepix = np.zeros(self.ntotpix,bool)        
+        for count,i in enumerate(dostars):
+            pars = self.starpars[i]
+            #pars = allpars[i*3:(i+1)*3]
+            # Full models
+            fxind = self.fxlist[i]
+            fyind = self.fylist[i]
+            fim1 = self.psf(fxind,fyind,pars)
+            resid[fxind,fyind] -= fim1
+            fmodels.append(fim1)            
+            #fjac.append(fjac1)
+            #fusepix[finvindex] = True
+            # Only fitting models
+            xind = self.xlist[i]
+            yind = self.ylist[i]
+            invindex = self.invindexlist[i]
+            im1,jac1 = self.psf.jac((xind,yind),*pars,retmodel=True)
+            models.append(im1)
+            jac.append(jac1)
+            #usepix[invindex] = True
+
+        nusepix = np.sum(usepix)
+
+        # Residual data
+        #dy = self.resflatten-self.skyflatten
+
+        # Loop over all free stars and fit centroid
+        xnew = np.zeros(self.nfreestars,float)
+        ynew = np.zeros(self.nfreestars,float)
+        for count,i in enumerate(dostars):
+            pars = self.starpars[i]
+            freezepars = self.freezepars[i*3:(i+1)*3]
+            xnew[count] = pars[1]
+            ynew[count] = pars[2]
+
+            # Both x/y frozen
+            if freezepars[1]==True and freezepars[2]==True:
+                continue
+            
+            # Add the model for this star back in
+            fxind = self.fxlist[i]
+            fyind = self.fylist[i]
+            fmodel1 = fmodels[count]
+            #fjac1 = fjac[count]
+            #fjac1 = np.delete(fjac1,0,axis=1)
+            resid[fxind,fyind] += fmodel1
+
+            # crowdsource, does a sum
+            #  y = 2 / integral(P*P*W) * integral(x*(I-P)*W)
+            #  where x = x/y coordinate, I = isolated stamp, P = PSF model, W = weight
+
+            # Use the derivatives instead
+            xind = self.xlist[i]
+            yind = self.ylist[i]
+            jac1 = jac[count]
+            jac1 = np.delete(jac1,0,axis=1)  # delete height column
+            resid1 = resid[xind,yind] 
+
+            # Use cholesky to solve
+            # If only one position frozen, solve for the free one
+            # X frozen, solve for Y
+            if freezepars[1]==True:
+                jac1 = np.delete(jac1,0,axis=1)
+                dbeta = cholesky_jac_solve(jac1,resid1)
+                ynew[count] += dbeta[0]
+            # Y frozen, solve for X
+            elif freezepars[2]==True:
+                jac1 = np.delete(jac1,1,axis=1)
+                dbeta = cholesky_jac_solve(jac1,resid1)
+                xnew[count] += dbeta[0]
+            # Solve for both X and Y
+            else:
+                dbeta = cholesky_jac_solve(jac1,resid1)
+                xnew[count] += dbeta[0]
+                ynew[count] += dbeta[1]            
+                
+        return xnew,ynew
         
         
     def cov(self):
@@ -557,78 +815,57 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     maxpercdiff = 1e10
     bestpar = initpar.copy()
     npars = len(bestpar)
+    method = str(method).lower()
     while (gf.niter<maxiter and maxpercdiff>minpercdiff):
         start0 = time.time()
         # Get the Jacobian and model
         #  only for pixels that are affected by the "free" parameters
-        m,jac = gf.jac(xdata,*bestpar,retmodel=True,trim=True)
-        # Residuals
-        dy = gf.resflatten[gf.usepix]-gf.skyflatten[gf.usepix]-m
+        if method != 'htcen' and method != 'curve_fit':
+            m,jac = gf.jac(xdata,*bestpar,retmodel=True,trim=True)
+            # Residuals
+            dy = gf.resflatten[gf.usepix]-gf.skyflatten[gf.usepix]-m
+
         # QR decomposition
-        if str(method).lower()=='qr':
-            q,r = np.linalg.qr(jac)
-            rinv = np.linalg.inv(r)
-            dbeta = rinv @ (q.T @ dy)
+        if method=='qr':
+            dbeta = qr_jac_solve(jac,dy)
+            
         # Singular Value decomposition (SVD)
-        elif str(method).lower()=='svd':
-            u,s,vt = np.linalg.svd(jac)
-            #u,s,vt = sparse.linalg.svds(jac)
-            # u: [Npix,Npix]
-            # s: [Npars]
-            # vt: [Npars,Npars]
-            # dy: [Npix]
-            sinv = s.copy()*0  # pseudo-inverse
-            sinv[s!=0] = 1/s[s!=0]
-            npars = len(s)
-            dbeta = vt.T @ ((u.T @ dy)[0:npars]*sinv)
+        elif method=='svd':
+            dbeta = svd_jac_solve(jac,dy)
 
         # Cholesky decomposition
-        elif str(method).lower()=='cholesky':
-            # J * x = resid
-            # J.T J x = J.T resid
-            # A = (J.T @ J)
-            # b = np.dot(J.T*dy)
-            A = jac.T @ jac
-            b = np.dot(jac.T,dy)
-            
-            # Now solve linear least squares with cholesky decomposition
-            # Ax = b
-            # decompose A into L L* using cholesky decomposition
-            #  L and L* are triangular matrices
-            #  L* is conjugate transpose
-            # solve Ly=b (where L*x=y) for y by forward substitution
-            # finally solve L*x = y for x by back substitution
-
-            L = np.linalg.cholesky(A)
-            Lstar = L.T.conj()   # Lstar is conjugate transpose
-            y = scipy.linalg.solve_triangular(L,b)
-            dbeta = scipy.linalg.solve_triangular(Lstar,y)
+        elif method=='cholesky':
+            dbeta = cholesky_jac_solve(jac,dy)
 
         # Sparse matrix cholesky solution
-        elif str(method).lower()=='sparse':
-            # J * x = resid
-            # J.T J x = J.T resid
-            # A = (J.T @ J)
-            # b = np.dot(J.T*dy)
-            from scipy import sparse
-            jac = sparse.csc_matrix(jac)  # make it sparse
-            A = jac.T @ jac
-            b = jac.T.dot(dy)
-            # Now solve linear least squares with sparse
-            # Ax = b
-            from sksparse.cholmod import cholesky
-            factor = cholesky(A)
-            dbeta = factor(b)
+        elif method=='sparse':
+            # Precondition?            
+            dbeta = cholesky_jac_sparse_solve(jac,dy)
             
         # htcen, crowdsource method of solving heights/fluxes first
         #  and then centroiding to get x/y
-        elif str(method).lower()=='cholesky':
-            #gf.heightfit()
-            #gf.centroid()
-            import pdb; pdb.set_trace()
+        elif method=='htcen':
+            dbeta = np.zeros(3*gf.nfreestars,float)
+            # Solve for the heights
+            newht = gf.heightfit()
+            dbeta[0::3] = gf.starheight[gf.freestars] - newht
+            gf.starheight[gf.freestars] = newht  # update the heights
+            # Solve for the positions
+            newx, newy = gf.centroid()
+            dbeta[1::3] = gf.starxcen[~gf.freezestars] - newx
+            dbeta[2::3] = gf.starycen[~gf.freezestars] - newy
+            gf.starxcen[gf.freestars] = newx
+            gf.starycen[gf.freestars] = newy
+            # trim frozen parameters from free stars
+            freestars = np.arange(gf.nstars)[gf.freestars]
+            freepars = np.zeros(3*gf.nstars,bool)
+            for count,i in enumerate(freestars):
+                freepars1 = gf.freepars[i*3:(i+1)*3]
+                freepars[count*3:(count+1)*3] = freepars1
+            dbeta = dbeta[freepars]
             
         # Curve_fit
-        elif str(method).lower()=='curve_fit':
+        elif method=='curve_fit':
             # Perform the fitting
             bounds = [np.zeros(gf.nstars*3,float)-np.inf,
                       np.zeros(gf.nstars*3,float)+np.inf]
@@ -646,7 +883,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
             gf.chisq = chisq
             break  # no iteration
         else:
-            raise ValueError('Only cholesky, svd, qr, sparse, or curve_fit methods currently supported')
+            raise ValueError('Only cholesky, svd, qr, sparse, htcen, or curve_fit methods currently supported')
 
         # Update parameters
         oldpar = bestpar.copy()
@@ -684,9 +921,10 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
         if verbose:
             print(gf.niter,bestpar,percdiff,chisq)
 
-        print('min/max X: ',np.min(gf.pars[1::3]),np.max(gf.pars[1::3]))
-        print('min/max Y: ',np.min(gf.pars[2::3]),np.max(gf.pars[2::3]))        
-
+        #print('min/max X: ',np.min(gf.pars[1::3]),np.max(gf.pars[1::3]))
+        #print('min/max Y: ',np.min(gf.pars[2::3]),np.max(gf.pars[2::3]))        
+        #print(dbeta)
+        
         # Re-estimate the sky
         if gf.niter % reskyiter == 0:
             print('Re-estimating the sky')
