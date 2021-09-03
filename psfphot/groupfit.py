@@ -439,6 +439,26 @@ class GroupFitter(object):
         else:
             return jac
 
+    def htfit(self):
+        """ Fit the heights only for the stars."""
+
+        
+
+        import pdb; pdb.set_trace()
+
+        return height
+
+    
+    def centroid(self):
+        """ Centroid all of the stars."""
+
+        # Start with the residual image and all stars subtracted.
+        # Then add in the model of one star at a time and centroid it with the best-fitting model.
+
+        import pdb; pdb.set_trace()
+
+        return xcen,ycen
+        
         
     def cov(self):
         """ Determine the covariance matrix."""
@@ -568,7 +588,9 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
             # J.T J x = J.T resid
             # A = (J.T @ J)
             # b = np.dot(J.T*dy)
-
+            A = jac.T @ jac
+            b = np.dot(jac.T,dy)
+            
             # Now solve linear least squares with cholesky decomposition
             # Ax = b
             # decompose A into L L* using cholesky decomposition
@@ -576,12 +598,34 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
             #  L* is conjugate transpose
             # solve Ly=b (where L*x=y) for y by forward substitution
             # finally solve L*x = y for x by back substitution
-            A = jac.T @ jac
-            b = np.dot(jac.T,dy)
+
             L = np.linalg.cholesky(A)
             Lstar = L.T.conj()   # Lstar is conjugate transpose
             y = scipy.linalg.solve_triangular(L,b)
             dbeta = scipy.linalg.solve_triangular(Lstar,y)
+
+        # Sparse matrix cholesky solution
+        elif str(method).lower()=='sparse':
+            # J * x = resid
+            # J.T J x = J.T resid
+            # A = (J.T @ J)
+            # b = np.dot(J.T*dy)
+            from scipy import sparse
+            jac = sparse.csc_matrix(jac)  # make it sparse
+            A = jac.T @ jac
+            b = jac.T.dot(dy)
+            # Now solve linear least squares with sparse
+            # Ax = b
+            from sksparse.cholmod import cholesky
+            factor = cholesky(A)
+            dbeta = factor(b)
+            
+        # htcen, crowdsource method of solving heights/fluxes first
+        #  and then centroiding to get x/y
+        elif str(method).lower()=='cholesky':
+            #gf.heightfit()
+            #gf.centroid()
+            import pdb; pdb.set_trace()
             
         # Curve_fit
         elif str(method).lower()=='curve_fit':
@@ -602,7 +646,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
             gf.chisq = chisq
             break  # no iteration
         else:
-            raise ValueError('Only cholesky, svd, qr or curve_fit methods currently supported')
+            raise ValueError('Only cholesky, svd, qr, sparse, or curve_fit methods currently supported')
 
         # Update parameters
         oldpar = bestpar.copy()
