@@ -1,1 +1,1 @@
-__all__ = ["models","getpsf","psfphot","synth","groupfit","leastsquares"]
+__all__ = ["models","getpsf","psfphot","synth","groupfit","starfit","leastsquares"]
