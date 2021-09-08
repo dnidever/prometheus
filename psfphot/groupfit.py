@@ -85,7 +85,12 @@ class GroupFitter(object):
             fxy = [[fxlo,fxhi],[fylo,fyhi]]
             fx,fy = psf.xylim2xy(fxy)
             frr = np.sqrt( (fx-xcen)**2 + (fy-ycen)**2 )
-            fmask = frr<=hpsfnpix
+            # Use image mask
+            #  mask=True for bad values
+            if image.mask is not None:
+                fmask = (frr<=hpsfnpix) & (image.mask[fx,fy]==False)
+            else:
+                fmask = frr<=hpsfnpix                
             fx = fx[fmask]  # raveled
             fy = fy[fmask]
             fxydata.append(fxy)
@@ -99,7 +104,12 @@ class GroupFitter(object):
             xy = [[xlo,xhi],[ylo,yhi]]
             x,y = psf.xylim2xy(xy)
             rr = np.sqrt( (x-xcen)**2 + (y-ycen)**2 )
-            mask = rr<=self.fitradius
+            # Use image mask
+            #  mask=True for bad values
+            if image.mask is not None:           
+                mask = (rr<=self.fitradius) & (image.mask[x,y]==False)
+            else:
+                mask = rr<=self.fitradius                
             x = x[mask]  # raveled
             y = y[mask]
             ntotpix += x.size
