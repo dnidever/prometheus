@@ -704,11 +704,13 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
        id, height, height_error, x, x_err, y, y_err, sky
     model : numpy array
        Best-fitting model of the stars and sky background.
+    sky : numpy array
+       Best-fitting sky image.
 
     Example
     -------
 
-    outcat,model = fit(psf,image,cat)
+    outcat,model,sky = fit(psf,image,cat)
 
     """
 
@@ -862,7 +864,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     
     # Make final model
     gf.unfreeze()
-    model = gf.modelim+gf.skyim
+    model = gf.modelim
         
     # Estimate uncertainties
     if method != 'curve_fit':
@@ -896,4 +898,4 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
 
     print('dt = ',time.time()-start)
     
-    return outcat,model
+    return outcat,model,gf.skyim

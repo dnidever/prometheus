@@ -10,7 +10,7 @@ __version__ = '20210908'  # yyyymmdd
 
 import numpy as np
 from astropy.nddata import CCDData as CCD,StdDevUncertainty
-from photutils.aperture import BoundingBox
+from photutils.aperture import BoundingBox as BBox
 
 
 class CCDData(CCD):
@@ -140,3 +140,21 @@ class CCDData(CCD):
     def y(self):
         """ Y-array."""
         return self._y 
+
+    
+class BoundingBox(BBox):
+
+    def __init__(self, *args, **kwargs):
+
+        # Initialize with the parent...
+        super().__init__(*args, **kwargs)
+
+    @property
+    def data(self):
+        return [self.ixmin,self.ixmax,self.iymin,self.iymax]
+        
+    def __getitem__(self,item):
+        return self.data[item]
+
+    def __array__(self):
+        return np.array(self.data)

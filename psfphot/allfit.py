@@ -927,6 +927,10 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     # Start the All Fitter
     af = AllFitter(psf,image,cat,fitradius=fitradius,verbose=verbose)
 
+    # Don't figure out the overlap pixels yet!!
+    # Just get the footprint for all stars for now.
+    
+    
     # Initialize catalog
     dt = np.dtype([('id',int),('height',float),('height_error',float),('x',float),
                    ('x_error',float),('y',float),('y_error',float),('sky',float),('niter',int)])
@@ -953,6 +957,9 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
         else:
             out = af.groupfit(cat1,method=method,fitradius=fitradius,maxiter=10,minpercdiff=0.5,
                               reskyiter=2,nofreeze=nofreeze,verbose=verbose)
+
+
+        # Need to subtract the best model for the group/star
             
         # Put in catalog
         cols = ['height','height_error','x','x_error','y','y_error','sky','niter']        
