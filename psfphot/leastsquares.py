@@ -9,6 +9,7 @@ __version__ = '20210908'  # yyyymmdd
 
 
 import numpy as np
+import scipy
 
 
 def jac_solve(jac,resid,method=None,weight=None):

@@ -29,7 +29,7 @@ import sep
 from photutils.aperture import CircularAnnulus
 from astropy.stats import sigma_clipped_stats
 from . import leastsquares as lsq
-from .ccddata import CCDData
+from .ccddata import CCDData,BoundingBox
 
 # Fit a PSF model to multiple stars in an image
 
@@ -80,12 +80,7 @@ class GroupFitter(object):
             xcen = self.starxcen[i]
             ycen = self.starycen[i]
             # Full PSF region
-            fbbox = starbbox((xcen,ycen),image.shape,hpsfnpix)
-            #fxlo = np.maximum(int(np.round(xcen)-hpsfnpix),0)
-            #fxhi = np.minimum(int(np.round(xcen)+hpsfnpix),nx-1)
-            #fylo = np.maximum(int(np.round(ycen)-hpsfnpix),0)
-            #fyhi = np.minimum(int(np.round(ycen)+hpsfnpix),ny-1)
-            #fxy = [[fxlo,fxhi],[fylo,fyhi]]
+            fbbox = psf.starbbox((xcen,ycen),image.shape,hpsfnpix)
             fx,fy = psf.bbox2xy(fbbox)
             frr = np.sqrt( (fx-xcen)**2 + (fy-ycen)**2 )
             # Use image mask
@@ -100,12 +95,7 @@ class GroupFitter(object):
             fxlist.append(fx)
             fylist.append(fy)
             # Fitting region
-            bbox = starbbox((xcen,ycen),image.shape,self.nfitpix)
-            #xlo = np.maximum(int(np.round(xcen)-self.nfitpix),0)
-            #xhi = np.minimum(int(np.round(xcen)+self.nfitpix),nx-1)
-            #ylo = np.maximum(int(np.round(ycen)-self.nfitpix),0)
-            #yhi = np.minimum(int(np.round(ycen)+self.nfitpix),ny-1)
-            #xy = [[xlo,xhi],[ylo,yhi]]
+            bbox = psf.starbbox((xcen,ycen),image.shape,self.nfitpix)
             x,y = psf.bbox2xy(bbox)
             rr = np.sqrt( (x-xcen)**2 + (y-ycen)**2 )
             # Use image mask
@@ -136,14 +126,14 @@ class GroupFitter(object):
             yall[count:count+n] = ylist[i]
             count += n
             
-        # Create 1D unraveled indices
-        ind1 = np.ravel_multi_index((xall,yall),image.shape)
+        # Create 1D unraveled indices, python images are (Y,X)
+        ind1 = np.ravel_multi_index((yall,xall),image.shape)
         # Get unique indexes and inverse indices
         #   the inverse index list takes you from the duplicated pixels
         #   to the unique ones
         uind1,invindex = np.unique(ind1,return_inverse=True)
         ntotpix = len(uind1)
-        x,y = np.unravel_index(uind1,image.shape)
+        y,x = np.unravel_index(uind1,image.shape)
         
         imflatten = image.data.ravel()[uind1]
         errflatten = image.uncertainty.array.ravel()[uind1]
@@ -747,7 +737,8 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     if absolute:
         imx0 = image.bbox.xrange[0]
         imy0 = image.bbox.yrange[0]
-
+        cat['x'] -= imx0
+        cat['y'] -= imy0        
      
     # Start the Group Fitter
     gf = GroupFitter(psf,image,cat,fitradius=fitradius,verbose=verbose)
@@ -762,9 +753,6 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     initpar[0::3] = cat['height']
     initpar[1::3] = cat['x']
     initpar[2::3] = cat['y']
-    if absolute:
-        initpar[1::3] -= imx0
-        initpar[2::3] -= imy0        
     
     # Curve_fit
     #   dealt with separately
@@ -778,7 +766,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
         bounds[0][2::3] = cat['y']-2
         bounds[1][2::3] = cat['y']+2
         bestpar,cov = curve_fit(gf.model,xdata,gf.imflatten-gf.skyflatten,bounds=bounds,
-                                sigma=gf.errflatten,p0=bestpar,jac=gf.jac)
+                                sigma=gf.errflatten,p0=initpar,jac=gf.jac)
         bestmodel = gf.model(xdata,*bestpar)
         perror = np.sqrt(np.diag(cov))
         chisq = np.sum((gf.imflatten-gf.skyflatten-bestmodel)**2/gf.errflatten**2)
@@ -866,8 +854,9 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
                 print('Iter = ',gf.niter)
                 print('Pars = ',gf.pars)
                 print('Percent diff = ',percdiff)
+                print('Diff = ',diff)
                 print('chisq = ',chisq)
-
+                
             # Re-estimate the sky
             if gf.niter % reskyiter == 0:
                 print('Re-estimating the sky')
@@ -885,7 +874,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     
     # Make final model
     gf.unfreeze()
-    model = gf.modelim
+    model = CCDData(gf.modelim,bbox=image.bbox,unit=image.unit)
         
     # Estimate uncertainties
     if method != 'curve_fit':
@@ -920,8 +909,9 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     # Image offsets for absolute X/Y coordinates
     if absolute:
         outcat['x'] += imx0
-        outcat['y'] += imy0        
-
+        outcat['y'] += imy0
+        cat['x'] += imx0
+        cat['y'] += imy0        
     
     print('dt = ',time.time()-start)
     

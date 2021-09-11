@@ -62,7 +62,8 @@ def makeimage(nstars=1000,nx=1024,ny=1024,psf=None,cat=None,noise=True,backgrnd=
     else:
         nstars = len(cat)
 
-    im = np.zeros((nx,ny),float)+backgrnd
+    # python images are (Y,X)
+    im = np.zeros((ny,nx),float)+backgrnd
     for i in range(nstars):
         height = cat['height'][i]
         xcen = cat['x'][i]

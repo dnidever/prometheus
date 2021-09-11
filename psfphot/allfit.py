@@ -40,9 +40,9 @@ def cutoutbbox(image,psf,cat):
     nx,ny = image.shape
     hpsfpix = psf.npix//2
     xmin = np.min(cat['x'])
-    xmx = np.min(cat['x'])
+    xmax = np.max(cat['x'])
     ymin = np.min(cat['y'])
-    ymax = np.min(cat['y'])    
+    ymax = np.max(cat['y'])    
 
     xlo = np.maximum(int(np.round(xmin)-hpsfpix),0)
     xhi = np.minimum(int(np.round(xmax)+hpsfpix),nx)
@@ -128,17 +128,12 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     ngroups = len(groups)
     if verbose:
         print(str(ngroups)+' star groups')
-    
-    # Start the All Fitter
-    af = AllFitter(psf,image,cat,fitradius=fitradius,verbose=verbose)
 
-    # Don't figure out the overlap pixels yet!!
-    # Just get the footprint for all stars for now.
-    
-    
+        
     # Initialize catalog
     dt = np.dtype([('id',int),('height',float),('height_error',float),('x',float),
-                   ('x_error',float),('y',float),('y_error',float),('sky',float),('niter',int)])
+                   ('x_error',float),('y',float),('y_error',float),('sky',float),
+                   ('niter',int),('group_id',int),('ngroup',int)])
     outcat = np.zeros(nstars,dtype=dt)
     if 'id' in cat.keys():
         outcat['id'] = cat['id']
@@ -147,6 +142,9 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
         
     # Group Loop
     #---------------
+    resid = image.copy()
+    outmodel = CCDData(np.zeros(image.shape),bbox=image.bbox,unit=image.unit)
+    outsky = CCDData(np.zeros(image.shape),bbox=image.bbox,unit=image.unit)    
     for g,grp in enumerate(groups):
         ind = starindex['index'][starindex['lo'][g]:starindex['hi'][g]+1]
         nind = len(ind)
@@ -156,27 +154,32 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
         
         # Single Star
         if nind==1:
-            out = psf.fit(image,cat1)
+            out,model = psf.fit(resid,cat1,niter=3,verbose=verbose,retfullmodel=True)
+            model.data -= out['sky']   # remove sky
+            outmodel[model.bbox.slices].data += model.data
+            outsky[model.bbox.slices].data = out['sky'] 
             
         # Group
         else:
             bbox = cutoutbbox(image,psf,cat1)
-            out,model,sky = groupfit.fit(cat1,image[bbox.slices],method=method,fitradius=fitradius,
+            out,model,sky = groupfit.fit(psf,resid[bbox.slices],cat1,method=method,fitradius=fitradius,
                                          maxiter=maxiter,minpercdiff=minpercdiff,reskyiter=reskyiter,
                                          nofreeze=nofreeze,verbose=verbose,absolute=True)
-
-
-        # Need to subtract the best model for the group/star
+            outmodel[model.bbox.slices].data += model.data
+            outsky[model.bbox.slices].data = sky
             
+
+        # Subtract the best model for the group/star
+        resid[model.bbox.slices].data -= model.data
+                
         # Put in catalog
         cols = ['height','height_error','x','x_error','y','y_error','sky','niter']        
         for c in cols:
             outcat[c][ind] = out[c]
-
-        import pdb; pdb.set_trace()
-
+        outcat['group_id'] = grp
+        outcat['ngroup'] = nind
         
     if verbose:
         print('dt = ',time.time()-start)
     
-    return outcat,model
+    return outcat,outmodel,outsky

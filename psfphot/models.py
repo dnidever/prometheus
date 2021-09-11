@@ -1082,7 +1082,8 @@ class PSFBase:
 
     
     def fit(self,im,pars,niter=2,radius=None,allpars=False,method='qr',nosky=False,
-            minpercdiff=0.5,absolute=False,retpararray=False):
+            minpercdiff=0.5,absolute=False,retpararray=False,retfullmodel=False,
+            verbose=False):
         """
         Method to fit a single star using the PSF model.
 
@@ -1116,6 +1117,10 @@ class PSFBase:
         retpararray : boolean, optional
             Return best-fit parameter values as an array.  Default is to return parameters
               as a catalog.
+        retfullmodel : boolean, optional
+            Return model over the full PSF region.  Default is False.
+        verbose : boolean, optional
+            Verbose output to the screen.  Default is False.
 
         Returns
         -------
@@ -1129,15 +1134,26 @@ class PSFBase:
 
 
         """
+        
         # PARS: initial guesses for Xo and Yo parameters.
-        if isinstance(pars,dict)==False:
-            if len(pars)<3:
-                raise ValueError('PARS must have [HEIGHT, XCEN, YCEN]')
-            cat = {'height':pars[0],'x':pars[1],'y':pars[2]}
-        else:
+        if isinstance(pars,Table):
+            for n in ['x','y','height']:
+                if n not in pars.columns:
+                    raise ValueError('PARS must have [HEIGHT, X, Y]')
+            cat = {'height':pars['height'][0],'x':pars['x'][0],'y':pars['y'][0]}
+        elif isinstance(pars,np.ndarray):
+            for n in ['x','y','height']:
+                if n not in pars.dtype.names:
+                    raise ValueError('PARS must have [HEIGHT, X, Y]')            
+            cat = {'height':pars['height'][0],'x':pars['x'][0],'y':pars['y'][0]}
+        elif isinstance(pars,dict):
             if 'x' in pars.keys()==False or 'y' in pars.keys() is False:
                 raise ValueError('PARS dictionary must have x and y')
             cat = pars
+        else:            
+            if len(pars)<3:
+                raise ValueError('PARS must have [HEIGHT, X, Y]')
+            cat = {'height':pars[0],'x':pars[1],'y':pars[2]}
 
         method = str(method).lower()
             
@@ -1251,11 +1267,16 @@ class PSFBase:
             outcat['sky'] = bestpar[3]
             outcat['sky_error'] = perror[3]        
         outcat['niter'] = count
-        
 
-        # Reshape model and make CCDData image with proper bbox
-        model = model.reshape(flux.shape)
-        model = CCDData(model,bbox=bbox,unit=im.unit)
+        # Return full model
+        if retfullmodel:
+            bbox = self.starbbox((bestpar[1],bestpar[2]),im.shape)
+            model = self(pars=bestpar,bbox=bbox)
+            model = CCDData(model,bbox=bbox,unit=im.unit)
+        else:
+            # Reshape model and make CCDData image with proper bbox
+            model = model.reshape(flux.shape)
+            model = CCDData(model,bbox=bbox,unit=im.unit)
 
         # Return catalog
         if not retpararray:
