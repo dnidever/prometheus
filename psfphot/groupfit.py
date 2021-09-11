@@ -19,7 +19,7 @@ import astropy.units as u
 from scipy.optimize import curve_fit, least_squares
 from scipy.interpolate import interp1d
 from scipy import sparse
-from astropy.nddata import CCDData,StdDevUncertainty
+#from astropy.nddata import CCDData,StdDevUncertainty
 from dlnpyutils import utils as dln, bindata
 import copy
 import logging
@@ -29,8 +29,10 @@ import sep
 from photutils.aperture import CircularAnnulus
 from astropy.stats import sigma_clipped_stats
 from . import leastsquares as lsq
+from .ccddata import CCDData
 
 # Fit a PSF model to multiple stars in an image
+
     
 class GroupFitter(object):
 
@@ -43,7 +45,7 @@ class GroupFitter(object):
         self.nstars = np.size(cat)  # number of stars
         self.niter = 0              # number of iterations in the solver
         self.npsfpix = psf.npix     # shape of PSF
-        nx,ny = image.data.shape    # save image dimensions
+        ny,nx = image.data.shape    # save image dimensions, python images are (Y,X)
         self.nx = nx
         self.ny = ny
         if fitradius is None:       # PSF fitting radius
@@ -66,10 +68,10 @@ class GroupFitter(object):
         self.pixused = None   # initialize pixused
         
         # Get xdata, ydata
-        xydata = []
+        bboxdata = []
         xlist = []
         ylist = []
-        fxydata = []
+        fbboxdata = []
         fxlist = []
         fylist = []
         ntotpix = 0
@@ -78,42 +80,44 @@ class GroupFitter(object):
             xcen = self.starxcen[i]
             ycen = self.starycen[i]
             # Full PSF region
-            fxlo = np.maximum(int(np.round(xcen)-hpsfnpix),0)
-            fxhi = np.minimum(int(np.round(xcen)+hpsfnpix),nx-1)
-            fylo = np.maximum(int(np.round(ycen)-hpsfnpix),0)
-            fyhi = np.minimum(int(np.round(ycen)+hpsfnpix),ny-1)
-            fxy = [[fxlo,fxhi],[fylo,fyhi]]
-            fx,fy = psf.xylim2xy(fxy)
+            fbbox = starbbox((xcen,ycen),image.shape,hpsfnpix)
+            #fxlo = np.maximum(int(np.round(xcen)-hpsfnpix),0)
+            #fxhi = np.minimum(int(np.round(xcen)+hpsfnpix),nx-1)
+            #fylo = np.maximum(int(np.round(ycen)-hpsfnpix),0)
+            #fyhi = np.minimum(int(np.round(ycen)+hpsfnpix),ny-1)
+            #fxy = [[fxlo,fxhi],[fylo,fyhi]]
+            fx,fy = psf.bbox2xy(fbbox)
             frr = np.sqrt( (fx-xcen)**2 + (fy-ycen)**2 )
             # Use image mask
             #  mask=True for bad values
             if image.mask is not None:
-                fmask = (frr<=hpsfnpix) & (image.mask[fx,fy]==False)
+                fmask = (frr<=hpsfnpix) & (image.mask[fy,fx]==False)
             else:
                 fmask = frr<=hpsfnpix                
             fx = fx[fmask]  # raveled
             fy = fy[fmask]
-            fxydata.append(fxy)
+            fbboxdata.append(fbbox)
             fxlist.append(fx)
             fylist.append(fy)
             # Fitting region
-            xlo = np.maximum(int(np.round(xcen)-self.nfitpix),0)
-            xhi = np.minimum(int(np.round(xcen)+self.nfitpix),nx-1)
-            ylo = np.maximum(int(np.round(ycen)-self.nfitpix),0)
-            yhi = np.minimum(int(np.round(ycen)+self.nfitpix),ny-1)
-            xy = [[xlo,xhi],[ylo,yhi]]
-            x,y = psf.xylim2xy(xy)
+            bbox = starbbox((xcen,ycen),image.shape,self.nfitpix)
+            #xlo = np.maximum(int(np.round(xcen)-self.nfitpix),0)
+            #xhi = np.minimum(int(np.round(xcen)+self.nfitpix),nx-1)
+            #ylo = np.maximum(int(np.round(ycen)-self.nfitpix),0)
+            #yhi = np.minimum(int(np.round(ycen)+self.nfitpix),ny-1)
+            #xy = [[xlo,xhi],[ylo,yhi]]
+            x,y = psf.bbox2xy(bbox)
             rr = np.sqrt( (x-xcen)**2 + (y-ycen)**2 )
             # Use image mask
             #  mask=True for bad values
             if image.mask is not None:           
-                mask = (rr<=self.fitradius) & (image.mask[x,y]==False)
+                mask = (rr<=self.fitradius) & (image.mask[y,x]==False)
             else:
                 mask = rr<=self.fitradius                
             x = x[mask]  # raveled
             y = y[mask]
             ntotpix += x.size
-            xydata.append(xy)  # this still includes the corners
+            bboxdata.append(bbox)  # this still includes the corners
             xlist.append(x)
             ylist.append(y)
 
@@ -159,8 +163,8 @@ class GroupFitter(object):
             invindexlist.append(invindex[count:count+n])
             count += n
         self.invindexlist = invindexlist
-        self.xylim = [[np.min(x),np.max(x)],[np.min(y),np.max(y)]]
-        self.xydata = xydata
+        self.bbox = BoundingBox(np.min(x),np.max(x),np.min(y),np.max(y))
+        self.bboxdata = bboxdata
 
         # Create initial sky image
         self.sky()
@@ -217,7 +221,7 @@ class GroupFitter(object):
             self.skyim = bkg.back()
             # Calculate sky value for each star
             #  use center position
-            self.starsky[:] = self.skyim[np.round(self.starxcen).astype(int),np.round(self.starycen).astype(int)]
+            self.starsky[:] = self.skyim[np.round(self.starycen).astype(int),np.round(self.starxcen).astype(int)]
         # Annulus aperture
         elif method=='annulus':
             if rin is None:
@@ -314,7 +318,7 @@ class GroupFitter(object):
                 xind = self.fxlist[i]
                 yind = self.fylist[i]
                 im1 = self.psf(xind,yind,pars1)
-                newmodel[xind,yind] += im1
+                newmodel[yind,xind] += im1
             # Only keep the pixels being fit
             #  and subtract from the residuals
             newmodel1 = newmodel.ravel()[self.ind1]
@@ -341,7 +345,7 @@ class GroupFitter(object):
             fxind = self.fxlist[i]
             fyind = self.fylist[i]
             im1 = self.psf(fxind,fyind,pars)
-            im[fxind,fyind] += im1
+            im[fyind,fxind] += im1
         return im
         
     @property
@@ -370,10 +374,10 @@ class GroupFitter(object):
         else:
             allpars = args
         
-        x0,x1 = self.xylim[0]
-        y0,y1 = self.xylim[1]
-        nx = x1-x0+1
-        ny = y1-y0+1
+        x0,x1 = self.bbox.xrange
+        y0,y1 = self.bbox.yrange
+        nx = x1-x0
+        ny = y1-y0
         #im = np.zeros((nx,ny),float)    # image covered by star
         allim = np.zeros(self.ntotpix,float)
         usepix = np.zeros(self.ntotpix,bool)
@@ -427,10 +431,10 @@ class GroupFitter(object):
         else:
             allpars = args
         
-        x0,x1 = self.xylim[0]
-        y0,y1 = self.xylim[1]
-        nx = x1-x0+1
-        ny = y1-y0+1
+        x0,x1 = self.bbox.xrange
+        y0,y1 = self.bbox.yrange
+        nx = x1-x0
+        ny = y1-y0
         #jac = np.zeros((nx,ny,len(args)),float)    # image covered by star
         jac = np.zeros((self.ntotpix,len(self.pars)),float)    # image covered by star
         usepix = np.zeros(self.ntotpix,bool)
@@ -445,7 +449,7 @@ class GroupFitter(object):
             dostars = np.arange(self.nstars)
         for i in dostars:
             pars = allpars[i*3:(i+1)*3]
-            xy = self.xydata[i]
+            bbox = self.bboxdata[i]
             xind = self.xlist[i]
             yind = self.ylist[i]
             invindex = self.invindexlist[i]
@@ -565,7 +569,7 @@ class GroupFitter(object):
             fxind = self.fxlist[i]
             fyind = self.fylist[i]
             fim1 = self.psf(fxind,fyind,pars)
-            resid[fxind,fyind] -= fim1
+            resid[fyind,fxind] -= fim1
             fmodels.append(fim1)            
             #fjac.append(fjac1)
             #fusepix[finvindex] = True
@@ -595,7 +599,7 @@ class GroupFitter(object):
             fxind = self.fxlist[i]
             fyind = self.fylist[i]
             fmodel1 = fmodels[count]
-            #resid[fxind,fyind] += fmodel1
+            #resid[fyind,fxind] += fmodel1
             
             # crowdsource, does a sum
             #  y = 2 / integral(P*P*W) * integral(x*(I-P)*W)
@@ -606,7 +610,7 @@ class GroupFitter(object):
             yind = self.ylist[i]
             jac1 = jac[count]
             jac1 = np.delete(jac1,0,axis=1)  # delete height column
-            resid1 = resid[xind,yind] 
+            resid1 = resid[yind,xind] 
 
             # CHOLESKY_JAC_SOLVE NEEDS THE ACTUAL RESIDUALS!!!!
             #  with the star removed!!
@@ -664,13 +668,15 @@ class GroupFitter(object):
         # Use chi-squared, since we are doing the weighted least-squares and weighted Hessian
         chisq = np.sum(resid**2/self.errflatten**2)        
         cov = cov_orig * (chisq/(self.ntotpix-len(self.pars)))  # what MPFITFUN suggests, but very small
+
+        # cov = lqr.jac_covariange(mjac,resid,wt)
         
         return cov
 
         
     
 def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,reskyiter=2,
-        nofreeze=False,verbose=False):
+        nofreeze=False,absolute=False,verbose=False):
     """
     Fit PSF to group of stars in an image.
 
@@ -686,14 +692,19 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
        Method to use for solving the non-linear least squares problem: "cholesky",
        "qr", "svd", and "curve_fit".  Default is "cholesky".
     maxiter : int, optional
-       Maximum number of iterations to allow.  Only for methods "qr" or "svd".
+       Maximum number of iterations to allow.  Only for methods "cholesky", "qr" or "svd".
        Default is 10.
     minpercdiff : float, optional
        Minimum percent change in the parameters to allow until the solution is
        considered converged and the iteration loop is stopped.  Only for methods
-       "qr" and "svd".  Default is 0.5.
+       "cholesky", "qr" and "svd".  Default is 0.5.
     reskyiter : int, optional
        After how many iterations to re-calculate the sky background. Default is 2.
+    absolute : boolean, optional
+       Input and output coordinates are in "absolute" values using the image bounding box.
+         Default is False, everything is relative.
+    nofreeze : boolean, optional
+       Do not freeze any parameters even if they have converged.  Default is False.
     verbose : boolean, optional
        Verbose output.
 
@@ -725,10 +736,19 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     method = str(method).lower()    
     if method not in ['cholesky','svd','qr','sparse','htcen','curve_fit']:
         raise ValueError('Only cholesky, svd, qr, sparse, htcen or curve_fit methods currently supported')
-        
-    nstars = np.array(cat).size
-    nx,ny = image.data.shape
 
+    # Make sure image is CCDData
+    if isinstance(image,CCDData) is False:
+        image = CCDData(image)
+    
+    nstars = np.array(cat).size
+
+    # Image offsets
+    if absolute:
+        imx0 = image.bbox.xrange[0]
+        imy0 = image.bbox.yrange[0]
+
+     
     # Start the Group Fitter
     gf = GroupFitter(psf,image,cat,fitradius=fitradius,verbose=verbose)
     xdata = np.arange(gf.ntotpix)
@@ -742,7 +762,10 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     initpar[0::3] = cat['height']
     initpar[1::3] = cat['x']
     initpar[2::3] = cat['y']
-
+    if absolute:
+        initpar[1::3] -= imx0
+        initpar[2::3] -= imy0        
+    
     # Curve_fit
     #   dealt with separately
     if method=='curve_fit':
@@ -783,8 +806,6 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
                 # Weights
                 wt = 1/gf.errflatten[gf.usepix]**2
                 # Solve Jacobian
-                jac1 = jac.copy()
-                dy1 = dy.copy()
                 dbeta = lsq.jac_solve(jac,dy,method=method,weight=wt)
                 
             #  htcen, crowdsource method of solving heights/fluxes first
@@ -896,6 +917,12 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     outcat['sky'] = gf.starsky
     outcat['niter'] = gf.starniter  # what iteration it converged on
 
+    # Image offsets for absolute X/Y coordinates
+    if absolute:
+        outcat['x'] += imx0
+        outcat['y'] += imy0        
+
+    
     print('dt = ',time.time()-start)
     
     return outcat,model,gf.skyim

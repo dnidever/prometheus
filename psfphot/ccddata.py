@@ -16,29 +16,35 @@ from photutils.aperture import BoundingBox as BBox
 class CCDData(CCD):
 
 
-    def __init__(self, data, *args, **kwargs):
+    def __init__(self, data, *args, bbox=None, **kwargs):
 
         # Initialize with the parent...
         super().__init__(data, *args, **kwargs)
 
         ndim = data.ndim
         if ndim==0:
-            self._bbox = BoundingBox(0,0,0,0)
+            if bbox is None: bbox=BoundingBox(0,0,0,0)
+            self._bbox = bbox
             self._x = None
             self._y = None         
         elif ndim==1:
             nx, = data.shape
-            self._bbox = BoundingBox(0,nx,0,0)
-            self._x = np.arange(nx)
+            if bbox is None: bbox=BoundingBox(0,nx,0,0)
+            self._bbox = bbox
+            self._x = np.arange(bbox.xrange[0],bbox.xrange[-1])
             self._y = None
         elif ndim==2:
             nx,ny = data.shape
-            self._bbox = BoundingBox(0,nx,0,ny)
-            self._x = np.arange(nx)
-            self._y = np.arange(ny)
+            if bbox is None: bbox=BoundingBox(0,nx,0,ny)
+            self._bbox = bbox
+            self._x = np.arange(bbox.xrange[0],bbox.xrange[-1])
+            self._y = np.arange(bbox.yrange[0],bbox.yrange[-1])
         else:
             raise ValueError('3D CCDData not supported')
-            
+
+
+    # for the string representation also print out the bbox values
+        
     def __getitem__(self, item):
         
         # Abort slicing if the data is a single scalar.
@@ -91,8 +97,9 @@ class CCDData(CCD):
                 else:
                     nel[i] = 0
                     start[i] = item1
-            newx = self._x[item[0]].copy()
-            newy = self._y[item[1]].copy()
+            # python images are (Y,X)
+            newx = self._x[item[1]].copy()
+            newy = self._y[item[0]].copy()
 
             # Deal with various output types
             
@@ -150,8 +157,16 @@ class BoundingBox(BBox):
         super().__init__(*args, **kwargs)
 
     @property
+    def xrange(self):
+        return (self.ixmin,self.ixmax)
+
+    @property
+    def yrange(self):
+        return (self.iymin,self.iymax)    
+        
+    @property
     def data(self):
-        return [self.ixmin,self.ixmax,self.iymin,self.iymax]
+        return [(self.ixmin,self.ixmax),(self.iymin,self.iymax)]
         
     def __getitem__(self,item):
         return self.data[item]

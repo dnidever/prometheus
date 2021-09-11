@@ -143,3 +143,65 @@ def cholesky_solve(A,b):
     y = scipy.linalg.solve_triangular(L,b)
     x = scipy.linalg.solve_triangular(Lstar,y)
     return x
+
+def jac_covariance(jac,resid,wt=None):
+    """
+    Determine the covariance matrix.
+    
+    Parameters
+    ----------
+    jac : numpy array
+       The 2-D jacobian (first derivative relative to the parameters) array
+         with dimensions [Npix,Npar].
+    resid : numpy array
+       Residual array (data-best model) with dimensions [Npix].
+    wt : numpy array, optional
+       Weight array (typically 1/sigma**2) with dimensions [Npix].
+
+    Returns
+    -------
+    cov : numpy array
+       Covariance array with dimensions [Npar,Npar].
+
+    Example
+    -------
+
+    cov = jac_covariance(jac,resid,wt)
+
+    """
+    
+    # https://stats.stackexchange.com/questions/93316/parameter-uncertainty-after-non-linear-least-squares-estimation
+    # more background here, too: http://ceres-solver.org/nnls_covariance.html        
+
+    # Hessian = J.T * T, Hessian Matrix
+    #  higher order terms are assumed to be small
+    # https://www8.cs.umu.se/kurser/5DA001/HT07/lectures/lsq-handouts.pdf
+
+    npix,npars = jac.shape
+    
+    # Weights
+    #   If weighted least-squares then
+    #   J.T * W * J
+    #   where W = I/sig_i**2
+    if wt is not None:
+        if wt.ndim==1:
+            wt = np.diag(wt)
+        hess = jac.T @ (wt @ jac)
+    else:
+        hess = jac.T @ jac  # not weighted
+
+    # cov = H-1, covariance matrix is inverse of Hessian matrix
+    cov_orig = np.linalg.inv(hess)
+
+    # Rescale to get an unbiased estimate
+    # cov_scaled = cov * (RSS/(m-n)), where m=number of measurements, n=number of parameters
+    # RSS = residual sum of squares
+    #  using rss gives values consistent with what curve_fit returns
+    # Use chi-squared, since we are doing the weighted least-squares and weighted Hessian
+    if wt is not None:
+        chisq = np.sum(resid**2 * wt)
+    else:
+        chisq = np.sum(resid**2)
+    cov = cov_orig * (chisq/(npix-npars))  # what MPFITFUN suggests, but very small
+        
+    return cov

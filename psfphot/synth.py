@@ -22,7 +22,8 @@ import copy
 import logging
 import time
 import matplotlib
-from astropy.nddata import CCDData,StdDevUncertainty
+from astropy.nddata import CCDData as CCD,StdDevUncertainty
+from .ccddata import CCDData
 from . import models
 
 # Fit a PSF model to multiple stars in an image
@@ -66,12 +67,9 @@ def makeimage(nstars=1000,nx=1024,ny=1024,psf=None,cat=None,noise=True,backgrnd=
         height = cat['height'][i]
         xcen = cat['x'][i]
         ycen = cat['y'][i]
-        xlo = np.maximum(int(np.round(xcen)-npsfpix/2),0)
-        xhi = np.minimum(int(np.round(xcen)+npsfpix/2)-1,nx-1)
-        ylo = np.maximum(int(np.round(ycen)-npsfpix/2),0)
-        yhi = np.minimum(int(np.round(ycen)+npsfpix/2)-1,ny-1)
-        im2 = psf(pars=[height,xcen,ycen],xy=[[xlo,xhi],[ylo,yhi]])
-        im[xlo:xhi+1,ylo:yhi+1] += im2
+        bbox = psf.starbbox((xcen,ycen),(ny,nx),npsfpix//2)
+        im2 = psf(pars=[height,xcen,ycen],bbox=bbox)
+        im[bbox.slices] += im2
     err = np.maximum(np.sqrt(im),1)
     if noise:
         im += err*np.random.randn(*im.shape)

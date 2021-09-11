@@ -23,12 +23,15 @@ import logging
 import time
 import matplotlib
 from . import getpsf
+from .ccddata import BoundingBox,CCDData
+from . import leastsquares as lsq
 
 # A bunch of the Gaussian2D and Moffat2D code comes from astropy's modeling module
 # https://docs.astropy.org/en/stable/_modules/astropy/modeling/functional_models.html
 
 # Maybe x0/y0 should NOT be part of the parameters, and
 # x/y should actually just be dx/dy (relative to x0/y0)
+
 
 def gaussian2d(x,y,pars,deriv=False,nderiv=None):
     """Two dimensional Gaussian model function"""
@@ -683,10 +686,10 @@ def empirical(x, y, pars, mpars, mcube, deriv=False, nderiv=None):
     """Empirical look-up table"""
     npars = len(pars)
     if mcube.ndim==2:
-        nxpsf,nypsf = mcube.shape
+        nypsf,nxpsf = mcube.shape   # python images are (Y,X)
         nel = 1
     else:
-        nxpsf,nypsf,nel = mcube.shape
+        nypsf,nxpsf,nel = mcube.shape
 
     # Parameters for the profile
     amp = pars[0]
@@ -762,7 +765,8 @@ class PSFBase:
         self.npix = npix
         self.radius = npix//2
         self.verbose = verbose
-
+        self.niter = 0
+        
         # add a precomputed circular mask here to mask out the corners??
         
     @property
@@ -774,23 +778,61 @@ class PSFBase:
     def params(self,value):
         self._params = value
 
+    def starbbox(self,coords,imshape,radius=None):
+        """
+        Return the boundary box for a star given radius and image size.
+        
+        Parameters
+        ----------
+        coords: list or tuple
+           Central coordinates (xcen,ycen) of star (*absolute* values).
+        imshape: list or tuple
+            Image shape (ny,nx) values.  Python images are (Y,X).
+        radius: float, optional
+            Radius in pixels.  Default is psf.npix//2.
+        
+        Returns
+        -------
+        bbox : BoundingBox object
+          Bounding box of the x/y ranges.
+          Upper values are EXCLUSIVE following the python convention.
+
+        """
+
+        # Star coordinates
+        xcen,ycen = coords
+        ny,nx = imshape   # python images are (Y,X)
+        if radius is None:
+            radius = self.npix//2
+        xlo = np.maximum(int(np.round(xcen)-radius),0)
+        xhi = np.minimum(int(np.round(xcen)+radius),nx)
+        ylo = np.maximum(int(np.round(ycen)-radius),0)
+        yhi = np.minimum(int(np.round(ycen)+radius),ny)
+        
+        return BoundingBox(xlo,xhi,ylo,yhi)
+        
     
-    def xylim2xy(self,xy):
+    def bbox2xy(self,bbox):
         """
-        Convenience method to convert 2x2 list of X/Y limits [[X0,X1],[Y0,Y1]]
-        to 2-D X and Y arrays.  The upper limits are inclusive.
+        Convenience method to convert boundary box of X/Y limits to 2-D X and Y arrays.  The upper limits
+        are EXCLUSIVE following the python convention.
         """
-        x0,x1 = xy[0]
-        y0,y1 = xy[1]
-        dx = np.arange(x0,x1+1)
+        if isinstance(bbox,BoundingBox):
+            x0,x1 = bbox.xrange
+            y0,y1 = bbox.yrange
+        else:
+            x0,x1 = bbox[0]
+            y0,y1 = bbox[1]            
+        dx = np.arange(x0,x1)
         nxpix = len(dx)
-        dy = np.arange(y0,y1+1)
+        dy = np.arange(y0,y1)
         nypix = len(dy)
-        x = dx.reshape(-1,1)+np.zeros(nypix,int)   # broadcasting is faster
-        y = dy.reshape(1,-1)+np.zeros(nxpix,int).reshape(-1,1)     
+        # Python images are (Y,X)
+        x = dx.reshape(1,-1)+np.zeros(nypix,int).reshape(-1,1)   # broadcasting is faster
+        y = dy.reshape(-1,1)+np.zeros(nxpix,int)     
         return x,y
         
-    def __call__(self,x=None,y=None,pars=None,mpars=None,xy=None,deriv=False,**kwargs):
+    def __call__(self,x=None,y=None,pars=None,mpars=None,bbox=None,deriv=False,**kwargs):
         """
         Generate a model PSF for the input X/Y value and parameters.  If no inputs
         are given, then a postage stamp PSF image is returned.
@@ -800,14 +842,14 @@ class PSFBase:
         x and y: numpy array, optional
             The X and Y values for the images pixels for which you want to
             generate the model. These can be 1D or 2D arrays.
-            The "xy" parameter can be used instead of "x" and "y" if a rectangular
+            The "bbox" parameter can be used instead of "x" and "y" if a rectangular
             region is desired.
         pars : numpy array
             Model parameter values [height, xcen, ycen, sky].
-        xy: list
-            Limits in X and Y for a rectangular region to generate the model.
-              XY = [[X0,X1],[Y0,Y1]]
-            X/Y and XY are absolute pixel values, NOT relative ones.
+        bbox: list or BoundingBox
+            Boundary box giving range in X and Y for a rectangular region to generate the model.
+            This can be BoundingBox object or a 2x2 list/tuple [[x0,x1],[y0,y1]].
+            Upper values are EXCLUSIVE following the python convention.
         mpars : numpy array, optional
             PSF model parameters to use.  The default behavior is to use the
             model pararmeters of the PSFobject.
@@ -830,28 +872,19 @@ class PSFBase:
         """
 
         # Nothing input, PSF postage stamp
-        if x is None and y is None and pars is None and xy is None:
+        if x is None and y is None and pars is None and bbox is None:
             pars = [1.0, self.npix//2, self.npix//2]
             pix = np.arange(self.npix)
-            x = pix.reshape(-1,1)+np.zeros(self.npix)  # broadcasting is faster
-            y = x.copy().T
-            #x = np.repeat(pix,self.npix).reshape(self.npix,self.npix)
-            #y = np.repeat(pix,self.npix).reshape(self.npix,self.npix).T
+            # Python images are (Y,X)
+            y = pix.reshape(-1,1)+np.zeros(self.npix,int)     # broadcasting is faster
+            x = y.copy().T
 
-        # Get coordinates from XY
-        if x is None and y is None and xy is not None:
-            x,y = self.xylim2xy(xy)
-            #x0,x1 = xy[0]
-            #y0,y1 = xy[1]
-            #dx = np.arange(x0,x1+1).astype(float)
-            #nxpix = len(dx)
-            #dy = np.arange(y0,y1+1).astype(float)
-            #nypix = len(dy)
-            #x = dx.reshape(-1,1)+np.zeros(nypix)   # broadcasting is faster
-            #y = dy.reshape(1,-1)+np.zeros(nxpix).reshape(-1,1) 
+        # Get coordinates from BBOX
+        if x is None and y is None and bbox is not None:
+            x,y = self.bbox2xy(bbox)
 
         if x is None or y is None:
-            raise ValueError("X and Y or XY must be input")
+            raise ValueError("X and Y or BBOX must be input")
         if pars is None:
             raise ValueError("PARS must be input")
         if len(pars)<3 or len(pars)>4:
@@ -928,6 +961,8 @@ class PSFBase:
         pars = args
         if self.verbose: print('model: ',pars)
 
+        self.niter += 1
+        
         # Just stellar parameters
         if not allpars:
             return self(xdata[0],xdata[1],pars,**kwargs)
@@ -1046,7 +1081,8 @@ class PSFBase:
         return self.jac(xdata,*args,allpars=True,**kwargs)
 
     
-    def fit(self,im,pars,niter=1,radius=None,allpars=False,method='qr',nosky=False,weight=True):
+    def fit(self,im,pars,niter=2,radius=None,allpars=False,method='qr',nosky=False,
+            minpercdiff=0.5,absolute=False,retpararray=False):
         """
         Method to fit a single star using the PSF model.
 
@@ -1058,19 +1094,28 @@ class PSFBase:
             Initial parameters.  If numpy array or list the values should be [height, xcen, ycen].
             If a catalog is input then it must at least the "x" and "y" columns.
         niter : int, optional
-            Number of iterations to perform.  Default is 1.
+            Number of iterations to perform.  Default is 2.
         radius : float, optional
             Fitting radius in pixels.  Default is to use the PSF FWHM.
         allpars : boolean, optional
             Fit PSF model parameters as well.  Default is to only fit the stellar parameters
             of [height, xcen, ycen, sky].
         method : str, optional
-            Method to use to solve the system of equations: "qr", "svd", or "curve_fit".
-            Default is "QR".
+            Method to use for solving the non-linear least squares problem: "cholesky",
+            "qr", "svd", and "curve_fit".  Default is "qr".
+        minpercdiff : float, optional
+           Minimum percent change in the parameters to allow until the solution is
+           considered converged and the iteration loop is stopped.  Default is 0.5.
         nosky : boolean, optional
             Do not fit the sky, only [height, xcen, and ycen].  Default is False.
         weight : boolean, optional
             Weight the data by 1/error**2.  Default is weight=True.
+        absolute : boolean, optional
+            Input and output coordinates are in "absolute" values using the image bounding box.
+              Default is False, everything is relative.
+        retpararray : boolean, optional
+            Return best-fit parameter values as an array.  Default is to return parameters
+              as a catalog.
 
         Returns
         -------
@@ -1094,23 +1139,31 @@ class PSFBase:
                 raise ValueError('PARS dictionary must have x and y')
             cat = pars
 
-        nx,ny = im.shape
+        method = str(method).lower()
+            
+        # Image offset for absolute X/Y coordinates
+        if absolute:
+            imx0 = im.bbox.xrange[0]
+            imy0 = im.bbox.yrange[0]
+
         xc = cat['x']
         yc = cat['y']
+        if absolute:  # offset
+            xc -= imx0
+            yc -= imy0
         if radius is None:
             radius = self.fwhm()
-        x0 = int(np.maximum(0,np.floor(xc-radius)))
-        x1 = int(np.minimum(np.ceil(xc+radius),nx-1))
-        y0 = int(np.maximum(0,np.floor(yc-radius)))
-        y1 = int(np.minimum(np.ceil(yc+radius),ny-1))
-        X,Y = self.xylim2xy([[x0,x1],[y0,y1]])
+        bbox = self.starbbox((xc,yc),im.shape,radius)
+        X,Y = self.bbox2xy(bbox)
         xdata = np.vstack((X.ravel(), Y.ravel()))
-        
-        flux = im.data[x0:x1+1,y0:y1+1]
-        err = im.uncertainty.array[x0:x1+1,y0:y1+1]
-        sky = np.median(im.data[x0:x1+1,y0:y1+1])
+
+        #subim = im[bbox.slices]
+        flux = im.data[bbox.slices]
+        err = im.uncertainty.array[bbox.slices]
+        wt = 1.0/np.maximum(err,1)**2  # weights
+        sky = np.median(flux)
         if nosky: sky=0.0
-        height = im.data[int(np.round(xc)),int(np.round(yc))]-sky
+        height = im.data[int(np.round(yc)),int(np.round(xc))]-sky   # python images are (Y,X)
         initpar = [height,xc,yc,sky]            
         
         # Fit PSF parameters as well
@@ -1120,64 +1173,105 @@ class PSFBase:
         # Remove sky column
         if nosky:
             initpar = np.delete(initpar,3,axis=0)
-            
-        # Use weights
-        if weight:
-            wt = 1.0/np.maximum(err,1)**2
-        
-        # Iterate
-        count = 0
-        bestpar = initpar.copy()
-        while (count<niter):
-            # Use QR or SVD to solve linear system of equations
-            if allpars:
-                m,jac = self.jac(xdata,*bestpar,allpars=True,retmodel=True)
-            else:
-                m,jac = self.jac(xdata,*bestpar,retmodel=True)
-            dy = flux.flatten()-m.flatten()
-            # Multipy by weights dy and jac by weights
-            if weight:
-                dy *= wt.flatten()
-                jac = jac * wt.flatten().reshape(-1,1)
-            # QR decomposition
-            if str(method).lower()=='qr':
-                q,r = np.linalg.qr(jac)
-                rinv = np.linalg.inv(r)
-                dbeta = rinv @ (q.T @ dy)
-            # SVD:
-            elif str(method).lower()=='svd':
-                u,s,vt = np.linalg.svd(jac)
-                # u: [Npix,Npix]
-                # s: [Npars]
-                # vt: [Npars,Npars]
-                # dy: [Npix]
-                sinv = s.copy()*0  # pseudo-inverse
-                sinv[s!=0] = 1/s[s!=0]
-                npars = len(s)
-                dbeta = vt.T @ ((u.T @ dy)[0:npars]*sinv)
-            # Curve_fit
-            elif str(method).lower()=='curve_fit':
-                if allpars==False:
-                    outpars,cov = curve_fit(self.model,xdata,flux.ravel(),sigma=err.ravel(),p0=bestpar,jac=self.jac)
-                    perror = np.sqrt(np.diag(cov))
-                    return outpars,perror
-                # Fit all parameters
-                else:
-                    outpars,cov = curve_fit(self.modelall,xdata,flux.ravel(),sigma=err.ravel(),p0=bestpar,jac=self.jacall)
-                    perror = np.sqrt(np.diag(cov))
-                    return outpars,perror
-            else:
-                raise ValueError('Only SVD or QR methods currently supported')
-            
-            oldpar = bestpar.copy()
-            bestpar += dbeta
-            count += 1
-                
-        return bestpar
 
+        # Initialize the output catalog
+        dt = np.dtype([('id',int),('height',float),('height_error',float),('x',float),
+                       ('x_error',float),('y',float),('y_error',float),('sky',float),
+                       ('sky_error',float),('niter',int)])
+        outcat = np.zeros(1,dtype=dt)
+        outcat['id'] = 1
+        
+        # Curve_fit
+        if method=='curve_fit':
+            self.niter = 0
+            if allpars==False:
+                bestpar,cov = curve_fit(self.model,xdata,flux.ravel(),sigma=err.ravel(),
+                                        p0=initpar,jac=self.jac)
+                perror = np.sqrt(np.diag(cov))
+                model = self.model(xdata,*bestpar)
+                count = self.niter
+                
+            # Fit all parameters
+            else:
+                bestpar,cov = curve_fit(self.modelall,xdata,flux.ravel(),sigma=err.ravel(),
+                                        p0=initpar,jac=self.jacall)
+                perror = np.sqrt(np.diag(cov))
+                model = self.modelall(xdata,*bestpar)
+                count = self.niter
+
+        # All other methods:
+        else:
+            # Iterate
+            count = 0
+            bestpar = initpar.copy()
+            maxpercdiff = 1e10
+            while (count<niter and maxpercdiff>minpercdiff):
+                # Use Cholesky, QR or SVD to solve linear system of equations
+                if allpars:
+                    m,jac = self.jac(xdata,*bestpar,allpars=True,retmodel=True)
+                else:
+                    m,jac = self.jac(xdata,*bestpar,retmodel=True)
+                dy = flux.ravel()-m.ravel()
+                # Solve Jacobian
+                dbeta = lsq.jac_solve(jac,dy,method=method,weight=wt.ravel())
+
+                # Update parameters
+                oldpar = bestpar.copy()
+                bestpar += dbeta
+                # Check differences and changes
+                diff = np.abs(bestpar-oldpar)
+                percdiff = diff.copy()/oldpar*100  # percent differences
+                percdiff[1:3] = diff[1:3]*100               # x/y
+                maxpercdiff = np.max(percdiff)
+            
+                count += 1
+
+            # Get covariance and errors
+            if allpars:
+                model,jac = self.jac(xdata,*bestpar,allpars=True,retmodel=True)
+            else:
+                model,jac = self.jac(xdata,*bestpar,retmodel=True)
+            dy = flux.ravel()-m.ravel()
+            cov = lsq.jac_covariance(jac,dy,wt.ravel())
+            perror = np.sqrt(np.diag(cov))
+
+        # Image offsets for absolute X/Y coordinates
+        if absolute:
+            bestpar[1] += imx0
+            bestpar[2] += imy0
+            
+        # Put values in catalog
+        outcat['height'] = bestpar[0]
+        outcat['height_error'] = perror[0]
+        outcat['x'] = bestpar[1]
+        outcat['x_error'] = perror[1]
+        outcat['y'] = bestpar[2]
+        outcat['y_error'] = perror[2]
+        if not nosky:
+            outcat['sky'] = bestpar[3]
+            outcat['sky_error'] = perror[3]        
+        outcat['niter'] = count
+        
+
+        # Reshape model and make CCDData image with proper bbox
+        model = model.reshape(flux.shape)
+        model = CCDData(model,bbox=bbox,unit=im.unit)
+
+        # Return catalog
+        if not retpararray:
+            if allpars:
+                mpars = bestpar[-len(self.params):]   # model parameters
+                return outcat,model,mpars
+            else:
+                return outcat,model
+        # Return parameter array
+        else:
+            return bestpar,perror,model
+
+    
     def sub(self,im,cat,sky=False,radius=None):
         """
-        Method to fit a single star using the PSF model.
+        Method to subtract a single star using the PSF model.
 
         Parameters
         ----------
@@ -1216,7 +1310,7 @@ class PSFBase:
             if not n in columns:
                 raise ValueError('Catalog must have height, x, y and sky columns')
             
-        nx,ny = im.shape
+        ny,nx = im.shape    # python images are (Y,X)
         nstars = np.array(cat).size
         hpix = self.npix//2
         if radius is None:
@@ -1228,13 +1322,15 @@ class PSFBase:
             pars = [cat['height'][i],cat['x'][i],cat['y'][i]]
             if sky:
                 pars.append(cat['sky'][i])
-            x0 = int(np.maximum(0,np.floor(pars[1]-radius)))
-            x1 = int(np.minimum(np.ceil(pars[1]+radius),nx-1))
-            y0 = int(np.maximum(0,np.floor(pars[2]-radius)))
-            y1 = int(np.minimum(np.ceil(pars[2]+radius),ny-1))
-            xy = [[x0,x1],[y0,y1]]
-            im1 = self(pars=pars,xy=xy)
-            subim[x0:x1+1,y0:y1+1] -= im1
+            bbox = self.starbbox((pars[1],pars[2]),im.shape,radius)
+            #x0 = int(np.maximum(0,np.floor(pars[1]-radius)))
+            #x1 = int(np.minimum(np.ceil(pars[1]+radius),nx))
+            #y0 = int(np.maximum(0,np.floor(pars[2]-radius)))
+            #y1 = int(np.minimum(np.ceil(pars[2]+radius),ny))
+            #bbox = [[x0,x1],[y0,y1]]
+            im1 = self(pars=pars,bbox=bbox)
+            #subim[x0:x1+1,y0:y1+1] -= im1
+            subim[bbox.slices] -= im1            
         return subim
                     
     
@@ -1435,7 +1531,7 @@ class PSFEmpirical(PSFBase):
             raise ValueError('Must input images')
         # MPARS should be a two-element tuple with (parameters, psf cube)
         self.cube = mpars[1]
-        nx,ny,npars = cube.shape
+        ny,nx,npars = cube.shape    # Python images are (Y,X)
         super().__init__(mpars[0],npix=npix)        
 
     def fwhm(self):
