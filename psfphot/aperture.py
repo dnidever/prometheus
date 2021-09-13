@@ -26,9 +26,20 @@ from .ccddata import BoundingBox,CCDData
 from matplotlib.patches import Ellipse
 
 
-def aperphot(image,bkg,objects,aper=[3],gain=1.0):
+def aperphot(image,bkg,objects,aper=[3],gain=None):
     """ Aperture photometry."""
 
+    if isinstance(image,CCDData) is False:
+        raise ValueError("Image must be a CCDData object")
+    
+    # Get gain from image if possible
+    if gain is None:
+        headgain = image.header.get('gain')
+        if headgain is not None:
+            gain = headgain
+        else:
+            gain = 1.0
+        
     # Background subtraction with SEP
     sky = bkg.back()
     data_sub = image.data-sky

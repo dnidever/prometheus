@@ -7,7 +7,7 @@
 __authors__ = 'David Nidever <dnidever@montana.edu?'
 __version__ = '20210908'  # yyyymmdd
 
-
+import sys
 import numpy as np
 from astropy.nddata import CCDData as CCD,StdDevUncertainty
 from photutils.aperture import BoundingBox as BBox
@@ -21,6 +21,12 @@ class CCDData(CCD):
         # Initialize with the parent...
         super().__init__(data, *args, **kwargs)
 
+        # Sky
+        if 'sky' in kwargs:
+            self.sky = sky
+        else:
+            self.sky = None
+        
         ndim = data.ndim
         if ndim==0:
             if bbox is None: bbox=BoundingBox(0,0,0,0)
@@ -42,7 +48,15 @@ class CCDData(CCD):
         else:
             raise ValueError('3D CCDData not supported')
 
+        self.native()
 
+        # for sep we need to ensure that the data is "c-contiguous"
+        # if we used a slice with no copy, then it won't be
+        # check image.data.flags['C_CONTIGUOUS']
+        # can make it c-contiguous by doing
+        # foo = foo.copy(order='C')
+
+        
     # for the string representation also print out the bbox values
         
     def __getitem__(self, item):
@@ -59,6 +73,12 @@ class CCDData(CCD):
         # Let the other methods handle slicing.
         kwargs = self._slice(item)        
         new = self.__class__(**kwargs)
+
+        # Deal with Sky
+        if self.sky is not None:
+            new.sky = self.sky[item]
+        else:
+            new.sky = None
             
         # Get number of starting values and number of output elements
         # 1-D
@@ -106,7 +126,7 @@ class CCDData(CCD):
             # 0-D output
             if np.sum(nel)==0:
                 new._x = newx
-                new._y = newy                
+                new._y = newy
                 return new
                 
             # 1-D output
@@ -148,7 +168,31 @@ class CCDData(CCD):
         """ Y-array."""
         return self._y 
 
+    def native(self):
+        """ Make sure that the arrays use native endian for sep."""
+
+        # Deal with byte order for sep
+        sys_is_le = sys.byteorder == 'little'
+        native_code = sys_is_le and '<' or '>'
+        # data
+        if self.data.dtype.byteorder != native_code:
+            self.data = self.data.byteswap(inplace=True).newbyteorder()
+        # uncertainty
+        if self.uncertainty is not None:
+            if self.uncertainty.array.dtype.byteorder != native_code:
+                self.uncertainty.array = self.uncertainty.array.byteswap(inplace=True).newbyteorder()
+        # mask
+        if self.mask is not None:
+            if self.mask.dtype.byteorder != native_code:
+                self.mask = self.mask.byteswap(inplace=True).newbyteorder()
+        # sky
+        if self.sky is not None:
+            if self.sky.dtype.byteorder != native_code:
+                self.sky = self.sky.byteswap(inplace=True).newbyteorder()            
+
+    # read/write methods? already exists
     
+                
 class BoundingBox(BBox):
 
     def __init__(self, *args, **kwargs):

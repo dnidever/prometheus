@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""PSF.PY - PSF photometry models
+"""MODELS.PY - PSF photometry models
 
 """
 
