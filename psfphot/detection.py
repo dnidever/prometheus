@@ -64,7 +64,8 @@ def plotobj(image,objects):
         ax.add_artist(e)
         
 
-def detection(image,method='sep',nsigma=1.5,fwhm=3,minarea=3,deblend_nthresh=32,deblend_cont=0.000015):
+def detection(image,method='sep',nsigma=1.5,fwhm=3,minarea=3,deblend_nthresh=32,deblend_cont=0.000015,
+              maskthresh=0.0):
     """ Detection algorithm """
 
     if isinstance(image,CCDData) is False:
@@ -111,11 +112,13 @@ def detection(image,method='sep',nsigma=1.5,fwhm=3,minarea=3,deblend_nthresh=32,
             #kernel = np.array([[1,2,1], [2,4,2], [1,2,1]])  # default 3x3 kernel
         else:
             kernel = None
-        
+
+            
         # Detection with SEP
+        #  NOTE! filter_type='matched' for some reason causes ploblems when 2D error array is input
         objects,segmap = sep.extract(data_sub, nsigma, filter_kernel=kernel,minarea=minarea,clean=False,
-                                     mask=mask, err=err, deblend_nthresh=deblend_nthresh,
-                                     deblend_cont=deblend_cont, segmentation_map=True)
+                                     mask=mask, err=err, maskthresh=maskthresh,deblend_nthresh=deblend_nthresh,
+                                     deblend_cont=deblend_cont, filter_type='conv',segmentation_map=True)
         nobj = len(objects)
         objects = Table(objects)
         objects['id'] = np.arange(nobj)+1
