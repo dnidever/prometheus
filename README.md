@@ -1,2 +1,2 @@
-# psfphot
+# prometheus
 PSF photometry
