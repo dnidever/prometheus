@@ -62,18 +62,112 @@ def plotobj(image,objects):
         e.set_facecolor('none')
         e.set_edgecolor('red')
         ax.add_artist(e)
-        
 
-def detection(image,method='sep',nsigma=1.5,fwhm=3,minarea=3,deblend_nthresh=32,deblend_cont=0.000015,
-              maskthresh=0.0):
-    """ Detection algorithm """
+def sepdetect(data,err,mask=None,nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,
+              deblend_cont=0.000015,kernel=None,maskthresh=0.0):
+    """ Detection with sep."""
+
+    
+    # matched filter
+    #  by default a 3x3 kernel is used
+    #  to turn off use filter_kernel=None
+    #  for optimal detection the kernel size should be approximately the PSF
+    if fwhm is not None and kernel is None:
+        npix = np.round(1.6*fwhm)
+        if npix % 2 == 0: npix += 1
+        npix = int(npix)
+        x = np.arange(npix).astype(float)-npix//2
+        kernel = np.exp(-0.5*( x.reshape(-1,1)**2 + x.reshape(1,-2)**2 )/(fwhm/2.35)**2)
+        #kernel = np.array([[1., 2., 3., 2., 1.],
+        #                   [2., 3., 5., 3., 2.],
+        #                   [3., 5., 8., 5., 3.],
+        #                   [2., 3., 5., 3., 2.],
+        #                   [1., 2., 3., 2., 1.]])
+        #objects = sep.extract(data, thresh, filter_kernel=kernel)
+        #kernel = np.array([[1,2,1], [2,4,2], [1,2,1]])  # default 3x3 kernel
+
+            
+    # Detection with SEP
+    #  NOTE! filter_type='matched' for some reason causes ploblems when 2D error array is input
+    objects,segmap = sep.extract(data, nsigma, filter_kernel=kernel,minarea=minarea,clean=False,
+                                 mask=mask, err=err, maskthresh=maskthresh,deblend_nthresh=deblend_nthresh,
+                                 deblend_cont=deblend_cont, filter_type='conv',segmentation_map=True)
+    nobj = len(objects)
+    objects = Table(objects)
+    objects['id'] = np.arange(nobj)+1
+    objects['fwhm'] = np.sqrt(objects['a']**2+objects['b']**2)*2.35
+    return objects,segmap
+
+    
+def daodetect(data,err,mask=None,nsigma=1.5,fwhm=3.0):
+    """ Detection with DAOFinder."""
+
+    threshold = np.median(err)*nsigma
+    daofind = DAOStarFinder(fwhm=fwhm, threshold=threshold, sky=0.0)  
+    objects = daofind(data, mask=mask)
+    # homogenize the columns
+    objects['xcentroid'].name = 'x'
+    objects['ycentroid'].name = 'y'        
+    return objects
+    
+def irafdetect(data,err,mask=None,nsigma=1.5,fwhm=3.0):
+    """ Detection with IRAFFinder."""
+    threshold = np.median(err)*nsigma        
+    iraffind = IRAFStarFinder(fwhm=fwhm, threshold=threshold, sky=0.0)
+    objects = iraffind(data, mask=mask)
+    # homogenize the columns
+    objects['xcentroid'].name = 'x'
+    objects['ycentroid'].name = 'y'        
+    return objects
+
+
+def detect(image,method='sep',nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,deblend_cont=0.000015,
+           kernel=None,maskthresh=0.0):
+    """
+    Detection algorithm
+
+    Parameters
+    ----------
+    image : CCDData object
+       The image to detect sources in.
+    method : str, optional
+       Method to use.  Options are sep, dao, and iraf.  Default is sep.
+    nsigma : float, optional
+       Detection threshold in number of sigma.  Default is 1.5.
+    fwhm : float, optional
+       Estimate for PSF full width at half maximum.  Default is 3.0.
+    minarea : int, optional
+       Minimum area requirement for an object (sep only).  Default is 3.
+    deblend_nthresh : int, optional
+       Number of deblending thresholds (sep only).  Default is 32.
+    deblend_cont : float, optional
+       Minimum contrast ratio used for object deblending (sep only).
+         Default is 0.000015.  To entirely disable deblending, set to 1.0.
+    kernel : numpy array, optional
+        Filter kernel used for on-the-fly filtering (used to
+        enhance detection). Default is a 3x3 array.
+    maskthresh : float, optional
+       Threshold for a pixel to be masked (sep only). Default is 0.0.
+    Returns
+    -------
+    objects : astropy Table
+       Table of objects with centroids.
+    segmap : numpy array
+       Segmentation (sep only).
+
+    Example
+    -------
+
+    obj = detect(image,nsigma=1.5,fwhm=4.0)
+
+
+    """
 
     if isinstance(image,CCDData) is False:
         raise ValueError("Image must be a CCDData object")
     
     # Background subtraction with SEP
-
-    # measure a spatially varying background on the image
+    #  measure a spatially varying background on the image
     if image.data.flags['C_CONTIGUOUS']==False:
         data = image.data.copy(order='C')
         mask = image.mask.copy(order='C')
@@ -92,63 +186,27 @@ def detection(image,method='sep',nsigma=1.5,fwhm=3,minarea=3,deblend_nthresh=32,
     
     # SEP
     if method=='sep':
-    
-        # matched filter
-        #  by default a 3x3 kernel is used
-        #  to turn off use filter_kernel=None
-        #  for optimal detection the kernel size should be approximately the PSF
-        if fwhm is not None:
-            npix = np.round(1.6*fwhm)
-            if npix % 2 == 0: npix += 1
-            npix = int(npix)
-            x = np.arange(npix).astype(float)-npix//2
-            kernel = np.exp(-0.5*( x.reshape(-1,1)**2 + x.reshape(1,-2)**2 )/(fwhm/2.35)**2)
-            #kernel = np.array([[1., 2., 3., 2., 1.],
-            #                   [2., 3., 5., 3., 2.],
-            #                   [3., 5., 8., 5., 3.],
-            #                   [2., 3., 5., 3., 2.],
-            #                   [1., 2., 3., 2., 1.]])
-            #objects = sep.extract(data, thresh, filter_kernel=kernel)
-            #kernel = np.array([[1,2,1], [2,4,2], [1,2,1]])  # default 3x3 kernel
-        else:
-            kernel = None
-
-            
-        # Detection with SEP
-        #  NOTE! filter_type='matched' for some reason causes ploblems when 2D error array is input
-        objects,segmap = sep.extract(data_sub, nsigma, filter_kernel=kernel,minarea=minarea,clean=False,
-                                     mask=mask, err=err, maskthresh=maskthresh,deblend_nthresh=deblend_nthresh,
-                                     deblend_cont=deblend_cont, filter_type='conv',segmentation_map=True)
-        nobj = len(objects)
-        objects = Table(objects)
-        objects['id'] = np.arange(nobj)+1
-        objects['fwhm'] = np.sqrt(objects['a']**2+objects['b']**2)*2.35
-        return objects,segmap
+        return sepdetect(data_sub,err,mask=mask,nsigma=nsigma,minarea=minarea,
+                         maskthresh=maskthresh,deblend_nthresh=deblend_nthresh,
+                         deblend_cont=deblend_cont,kernel=kernel)
 
 
     # DAOFinder
     elif method=='dao':
-        threshold = np.median(err)*nsigma
-        daofind = DAOStarFinder(fwhm=fwhm, threshold=threshold, sky=0.0)  
-        objects = daofind(data_sub, mask=mask)
-        # homogenize the columns
-        objects['xcentroid'].name = 'x'
-        objects['ycentroid'].name = 'y'        
+        return daodetect(data_sub,err,mask=mask,nsigma=nsigma,fwhm=fwhm)
         return objects
         
     # IRAFFinder
     elif method=='iraf':
-        threshold = np.median(err)*nsigma        
-        iraffind = IRAFStarFinder(fwhm=fwhm, threshold=threshold, sky=0.0)
-        objects = iraffind(data_sub, mask=mask)
-        # homogenize the columns
-        objects['xcentroid'].name = 'x'
-        objects['ycentroid'].name = 'y'        
+        return irafdetect(data_sub,err,mask=mask,nsigma=nsigma,fwhm=fwhm)
         return objects
         
     else:
         raise ValueError('Only sep, dao or iraf methods supported')
-        
+
+
+    # Maybe add my own detection algorithm here, just peaks?
+    
     
     import pdb; pdb.set_trace()
     
