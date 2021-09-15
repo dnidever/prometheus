@@ -65,7 +65,8 @@ def plotobj(image,objects):
         ax.add_artist(e)
 
 def sepdetect(image,nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,
-              deblend_cont=0.000015,kernel=None,maskthresh=0.0):
+              deblend_cont=0.000015,kernel=None,maskthresh=0.0,
+              segmentation_map=False):
     """ Detection with sep."""
 
     
@@ -90,21 +91,45 @@ def sepdetect(image,nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,
             
     # Detection with SEP
     #  NOTE! filter_type='matched' for some reason causes ploblems when 2D error array is input
-    objects,segmap = sep.extract(image.data-image.sky, nsigma, filter_kernel=kernel,minarea=minarea,
-                                 clean=False,mask=image.mask, err=image.uncertainty.array,
-                                 maskthresh=maskthresh,deblend_nthresh=deblend_nthresh,
-                                 deblend_cont=deblend_cont,filter_type='conv',segmentation_map=True)
+    if image.data.flags['C_CONTIGUOUS']==False:
+        data = image.data.copy(order='C')
+    else:
+        data = image.data
+    if image.error.flags['C_CONTIGUOUS']==False:
+        error = image.error.copy(order='C')
+    else:
+        error = image.error
+    if image.sky.flags['C_CONTIGUOUS']==False:
+        sky = image.sky.copy(order='C')
+    else:
+        sky = image.sky
+    if image.mask.flags['C_CONTIGUOUS']==False:
+        mask = image.mask.copy(order='C')
+    else:
+        mask = image.mask
+    out = sep.extract(data-sky, nsigma, filter_kernel=kernel,minarea=minarea,
+                      clean=False,mask=mask, err=error,
+                      maskthresh=maskthresh,deblend_nthresh=deblend_nthresh,
+                      deblend_cont=deblend_cont,filter_type='conv',
+                      segmentation_map=segmentation_map)
+    if segmentation_map:
+        objects,segmap = out
+    else:
+        objects = out
     nobj = len(objects)
     objects = Table(objects)
     objects['id'] = np.arange(nobj)+1
     objects['fwhm'] = np.sqrt(objects['a']**2+objects['b']**2)*2.35
-    return objects,segmap
 
+    if segmentation_map:
+        return objects,segmap
+    else:
+        return objects
     
 def daodetect(image,nsigma=1.5,fwhm=3.0):
     """ Detection with DAOFinder."""
 
-    threshold = np.median(image.uncertainty.array)*nsigma
+    threshold = np.median(image.error)*nsigma
     daofind = DAOStarFinder(fwhm=fwhm, threshold=threshold, sky=0.0)  
     objects = daofind(image.data-image.sky, mask=image.mask)
     # homogenize the columns
@@ -114,7 +139,7 @@ def daodetect(image,nsigma=1.5,fwhm=3.0):
     
 def irafdetect(image,nsigma=1.5,fwhm=3.0):
     """ Detection with IRAFFinder."""
-    threshold = np.median(image.uncertainty.array)*nsigma        
+    threshold = np.median(image.error)*nsigma        
     iraffind = IRAFStarFinder(fwhm=fwhm, threshold=threshold, sky=0.0)
     objects = iraffind(image.data-image.sky, mask=image.mask)
     # homogenize the columns
@@ -127,7 +152,7 @@ def peaks(image,nsigma=1.5,thresh=None):
 
     # Comparison between image_max and im to find the coordinates of local maxima
     data = image.data-image.sky
-    err = image.uncertainty.array
+    err = image.error
     coordinates = peak_local_max(data, threshold_abs=thresh, min_distance=3)
     xind = coordinates[:,1]
     yind = coordinates[:,0]    
