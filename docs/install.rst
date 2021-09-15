@@ -6,18 +6,11 @@ Installation
 Installing Prometheus
 =====================
 
-Until I get Prometheus set up with PyPi, it's best to install it from source using GitHub.
+Until I get Prometheus set up with PyPi, it's best to install it from source from GitHub.
 
 .. code-block:: bash
 
-    pip install https://github.com/dnidever/prometheus.git
-
-Then install it:
-
-.. code-block:: bash
-
-    python setup.py install
-
+    pip install git+https://github.com/dnidever/prometheus
 
 
 Dependencies
