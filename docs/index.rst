@@ -9,10 +9,8 @@ Prometheus
 
 Introduction
 ============
-|Prometheus| [#f1]_ is a generic stellar abundance determination package that fits observed spectrum with synthetic spectral (from the Synspec package).
-|Prometheus| uses the `Doppler <https://github.com/dnidever/doppler>`_ package to get an initial estimate of the main stellar parameters (Teff, logg,
-[Fe/H]) and radial velocity.  It then performs a least-squares fit of the data by searching through parameter space and generated a new Synspec synthetic
-spectrum (using the `synple <https://github.com/callendeprieto/synpl>`_ python wrapper package) at each position.
+|Prometheus| [#f1]_ is a point spread function (PSF) photometry package that implements many of the standard practices
+in Peter Stetson's DAOPHOT package.
 
 .. toctree::
    :maxdepth: 1
@@ -22,16 +20,7 @@ spectrum (using the `synple <https://github.com/callendeprieto/synpl>`_ python w
 
 Description
 ===========
-|Prometheus| has two main modes of operation: 1) a multi-step, iterative fit of the spectrum; or 2) fitting a set of input parameters directly using least-squares.
-The first option is the default and is the easiest and most automatic way to fit a spectrum.  The second option can be used for more hands-on situations.
-
-The default, multi-step approach:
-
-1. Fit Teff/logg/[Fe/H]/RV using Doppler
-2. Fit Teff/logg/[Fe/H]/RV + vsini with Doppler model
-3. Fit stellar parameters (Teff/logg/[Fe/H]/[alpha/H]), RV and broadening (Vrot/Vmicro)
-4. Fit each element one at a time holding everything else fixed
-5. Fit everything simultaneously
+|Prometheus| has a number of modules to perform photometry.
 
 |Prometheus| can be called from python directly or the command-line script `hofer` can be used.
 
@@ -49,35 +38,26 @@ hofer
 =====
 Here are the various input arguments for command-line script `hofer`::
 
-  usage: hofer [-h] [-e ELEM] [-f FPARS] [-i INIT] [--outfile OUTFILE]
-               [--figfile FIGFILE] [-d OUTDIR] [-l LIST] [-p] [--vmicro]
-               [--vsini] [-r READER] [-v [VERBOSE]]
-               files [files ...]
+  usage: prometheus [-h] [--outfile OUTFILE] [--figfile FIGFILE] [-d OUTDIR]
+                    [-l] [-p] [-v] [-t]
+                    files [files ...]
 
-  Run Prometheus fitting on spectra
+  Run Prometheus on an image
 
   positional arguments:
-    files                 Spectrum FITS files
+    files                 Images FITS files or list
 
   optional arguments:
     -h, --help            show this help message and exit
-    -e ELEM, --elem ELEM  List of elements to fit
-    -f FPARS, --fpars FPARS
-                          List of parameteres to fit
-    -i INIT, --init INIT  Initial parameters to use
-    -o, --outfile OUTFILE Output filename
+    --outfile OUTFILE     Output filename
     --figfile FIGFILE     Figure filename
     -d OUTDIR, --outdir OUTDIR
                           Output directory
-    -l LIST, --list LIST  Input list of FITS files
+    -l, --list            Input is a list of FITS files
     -p, --plot            Save the plots
-    --vmicro              Fit vmicro
-    --vsini               Fit vsini
-    -r READER, --reader READER
-                          The spectral reader to use
-    -v [VERBOSE], --verbose [VERBOSE]
-                          Verbosity level (0, 1, 2)
+    -v, --verbose         Verbose output
+    -t, --timestamp       Add timestamp to Verbose output
 
 .. rubric:: Footnotes
 
-.. [#f1] For `Joseph von Prometheus <https://en.wikipedia.org/wiki/Joseph_von_Prometheus>`_ who was a German physicist and the first one to systematically study the absorption lines in the Sun's spectrum.
+.. [#f1] In Greek mythology, `Prometheus <https://en.wikipedia.org/wiki/Prometheus>`_ is a Titan that brings fire from the heavens down to humans on earth.
