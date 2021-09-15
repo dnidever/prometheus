@@ -8,36 +8,99 @@ __authors__ = 'David Nidever <dnidever@montana.edu?'
 __version__ = '20210908'  # yyyymmdd
 
 import sys
+import time
 import numpy as np
 from astropy.nddata import CCDData as CCD,StdDevUncertainty
+from astropy.wcs import WCS
+from astropy.io import fits
 from photutils.aperture import BoundingBox as BBox
 from copy import deepcopy
-from . import sky
+from . import sky as psky
+
+
+def poissonnoise(data,gain=1.0,rdnoise=0.0):
+    """ Generate Poisson noise model (ala DAOPHOT)."""
+    # gain
+    # rdnoise
+    
+    noise = np.sqrt(data/gain + rdnoise**2)
+    return noise
+
+def getgain(image):
+    """ Get the gain from the header."""
+
+    gain = 1.0  # default
+    
+    # check if there's a header
+    if hasattr(image,'meta'):
+        if image.meta is not None:
+            # Try all versions of gain
+            for f in ['gain','egain','gaina']:
+                hgain = image.meta.get(f)
+                if hgain is not None:
+                    gain = hgain
+                    break
+    return gain
+    
+def getrdnoise(image):
+    " Get the read noise from the header."""
+
+    rdnoise = 0.0  # default
+    
+    # check if there's a header
+    if hasattr(image,'meta'):
+        if image.meta is not None:
+            # Try all versions of rdnoise
+            for f in ['rdnoise','readnois','enoise','rdnoisea']:
+                hrdnoise = image.meta.get(f)
+                if hrdnoise is not None:
+                    rdnoise = hrdnoise
+                    break
+    return rdnoise
 
 
 class CCDData(CCD):
 
 
-    def __init__(self, data, *args, bbox=None, copy=True, **kwargs):
+    def __init__(self, data, *args, error=None, bbox=None, gain=None, rdnoise=None, sky=None,
+                 copy=True, skyfunc=None, **kwargs):
         # Make sure the original version copies all of the input data
         # otherwise bad things will happen when we convert to native byte-order
+
+        # Pull out error from arguments
+        if len(args)>0:
+            error = args[0]
+            if len(args)==1:
+                args = ()
+            else:
+                args = (None,*args[1:])
         
         # Initialize with the parent...
         super().__init__(data, *args, copy=copy, **kwargs)
-        
+
+        # Error
+        self._error = error
         # Sky
-        if 'sky' in kwargs:
-            self._sky = sky
-        else:
-            self._sky = None
+        self._sky = sky
         # Sky estimation function
-        if 'skyfunc' in kwargs:
+        if skyfunc is not None:
             self._skyfunc = skyfunc
         else:
-            self._skyfunc = sky.sepsky
+            self._skyfunc = psky.sepsky
+
+        # Gain
+        self._gain = gain
+        # Read noise
+        self._rdnoise = rdnoise
             
         # Copy
         if copy:
+            if self._gain is not None:
+                self._gain = deepcopy(self._gain)
+            if self._rdnoise is not None:
+                self._rdnoise = deepcopy(self._rdnoise)
+            if self._error is not None:
+                self._error = deepcopy(self._error)
             if self._sky is not None:
                 self._sky = deepcopy(self._sky)
             self._skyfunc = deepcopy(self._skyfunc)
@@ -88,12 +151,22 @@ class CCDData(CCD):
         # Let the other methods handle slicing.
         kwargs = self._slice(item)        
         new = self.__class__(**kwargs)
-        
+
+        # Deal with error
+        if self._error is not None:
+            new._error = self._error[item]
+        else:
+            new._error = None
         # Deal with Sky
         if self._sky is not None:
             new._sky = self._sky[item]
         else:
             new._sky = None
+        # Gain and rdnoise
+        if self._gain is not None:
+            new._gain = deepcopy(self._gain)
+        if self._rdnoise is not None:
+            new._rdnoise = deepcopy(self._rdnoise)
             
         # Get number of starting values and number of output elements
         # 1-D
@@ -167,13 +240,36 @@ class CCDData(CCD):
         return new
 
     @property
+    def error(self):
+        """ Return the uncertainty."""
+        # if error not input
+        # estimate error from image plus gain
+        if self._error is None:
+            self._error = poissonnoise(self.data,self.gain,self.rdnoise)
+        return self._error
+    
+    @property
     def sky(self):
         """ Return the sky."""
         # estimate the sky
         if self._sky is None:
             self._sky = self._skyfunc(self)
         return self._sky
-            
+
+    @property
+    def gain(self):
+        """ Return the gain."""
+        if self._gain is None:
+            self._gain = getgain(self)
+        return self._gain
+
+    @property
+    def rdnoise(self):
+        """ Return the read noise."""
+        if self._rdnoise is None:
+            self._rdnoise = getrdnoise(self)
+        return self._rdnoise    
+    
     @property
     def bbox(self):
         """ Boundary box."""
@@ -212,9 +308,79 @@ class CCDData(CCD):
             if self._sky.dtype.byteorder != native_code:
                 self._sky = self._sky.byteswap(inplace=True).newbyteorder()            
 
-    # read/write methods? already exists
+    def copy(self):
+        """
+        Return a copy of the CCDData object.
+        """
+        return self.__class__(self, copy=True, error=self._error, gain=self._gain, rdnoise=self._rdnoise)
+
     
-                
+    # read/write methods? already exists
+    # put data, error, mask, sky in separate extensions
+
+    def write(self,outfile,overwrite=True):
+        """ Write the image data to a file."""
+
+        hdulist = fits.HDUList()
+        # HDU0: Data and header
+        hdulist.append(fits.PrimaryHDU(self.data,self.header))
+        hdulist[0].header['IMAGTYPE'] = 'Prometheus'
+        # HDU1: error
+        hdulist.append(fits.ImageHDU(self.error))
+        hdulist[1].header['BUNIT'] = 'Uncertainty'
+        # HDU2: mask
+        if self.mask is None:
+            hdulist.append(fits.ImageHDU(self.mask))
+        else:
+            hdulist.append(fits.ImageHDU(self.mask.astype(int)))            
+        hdulist[2].header['BUNIT'] = 'Mask'
+        # HDU3: flags
+        hdulist.append(fits.ImageHDU(self.flags))
+        hdulist[3].header['BUNIT'] = 'Flags'
+        # HDU4: sky
+        hdulist.append(fits.ImageHDU(self.sky))
+        hdulist[4].header['BUNIT'] = 'Sky'
+        hdulist.writeto(outfile,overwrite=overwrite)
+        hdulist.close()
+        
+    @classmethod
+    def read(cls,filename):
+        """ Read in an image from file."""
+
+        hdulist = fits.open(filename)
+        nhdu = len(hdulist)
+        # HDU0: Data and header
+        data = hdulist[0].data
+        head = hdulist[0].header
+        # HDU1: error
+        if nhdu>1:
+            error = hdulist[1].data
+            ehead = hdulist[1].header
+        # HDU2: mask
+        if nhdu>2:
+            mask = hdulist[2].data
+            mhead = hdulist[2].header
+        # HDU3: flags
+        if nhdu>3:
+            flags = hdulist[3].data
+            fhead = hdulist[3].header
+        # HDU4: sky
+        if nhdu>4:
+            sky = hdulist[4].data
+            shead = hdulist[4].header
+        hdulist.close()
+        # Make WCS, this doesn't capture the PV#_# values
+        w = WCS(head)
+        # Units
+        unit = head.get('bunit')
+        if unit is None:
+            unit = 'adu'
+        # make the ccddata object
+        image = CCDData(data,error,mask=mask,meta=head,flags=flags,sky=sky,wcs=w,unit=unit)
+        
+        return image
+
+    
 class BoundingBox(BBox):
 
     def __init__(self, *args, **kwargs):
