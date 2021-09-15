@@ -84,6 +84,8 @@ def aperphot(image,objects,aper=[3],gain=None,mag_zeropoint=25.0):
     outcat['magerr_auto'] = 0.0
     outcat['kronrad'] = kronrad
     outcat['flag_auto'] = np.int16(0)
+
+    # BACKGROUND ANNULUS???
     
     # Only use elliptical aperture if Kron radius is large enough
     # Use circular aperture photometry if the Kron radius is too small

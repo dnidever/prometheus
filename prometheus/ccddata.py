@@ -11,43 +11,58 @@ import sys
 import numpy as np
 from astropy.nddata import CCDData as CCD,StdDevUncertainty
 from photutils.aperture import BoundingBox as BBox
+from copy import deepcopy
+from . import sky
 
 
 class CCDData(CCD):
 
 
-    def __init__(self, data, *args, bbox=None, **kwargs):
-
+    def __init__(self, data, *args, bbox=None, copy=True, **kwargs):
+        # Make sure the original version copies all of the input data
+        # otherwise bad things will happen when we convert to native byte-order
+        
         # Initialize with the parent...
-        super().__init__(data, *args, **kwargs)
-
+        super().__init__(data, *args, copy=copy, **kwargs)
+        
         # Sky
         if 'sky' in kwargs:
-            self.sky = sky
+            self._sky = sky
         else:
-            self.sky = None
-        
-        ndim = data.ndim
+            self._sky = None
+        # Sky estimation function
+        if 'skyfunc' in kwargs:
+            self._skyfunc = skyfunc
+        else:
+            self._skyfunc = sky.sepsky
+            
+        # Copy
+        if copy:
+            if self._sky is not None:
+                self._sky = deepcopy(self._sky)
+            self._skyfunc = deepcopy(self._skyfunc)
+            
+        ndim = self.data.ndim
         if ndim==0:
             if bbox is None: bbox=BoundingBox(0,0,0,0)
             self._bbox = bbox
             self._x = None
             self._y = None         
         elif ndim==1:
-            nx, = data.shape
+            nx, = self.data.shape
             if bbox is None: bbox=BoundingBox(0,nx,0,0)
             self._bbox = bbox
             self._x = np.arange(bbox.xrange[0],bbox.xrange[-1])
             self._y = None
         elif ndim==2:
-            nx,ny = data.shape
+            nx,ny = self.data.shape
             if bbox is None: bbox=BoundingBox(0,nx,0,ny)
             self._bbox = bbox
             self._x = np.arange(bbox.xrange[0],bbox.xrange[-1])
             self._y = np.arange(bbox.yrange[0],bbox.yrange[-1])
         else:
             raise ValueError('3D CCDData not supported')
-
+        
         self.native()
 
         # for sep we need to ensure that the data is "c-contiguous"
@@ -73,12 +88,12 @@ class CCDData(CCD):
         # Let the other methods handle slicing.
         kwargs = self._slice(item)        
         new = self.__class__(**kwargs)
-
+        
         # Deal with Sky
-        if self.sky is not None:
-            new.sky = self.sky[item]
+        if self._sky is not None:
+            new._sky = self._sky[item]
         else:
-            new.sky = None
+            new._sky = None
             
         # Get number of starting values and number of output elements
         # 1-D
@@ -150,7 +165,14 @@ class CCDData(CCD):
             raise ValueError('3D CCDData not supported')            
                 
         return new
-        
+
+    @property
+    def sky(self):
+        """ Return the sky."""
+        # estimate the sky
+        if self._sky is None:
+            self._sky = self._skyfunc(self)
+        return self._sky
             
     @property
     def bbox(self):
@@ -186,9 +208,9 @@ class CCDData(CCD):
             if self.mask.dtype.byteorder != native_code:
                 self.mask = self.mask.byteswap(inplace=True).newbyteorder()
         # sky
-        if self.sky is not None:
-            if self.sky.dtype.byteorder != native_code:
-                self.sky = self.sky.byteswap(inplace=True).newbyteorder()            
+        if self._sky is not None:
+            if self._sky.dtype.byteorder != native_code:
+                self._sky = self._sky.byteswap(inplace=True).newbyteorder()            
 
     # read/write methods? already exists
     

@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 import sep
 from photutils.detection import DAOStarFinder,IRAFStarFinder
+from skimage.feature import peak_local_max
     
 # A bunch of the Gaussian2D and Moffat2D code comes from astropy's modeling module
 # https://docs.astropy.org/en/stable/_modules/astropy/modeling/functional_models.html
@@ -63,7 +64,7 @@ def plotobj(image,objects):
         e.set_edgecolor('red')
         ax.add_artist(e)
 
-def sepdetect(data,err,mask=None,nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,
+def sepdetect(image,nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,
               deblend_cont=0.000015,kernel=None,maskthresh=0.0):
     """ Detection with sep."""
 
@@ -89,9 +90,10 @@ def sepdetect(data,err,mask=None,nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=3
             
     # Detection with SEP
     #  NOTE! filter_type='matched' for some reason causes ploblems when 2D error array is input
-    objects,segmap = sep.extract(data, nsigma, filter_kernel=kernel,minarea=minarea,clean=False,
-                                 mask=mask, err=err, maskthresh=maskthresh,deblend_nthresh=deblend_nthresh,
-                                 deblend_cont=deblend_cont, filter_type='conv',segmentation_map=True)
+    objects,segmap = sep.extract(image.data-image.sky, nsigma, filter_kernel=kernel,minarea=minarea,
+                                 clean=False,mask=image.mask, err=image.uncertainty.array,
+                                 maskthresh=maskthresh,deblend_nthresh=deblend_nthresh,
+                                 deblend_cont=deblend_cont,filter_type='conv',segmentation_map=True)
     nobj = len(objects)
     objects = Table(objects)
     objects['id'] = np.arange(nobj)+1
@@ -99,28 +101,50 @@ def sepdetect(data,err,mask=None,nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=3
     return objects,segmap
 
     
-def daodetect(data,err,mask=None,nsigma=1.5,fwhm=3.0):
+def daodetect(image,nsigma=1.5,fwhm=3.0):
     """ Detection with DAOFinder."""
 
-    threshold = np.median(err)*nsigma
+    threshold = np.median(image.uncertainty.array)*nsigma
     daofind = DAOStarFinder(fwhm=fwhm, threshold=threshold, sky=0.0)  
-    objects = daofind(data, mask=mask)
+    objects = daofind(image.data-image.sky, mask=image.mask)
     # homogenize the columns
     objects['xcentroid'].name = 'x'
     objects['ycentroid'].name = 'y'        
     return objects
     
-def irafdetect(data,err,mask=None,nsigma=1.5,fwhm=3.0):
+def irafdetect(image,nsigma=1.5,fwhm=3.0):
     """ Detection with IRAFFinder."""
-    threshold = np.median(err)*nsigma        
+    threshold = np.median(image.uncertainty.array)*nsigma        
     iraffind = IRAFStarFinder(fwhm=fwhm, threshold=threshold, sky=0.0)
-    objects = iraffind(data, mask=mask)
+    objects = iraffind(image.data-image.sky, mask=image.mask)
     # homogenize the columns
     objects['xcentroid'].name = 'x'
     objects['ycentroid'].name = 'y'        
     return objects
 
+def peaks(image,nsigma=1.5,thresh=None):
+    """ Detect peaks."""
 
+    # Comparison between image_max and im to find the coordinates of local maxima
+    coordinates = peak_local_max(image.data-image.sky, threshold_abs=thresh, min_distance=3)
+    xind = coordinates[:,1]
+    yind = coordinates[:,0]    
+    
+    # Check that they are above the error limit
+    ntresh = data[yind,xind]/(nsigma*err[yind,xind])
+    if mask is None:
+        gd, = np.where(nthresh >= 1.0)
+    else:
+        gd, = np.where((nthresh >= 1.0) & (mask[yind,xind]==False))
+    nobj = len(gd)
+    dtype = np.dtype([('id',int),('x',float),('y',float),('nthresh',float)])
+    objects = np.zeros(nobj,dtype=dtype)
+    objects['id'] = np.arange(nobj)+1
+    objects['x'] = xind[gd]
+    objects['y'] = yind[gd]
+    objects['nthresh'] = nthresh[gd]
+    return objects
+    
 def detect(image,method='sep',nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,deblend_cont=0.000015,
            kernel=None,maskthresh=0.0):
     """
@@ -165,40 +189,25 @@ def detect(image,method='sep',nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,d
 
     if isinstance(image,CCDData) is False:
         raise ValueError("Image must be a CCDData object")
-    
-    # Background subtraction with SEP
-    #  measure a spatially varying background on the image
-    if image.data.flags['C_CONTIGUOUS']==False:
-        data = image.data.copy(order='C')
-        mask = image.mask.copy(order='C')
-        err = image.uncertainty.array.copy(order='C')
-    else:
-        data = image.data
-        mask = image.mask
-        err = image.uncertainty.array
-    bkg = sep.Background(data, mask=mask, bw=64, bh=64, fw=3, fh=3)
-    sky = bkg.back()
-    image.sky = sky
-    data_sub = data-sky
 
     # Detection method
     method = str(method).lower()
     
     # SEP
     if method=='sep':
-        return sepdetect(data_sub,err,mask=mask,nsigma=nsigma,minarea=minarea,
+        return sepdetect(image,nsigma=nsigma,minarea=minarea,
                          maskthresh=maskthresh,deblend_nthresh=deblend_nthresh,
                          deblend_cont=deblend_cont,kernel=kernel)
 
 
     # DAOFinder
     elif method=='dao':
-        return daodetect(data_sub,err,mask=mask,nsigma=nsigma,fwhm=fwhm)
+        return daodetect(image,nsigma=nsigma,fwhm=fwhm)
         return objects
         
     # IRAFFinder
     elif method=='iraf':
-        return irafdetect(data_sub,err,mask=mask,nsigma=nsigma,fwhm=fwhm)
+        return irafdetect(image,nsigma=nsigma,fwhm=fwhm)
         return objects
         
     else:
