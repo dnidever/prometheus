@@ -11,6 +11,6 @@ setup(name='prometheus',
       url='https://github.com/dnidever/prometheus',
       packages=find_packages(exclude=["tests"]),
 #      scripts=['bin/dopfit','bin/dopjointfit','bin/doppler'],
-      requires=['numpy','astropy(>=4.0)','scipy','dlnpyutils'],
+      requires=['numpy','astropy(>=4.0)','scipy','dlnpyutils','sep','photutils'],
 #      include_package_data=True,
 )
