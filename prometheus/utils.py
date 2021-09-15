@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""PSF.PY - Some PSF routines
+"""UTILS.PY - Some PSF utility routines
 
 """
 
@@ -23,10 +23,30 @@ from .ccddata import CCDData
 def estimatefwhm(objects):
     """ Estimate FWHM using objects."""
 
-    # Morphology guts
-    gd, = np.where(objects['fwhm'] < 10)
+    # Check that we have all of the columns that we need
+    for f in ['mag_auto','magerr_auto','flags','fwhm']:
+        if f not in objects.colnames:
+            raise ValueError('objects catalog must have mag_auto, magerr_auto, flags and fwhm columns')
+    
+    # Select good sources
+    gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.05) &
+                 (objects['flags']==0))
+    ngdobjects = np.sum(gdobjects)
+    # Not enough good source, remove FLAGS cut
+    if (ngdobjects<10):
+        gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.05))
+        ngdobjects = np.sum(gdobjects)
+    # Not enough sources, lower thresholds
+    if (ngdobjects<10):
+        gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.08))
+        ngdobjects = np.sum(gdobjects)            
+    medfwhm = np.median(objects[gdobjects]['fwhm'])
+    print('FWHM = %5.2f pixels (%d sources)' % (medfwhm, ngdobjects))
 
-def psfstars(objects,image=None,nstars=100,logger=None):
+    return medfwhm
+
+    
+def pickpsfstars(objects,fwhm,image=None,nstars=100,logger=None):
     """ Pick PSF stars."""
 
     # -morph cuts
@@ -51,33 +71,32 @@ def psfstars(objects,image=None,nstars=100,logger=None):
     # -no flags set
     if fwhm<1.8:
         gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.1) & 
-                 (objects['fwhm']*3600.>0.5*fwhm) & (objects['fwhm']*3600.<1.5*fwhm) &
+                 (objects['fwhm']>0.5*fwhm) & (objects['fwhm']<1.5*fwhm) &
                  (objects['mag_auto']>(minmag+1.0)) & (objects['mag_auto']<(maxmag-0.5)) &
-                 (objects['flags']==0) & (objects['IMAFLAGS_ISO']==0))
+                 (objects['flags']==0))
         ngdobjects = np.sum(gdobjects)
     # Do not use CLASS_STAR if seeing bad, not as reliable
     else:
         gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.1) & 
-                 (objects['fwhm']*3600.>0.5*fwhm) & (objects['fwhm']*3600.<1.5*fwhm) &
+                 (objects['fwhm']>0.5*fwhm) & (objects['fwhm']<1.5*fwhm) &
                  (objects['mag_auto']>(minmag+1.0)) & (objects['mag_auto']<(maxmag-0.5)) &
-                 (objects['flags']==0) & (objects['IMAFLAGS_ISO']==0))
+                 (objects['flags']==0))
         ngdobjects = np.sum(gdobjects)
     # No candidate, loosen cuts
     if ngdobjects<10:
-        logger.info("Too few PSF stars on first try. Loosening cuts")
+        print("Too few PSF stars on first try. Loosening cuts")
         gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.15) & 
-                 (objects['fwhm']*3600.>0.2*self.seeing) & (objects['fwhm']*3600.<1.8*fwhm) &
+                 (objects['fwhm']>0.2*fwhm) & (objects['fwhm']<1.8*fwhm) &
                  (objects['mag_auto']>(minmag+0.5)) & (objects['mag_auto']<(maxmag-0.5)))
         ngdobjects = np.sum(gdobjects)
     # No candidates
     if ngdobjects==0:
-        logger.error("No good PSF stars found")
-        raise
+        raise Exception('No good PSF stars found')
 
     # Candidate PSF stars, use only Nstars, and sort by magnitude
     si = np.argsort(objects[gdobjects]['mag_auto'])
     psfobjects = objects[gdobjects][si]
     if ngdobjects>nstars: psfobjects=psfobjects[0:nstars]
-    logger.info(str(len(psfobjects))+" PSF stars found")
+    print(str(len(psfobjects))+" PSF stars found")
     
     return psfobjects

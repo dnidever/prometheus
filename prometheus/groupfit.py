@@ -136,7 +136,7 @@ class GroupFitter(object):
         y,x = np.unravel_index(uind1,image.shape)
         
         imflatten = image.data.ravel()[uind1]
-        errflatten = image.uncertainty.array.ravel()[uind1]
+        errflatten = image.error.ravel()[uind1]
         # Save information on the "flattened" arrays
         self.ntotpix = ntotpix
         self.imflatten = imflatten

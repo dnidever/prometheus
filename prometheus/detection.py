@@ -91,22 +91,9 @@ def sepdetect(image,nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,
             
     # Detection with SEP
     #  NOTE! filter_type='matched' for some reason causes ploblems when 2D error array is input
-    if image.data.flags['C_CONTIGUOUS']==False:
-        data = image.data.copy(order='C')
-    else:
-        data = image.data
-    if image.error.flags['C_CONTIGUOUS']==False:
-        error = image.error.copy(order='C')
-    else:
-        error = image.error
-    if image.sky.flags['C_CONTIGUOUS']==False:
-        sky = image.sky.copy(order='C')
-    else:
-        sky = image.sky
-    if image.mask.flags['C_CONTIGUOUS']==False:
-        mask = image.mask.copy(order='C')
-    else:
-        mask = image.mask
+
+    # Get C-continuous data
+    data,error,mask,sky = image.ccontdata
     out = sep.extract(data-sky, nsigma, filter_kernel=kernel,minarea=minarea,
                       clean=False,mask=mask, err=error,
                       maskthresh=maskthresh,deblend_nthresh=deblend_nthresh,
@@ -120,6 +107,7 @@ def sepdetect(image,nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,
     objects = Table(objects)
     objects['id'] = np.arange(nobj)+1
     objects['fwhm'] = np.sqrt(objects['a']**2+objects['b']**2)*2.35
+    objects['flag'].name = 'flags'
 
     if segmentation_map:
         return objects,segmap

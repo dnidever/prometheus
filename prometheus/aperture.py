@@ -33,31 +33,12 @@ def aperphot(image,objects,aper=[3],gain=None,mag_zeropoint=25.0):
     if isinstance(image,CCDData) is False:
         raise ValueError("Image must be a CCDData object")
 
-    sky = None
-    if image.data.flags['C_CONTIGUOUS']==False:
-        data = image.data.copy(order='C')
-        mask = image.mask.copy(order='C')
-        err = image.uncertainty.array.copy(order='C')
-        if hasattr(image,'sky'): sky = image.sky.copy(order='C')
-    else:
-        data = image.data
-        mask = image.mask
-        err = image.uncertainty.array
-        if hasattr(image,'sky'): sky = image.sky
-    # Get background if needed        
-    if sky is None:
-        bkg = sep.Background(data, mask=mask, bw=64, bh=64, fw=3, fh=3)
-        sky = bkg.back()
-        image.sky = sky
+    # Get C-continuous data
+    data,error,mask,sky = image.ccontdata
     data_sub = data-sky
     
     # Get gain from image if possible
-    if gain is None:
-        headgain = image.header.get('gain')
-        if headgain is not None:
-            gain = headgain
-        else:
-            gain = 1.0
+    gain = image.gain
 
     # Initialize the output catalog
     outcat = objects.copy()
@@ -65,7 +46,7 @@ def aperphot(image,objects,aper=[3],gain=None,mag_zeropoint=25.0):
     # Circular aperture photometry
     for i,ap in enumerate(aper):
         apflux, apfluxerr, apflag = sep.sum_circle(data_sub, outcat['x'], outcat['y'],
-                                                   ap, err=err, mask=mask, gain=gain)
+                                                   ap, err=error, mask=mask, gain=gain)
         # Add to the catalog
         outcat['flux_aper'+str(i+1)] = apflux
         outcat['fluxerr_aper'+str(i+1)] = apfluxerr
@@ -98,7 +79,7 @@ def aperphot(image,objects,aper=[3],gain=None,mag_zeropoint=25.0):
         flux, fluxerr, flag = sep.sum_ellipse(data_sub, outcat['x'][~use_circle], outcat['y'][~use_circle],
                                               outcat['a'][~use_circle],outcat['b'][~use_circle],
                                               outcat['theta'][~use_circle], 2.5*kronrad[~use_circle],
-                                              subpix=1, err=err, mask=mask)
+                                              subpix=1, err=error, mask=mask)
         flag |= krflag[~use_circle]  # combine flags into 'flag'
         outcat['flux_auto'][~use_circle] = flux
         outcat['fluxerr_auto'][~use_circle] = fluxerr
@@ -110,7 +91,7 @@ def aperphot(image,objects,aper=[3],gain=None,mag_zeropoint=25.0):
     if nuse_circle>0:
         cflux, cfluxerr, cflag = sep.sum_circle(data_sub, outcat['x'][use_circle],
                                                 outcat['y'][use_circle], r_min, subpix=1,
-                                                err=err, mask=mask)
+                                                err=error, mask=mask)
         outcat['flux_auto'][use_circle] = cflux
         outcat['fluxerr_auto'][use_circle] = cfluxerr
         outcat['mag_auto'][use_circle] = -2.5*np.log10(cflux)+mag_zeropoint

@@ -308,6 +308,32 @@ class CCDData(CCD):
             if self._sky.dtype.byteorder != native_code:
                 self._sky = self._sky.byteswap(inplace=True).newbyteorder()            
 
+    @property
+    def ccontdata(self):
+        """ Return C-Continuous data for data, error, mask, sky."""
+
+        if self.data.flags['C_CONTIGUOUS']==False:
+            data = self.data.copy(order='C')
+        else:
+            data = self.data
+        if self.error.flags['C_CONTIGUOUS']==False:
+            error = self.error.copy(order='C')
+        else:
+            error = self.error
+        if self.mask is not None:
+            if self.mask.flags['C_CONTIGUOUS']==False:
+                mask = self.mask.copy(order='C')
+            else:
+                mask = self.mask
+        else:
+            mask = self.mask
+        if self.sky.flags['C_CONTIGUOUS']==False:
+            sky = self.sky.copy(order='C')
+        else:
+            sky = self.sky
+
+        return (data,error,mask,sky)
+            
     def copy(self):
         """
         Return a copy of the CCDData object.

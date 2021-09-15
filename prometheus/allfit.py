@@ -19,7 +19,7 @@ import astropy.units as u
 from scipy.optimize import curve_fit, least_squares
 from scipy.interpolate import interp1d
 from scipy import sparse
-from astropy.nddata import CCDData as CCD,StdDevUncertainty
+#from astropy.nddata import CCDData as CCD,StdDevUncertainty
 from dlnpyutils import utils as dln, bindata
 import copy
 import logging

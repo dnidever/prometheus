@@ -17,7 +17,7 @@ from astropy.table import Table
 import astropy.units as u
 from scipy.optimize import curve_fit, least_squares
 from scipy.interpolate import interp1d
-from astropy.nddata import CCDData,StdDevUncertainty
+#from astropy.nddata import CCDData,StdDevUncertainty
 from dlnpyutils import utils as dln, bindata
 import copy
 import logging
@@ -80,7 +80,7 @@ class PSFFitter(object):
             xcen = self.starxcen[i]
             ycen = self.starycen[i]
             im = imdata[i].data.copy()
-            err = imdata[i].uncertainty.array.copy()
+            err = imdata[i].error.copy()
             xy = xydata[i]
             # Zero-out anything beyond the fitting radius
             x = np.arange(xy[0][0],xy[0][1]+1).astype(float)
@@ -133,7 +133,7 @@ class PSFFitter(object):
             #   do it empirically
             else:
                 im1 = psf(pars=[1.0,xcen,ycen],xy=xy)
-                wt = 1/image.uncertainty.array**2
+                wt = 1/image.error**2
                 height = np.median(image.data[mask]/im1[mask])
                 pars2 = psf.fit(image,[height,x0,y0],nosky=True)
                 height = pars2[0]
@@ -350,7 +350,7 @@ def fitstar(im,cat,psf,radius=None,allpars=False):
     y1 = int(np.minimum(np.ceil(yc+radius),ny-1))
     
     flux = im.data[x0:x1+1,y0:y1+1]
-    err = im.uncertainty.array[x0:x1+1,y0:y1+1]
+    err = im.error[x0:x1+1,y0:y1+1]
     sky = np.median(im.data[x0:x1+1,y0:y1+1])
     height = im.data[int(np.round(xc)),int(np.round(yc))]-sky
 
