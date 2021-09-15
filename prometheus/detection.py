@@ -126,16 +126,18 @@ def peaks(image,nsigma=1.5,thresh=None):
     """ Detect peaks."""
 
     # Comparison between image_max and im to find the coordinates of local maxima
-    coordinates = peak_local_max(image.data-image.sky, threshold_abs=thresh, min_distance=3)
+    data = image.data-image.sky
+    err = image.uncertainty.array
+    coordinates = peak_local_max(data, threshold_abs=thresh, min_distance=3)
     xind = coordinates[:,1]
     yind = coordinates[:,0]    
     
     # Check that they are above the error limit
-    ntresh = data[yind,xind]/(nsigma*err[yind,xind])
-    if mask is None:
+    nthresh = data[yind,xind]/(nsigma*err[yind,xind])
+    if image.mask is None:
         gd, = np.where(nthresh >= 1.0)
     else:
-        gd, = np.where((nthresh >= 1.0) & (mask[yind,xind]==False))
+        gd, = np.where((nthresh >= 1.0) & (image.mask[yind,xind]==False))
     nobj = len(gd)
     dtype = np.dtype([('id',int),('x',float),('y',float),('nthresh',float)])
     objects = np.zeros(nobj,dtype=dtype)
