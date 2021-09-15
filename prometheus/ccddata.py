@@ -356,18 +356,26 @@ class CCDData(CCD):
         if nhdu>1:
             error = hdulist[1].data
             ehead = hdulist[1].header
+        else:
+            error = None
         # HDU2: mask
         if nhdu>2:
             mask = hdulist[2].data
             mhead = hdulist[2].header
+        else:
+            mask = None
         # HDU3: flags
         if nhdu>3:
             flags = hdulist[3].data
             fhead = hdulist[3].header
+        else:
+            flags = None
         # HDU4: sky
         if nhdu>4:
             sky = hdulist[4].data
             shead = hdulist[4].header
+        else:
+            sky = None
         hdulist.close()
         # Make WCS, this doesn't capture the PV#_# values
         w = WCS(head)
