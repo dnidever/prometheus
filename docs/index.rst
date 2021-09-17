@@ -34,9 +34,9 @@ Examples
     examples
 
 
-hofer
-=====
-Here are the various input arguments for command-line script `hofer`::
+prometheus
+==========
+Here are the various input arguments for command-line script `prometheus`::
 
   usage: prometheus [-h] [--outfile OUTFILE] [--figfile FIGFILE] [-d OUTDIR]
                     [-l] [-p] [-v] [-t]
