@@ -56,17 +56,17 @@ def run(image,verbose=False):
     # 3) Pick PSF stars
     if verbose:
         print('Step 3: Pick PSF stars')
-    psfobj = utils.pickpsfstars(objects,fwhm,image)
+    psfobj = utils.pickpsfstars(objects,fwhm)
     #if verbose:
     #    print(str(len(psfobj))+' PSF stars found')
-    
-    import pdb; pdb.set_trace()
     
     # 4) Construct the PSF iteratively
     if verbose:
         print('Step 4: Construct PSF')
     initpsf = models.PSFGaussian([fwhm,fwhm,0.0])
     psf = getpsf.getpsf(initpsf,image,psfobj)
+
+    import pdb; pdb.set_trace()
     
     # 5) Run on all sources
     if verbose:

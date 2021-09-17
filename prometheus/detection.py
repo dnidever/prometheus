@@ -210,7 +210,7 @@ def detect(image,method='sep',nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,d
     
     # SEP
     if method=='sep':
-        return sepdetect(image,nsigma=nsigma,minarea=minarea,
+        return sepdetect(image,nsigma=nsigma,minarea=minarea,fwhm=fwhm,
                          maskthresh=maskthresh,deblend_nthresh=deblend_nthresh,
                          deblend_cont=deblend_cont,kernel=kernel)
 

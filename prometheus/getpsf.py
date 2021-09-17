@@ -45,6 +45,7 @@ class PSFFitter(object):
             fitradius = psf.fwhm()
         self.fitradius = fitradius
         self.nfitpix = int(np.ceil(fitradius))  # +/- nfitpix
+        import pdb; pdb.set_trace()
         self.starheight = np.zeros(self.nstars,float)
         self.starheight[:] = cat['height'].copy()
         self.starxcen = np.zeros(self.nstars,float)
@@ -246,7 +247,8 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
     
     # Subtract the background
     image0 = image.copy()
-    image.data -= bkg_image
+    import pdb; pdb.set_trace()
+    #image.data -= bkg_image  # NO GOOD!!!
     
     psffitter = PSFFitter(psf,image,cat,verbose=verbose)
     xdata = np.arange(psffitter.ntotpix)

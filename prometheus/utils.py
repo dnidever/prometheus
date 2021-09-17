@@ -16,6 +16,7 @@ from astropy.io import fits
 from astropy.table import Table
 import logging
 import time
+from scipy.spatial import cKDTree
 from . import detection, models, getpsf, allfit
 from .ccddata import CCDData
 
@@ -45,8 +46,26 @@ def estimatefwhm(objects):
 
     return medfwhm
 
+def neighbors(objects,nnei=1,max_dist=50):
+    """ Find the closest neighbors to a star."""
+
+    # Returns distance and index of closest neighbor
     
-def pickpsfstars(objects,fwhm,image=None,nstars=100,logger=None):
+    # Use KD-tree
+    X = np.vstack((objects['x'].data,objects['y'].data)).T
+    kdt = cKDTree(X)
+    # Get distance for 2 closest neighbors
+    dist, ind = kdt.query(X, k=nnei+1, distance_upper_bound=max_dist)
+    # closest neighbor is always itself, remove it
+    dist = dist[:,1:]
+    ind = ind[:,1:]
+    if nnei==1:
+        dist = dist.flatten()
+        ind = ind.flatten()
+    return dist,ind
+    
+    
+def pickpsfstars(objects,fwhm,nstars=100,logger=None):
     """ Pick PSF stars."""
 
     # -morph cuts
@@ -55,12 +74,10 @@ def pickpsfstars(objects,fwhm,image=None,nstars=100,logger=None):
     # -no close neighbors
 
     # Use KD-tree to figure out closest neighbors
-
-    # Check image for bad pixels in footprint
-    
+    neidist,neiind = neighbors(objects)
 
     # Select good sources
-    gdobjects1 = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.05))
+    gdobjects1 = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.10))
     ngdobjects1 = np.sum(gdobjects1)
     # Bright and faint limit, use 5th and 95th percentile
     minmag, maxmag = np.sort(objects[gdobjects1]['mag_auto'])[[int(np.round(0.05*ngdobjects1)),int(np.round(0.95*ngdobjects1))]]
@@ -69,30 +86,30 @@ def pickpsfstars(objects,fwhm,image=None,nstars=100,logger=None):
     # -good clas_star values (unless FWHM too large)
     # -good mag range, bright but not too bright
     # -no flags set
-    if fwhm<1.8:
-        gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.1) & 
+    gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.1) & 
                  (objects['fwhm']>0.5*fwhm) & (objects['fwhm']<1.5*fwhm) &
                  (objects['mag_auto']>(minmag+1.0)) & (objects['mag_auto']<(maxmag-0.5)) &
-                 (objects['flags']==0))
-        ngdobjects = np.sum(gdobjects)
-    # Do not use CLASS_STAR if seeing bad, not as reliable
-    else:
-        gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.1) & 
-                 (objects['fwhm']>0.5*fwhm) & (objects['fwhm']<1.5*fwhm) &
-                 (objects['mag_auto']>(minmag+1.0)) & (objects['mag_auto']<(maxmag-0.5)) &
-                 (objects['flags']==0))
-        ngdobjects = np.sum(gdobjects)
+                 (objects['flags']==0) & (neidist>25.0))
+    ngdobjects = np.sum(gdobjects)
     # No candidate, loosen cuts
     if ngdobjects<10:
         print("Too few PSF stars on first try. Loosening cuts")
         gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.15) & 
-                 (objects['fwhm']>0.2*fwhm) & (objects['fwhm']<1.8*fwhm) &
-                 (objects['mag_auto']>(minmag+0.5)) & (objects['mag_auto']<(maxmag-0.5)))
+                     (objects['fwhm']>0.2*fwhm) & (objects['fwhm']<1.8*fwhm) &
+                     (objects['mag_auto']>(minmag+0.5)) & (objects['mag_auto']<(maxmag-0.5)) &
+                     (neidist>10))
+        ngdobjects = np.sum(gdobjects)
+    # No candidate, loosen cuts again
+    if ngdobjects<10:
+        print("Too few PSF stars on first try. Loosening cuts")
+        gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.15) & 
+                     (objects['fwhm']>0.2*fwhm) & (objects['fwhm']<1.8*fwhm) &
+                     (objects['mag_auto']>(minmag+0.5)) & (objects['mag_auto']<(maxmag-0.5)))
         ngdobjects = np.sum(gdobjects)
     # No candidates
     if ngdobjects==0:
         raise Exception('No good PSF stars found')
-
+    
     # Candidate PSF stars, use only Nstars, and sort by magnitude
     si = np.argsort(objects[gdobjects]['mag_auto'])
     psfobjects = objects[gdobjects][si]
