@@ -16,7 +16,8 @@ in Peter Stetson's DAOPHOT package.
    :maxdepth: 1
 
    install
-   
+   gettingstarted
+	      
 
 Description
 ===========

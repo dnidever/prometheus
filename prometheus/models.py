@@ -734,13 +734,12 @@ def empirical(x, y, pars, mpars, mcube, deriv=False, nderiv=None):
         return g
 
 
-def psfmodel(name,pars=None):
+def psfmodel(name,pars=None,**kwargs):
     """ Select PSF model based on the name."""
     if str(name).lower() in _models.keys():
-        return _models[name](pars)
+        return _models[str(name).lower()](pars,**kwargs)
     else:
         raise ValueError('PSF type '+str(name)+' not supported.  Select '+'.'.join(_models.keys()))
-
     
 
 #######################
@@ -1406,6 +1405,26 @@ class PSFBase:
         """ Create a new copy of this LSF object."""
         return copy.deepcopy(self)        
 
+    @classmethod
+    def read(cls,filename):
+        """ Load a PSF file."""
+        if os.path.exists(filename)==False:
+            raise ValueError(filename+' NOT FOUND')
+        data,head = fits.getdata(filename,header=True)
+        psftype = head.get('PSFTYPE')
+        if psftype is None:
+            raise ValueError('No PSFTYPE found in header')
+        kwargs = {}        
+        binned = head.get('BINNED')
+        if binned is not None: kwargs['binned'] = binned
+        npix = head.get('NPIX')
+        if npix is not None: kwargs['npix'] = npix        
+        return psfmodel(psftype,data,**kwargs)
+        
+    def write(self,filename,overwrite=True):
+        """ Write a PSF to a file.  Defined by subclass"""
+        pass
+
     
 # PSF Gaussian class
 class PSFGaussian(PSFBase):
@@ -1456,7 +1475,19 @@ class PSFGaussian(PSFBase):
         else:
             g, derivative = gaussian2d(x, y, pars, deriv=True, nderiv=nderiv)
         return derivative            
-        
+
+    def write(self,filename,overwrite=True):
+        """ Write a PSF to a file."""
+        if os.path.exists(filename) and overwrite==False:
+            raise ValueError(filename+' already exists and overwrite=False')
+        hdulist = fits.HDUList()
+        hdulist.append(fits.PrimaryHDU(self.params))
+        hdulist[0].header['PSFTYPE'] = 'Gaussian'
+        hdulist[0].header['BINNED'] = self.binned
+        hdulist[0].header['NPIX'] = self.npix
+        hdulist.writeto(filename,overwrite=overwrite)
+        hdulist.close()
+
         
 # PSF Moffat class
 class PSFMoffat(PSFBase):
@@ -1514,6 +1545,18 @@ class PSFMoffat(PSFBase):
             g, derivative = moffat2d(x, y, pars, deriv=True, nderiv=nderiv)
         return derivative
 
+    def write(self,filename,overwrite=True):
+        """ Write a PSF to a file."""
+        if os.path.exists(filename) and overwrite==False:
+            raise ValueError(filename+' already exists and overwrite=False')
+        hdulist = fits.HDUList()
+        hdulist.append(fits.PrimaryHDU(self.params))
+        hdulist[0].header['PSFTYPE'] = 'Moffat'
+        hdulist[0].header['BINNED'] = self.binned
+        hdulist[0].header['NPIX'] = self.npix        
+        hdulist.writeto(filename,overwrite=overwrite)
+        hdulist.close()
+    
     
 # PSF Penny class
 class PSFPenny(PSFBase):
@@ -1571,6 +1614,18 @@ class PSFPenny(PSFBase):
             g, derivative = penny2d(x, y, pars, deriv=True, nderiv=nderiv)
         return derivative
 
+    def write(self,filename,overwrite=True):
+        """ Write a PSF to a file."""
+        if os.path.exists(filename) and overwrite==False:
+            raise ValueError(filename+' already exists and overwrite=False')
+        hdulist = fits.HDUList()
+        hdulist.append(fits.PrimaryHDU(self.params))
+        hdulist[0].header['PSFTYPE'] = 'Penny'
+        hdulist[0].header['BINNED'] = self.binned
+        hdulist[0].header['NPIX'] = self.npix        
+        hdulist.writeto(filename,overwrite=overwrite)
+        hdulist.close()
+    
     
 class PSFEmpirical(PSFBase):
     """ Empirical look-up table PSF, can vary spatially."""
@@ -1601,6 +1656,21 @@ class PSFEmpirical(PSFBase):
         if cube is None: cube = self.cube
         return empirical(x, y, pars, cube=cube, nderiv=nderiv)   
 
+    def write(self,filename,overwrite=True):
+        """ Write a PSF to a file."""
+        if os.path.exists(filename) and overwrite==False:
+            raise ValueError(filename+' already exists and overwrite=False')
+        hdulist = fits.HDUList()
+        hdulist.append(fits.PrimaryHDU(self.params))
+        hdulist[0].header['PSFTYPE'] = 'Empirical'
+        hdulist[0].header['BINNED'] = self.binned
+        hdulist[0].header['NPIX'] = self.npix        
+        hdulist.writeto(filename,overwrite=overwrite)
+        hdulist.close()
+
+
+# Read function
+read = PSFBase.read    
     
 # List of models
 _models = {'gaussian':PSFGaussian,'moffat':PSFMoffat,'penny':PSFPenny,'empirical':PSFEmpirical}

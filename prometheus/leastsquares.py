@@ -34,9 +34,14 @@ def jac_solve(jac,resid,method=None,weight=None):
             usejac = jac.copy()
             usejac = np.delete(usejac,badpars,axis=1)
             goodpars, = np.where(np.diag(sample_cov)!=0.0)
+            print('removing '+str(len(badpars))+' parameters with all zeros in jacobian')
     else:
         badpars = []
-            
+
+    if npars==6:
+        import pdb; pdb.set_trace()
+    #print('badpars = ',badpars)
+    
     # Solve the problem
     if method=='qr':
         dbeta = qr_jac_solve(usejac,resid,weight=weight)

@@ -324,8 +324,8 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
     method = str(method).lower()
 
     print('KLUDGE!! FORCING CURVE_FIT FOR NOW')
-    #method = 'curve_fit'
-    method = 'cholesky'
+    method = 'curve_fit'
+    #method = 'cholesky'
 
     # testing the derivative
     #orig = PSFFitter(psf,image,cat,verbose=verbose)
@@ -337,7 +337,7 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
     if method=='curve_fit':    
         # Perform the fitting
         bestpar,cov = curve_fit(pf.model,xdata,pf.imflatten,
-                                sigma=pf.errflatten,p0=initpar,jac=pf.jac)
+                                sigma=pf.errflatten,p0=initpar) #,jac=pf.jac)
         perror = np.sqrt(np.diag(cov))
         
     # All other fitting methods
@@ -355,12 +355,15 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
             wt = 1/pf.errflatten**2
             # Solve Jacobian
             dbeta = lsq.jac_solve(jac,dy,method=method,weight=wt)
-
+            print('dbeta = ',dbeta)
+            
             # Update the parameters
             oldpar = bestpar.copy()
             bestpar += dbeta
             diff = np.abs(bestpar-oldpar)
-            percdiff = np.max(diff/oldpar*100)
+            denom = np.abs(oldpar.copy())
+            denom[denom==0] = 1.0  # deal with zeros
+            percdiff = np.max(diff/denom*100)
             perror = diff  # rough estimate
             count += 1
 

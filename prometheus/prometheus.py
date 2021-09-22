@@ -69,6 +69,7 @@ def run(image,psfname='gaussian',verbose=False):
     if verbose:
         print('Step 4: Construct PSF')
     initpsf = models.psfmodel(psfname,[fwhm,fwhm,0.0])
+    import pdb; pdb.set_trace()
     psf = getpsf.getpsf(initpsf,image,psfobj,verbose=verbose)
 
     import pdb; pdb.set_trace()
