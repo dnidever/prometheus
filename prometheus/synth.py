@@ -75,6 +75,6 @@ def makeimage(nstars=1000,nx=1024,ny=1024,psf=None,cat=None,noise=True,backgrnd=
     if noise:
         im += err*np.random.randn(*im.shape)
 
-    image = CCDData(im,StdDevUncertainty(err),unit='adu')
+    image = CCDData(im,err,unit='adu')
     
     return image

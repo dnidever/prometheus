@@ -15,16 +15,21 @@ from photutils.background import Background2D, MedianBackground, MADStdBackgroun
 def sepsky(image,box_size=(64,64),filter_size=(3,3)):
     """ Estimate sky background using sep."""
 
-    image.native()  # make sure the arrays use native byte-order
+    # Check if the data is "sep ready"
+
+    data = image.sepready(image.data)
+    mask = image.sepready(image.mask)
+
+    #image.native()  # make sure the arrays use native byte-order
     
-    # Background subtraction with SEP
-    #  measure a spatially varying background on the image
-    if image.data.flags['C_CONTIGUOUS']==False:
-        data = image.data.copy(order='C')
-        mask = image.mask.copy(order='C')
-    else:
-        data = image.data
-        mask = image.mask
+    ## Background subtraction with SEP
+    ##  measure a spatially varying background on the image
+    #if image.data.flags['C_CONTIGUOUS']==False:
+    #    data = image.data.copy(order='C')
+    #    mask = image.mask.copy(order='C')
+    #else:
+    #    data = image.data
+    #    mask = image.mask
     bkg = sep.Background(data, mask=mask, bw=box_size[0], bh=box_size[1], fw=filter_size[0], fh=filter_size[1])
     return bkg.back()
 

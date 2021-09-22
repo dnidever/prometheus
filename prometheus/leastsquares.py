@@ -15,16 +15,45 @@ import scipy
 def jac_solve(jac,resid,method=None,weight=None):
     """ Thin wrapper for the various jacobian solver method."""
 
+    npix,npars = jac.shape
+    
+    # Check the sample covariance to make sure that each
+    # columns is independent (and not zero)
+    # check if the sample covariance matrix is singular (has determinant of zero)
+    sample_cov = np.cov(jac.T)
+    sample_cov_det = np.linalg.det(sample_cov)
+    usejac = jac
+    if sample_cov_det==0:
+        # Check if a whole row is zero
+        badpars, = np.where(np.diag(sample_cov)==0.0)
+        if len(badpars)==npars:
+            raise ValueError('All columns in the Jacobian matrix are zero')
+        # Remove the offending column(s) in the Jacobian, solve and put zeros
+        #  in the output dbeta array
+        if len(badpars)>0:
+            usejac = jac.copy()
+            usejac = np.delete(usejac,badpars,axis=1)
+            goodpars, = np.where(np.diag(sample_cov)!=0.0)
+    else:
+        badpars = []
+            
+    # Solve the problem
     if method=='qr':
-        dbeta = qr_jac_solve(jac,resid,weight=weight)
+        dbeta = qr_jac_solve(usejac,resid,weight=weight)
     elif method=='svd':
-        dbeta = svd_jac_solve(jac,resid,weight=weight)
+        dbeta = svd_jac_solve(usejac,resid,weight=weight)
     elif method=='cholesky':
-        dbeta = cholesky_jac_solve(jac,resid,weight=weight)
+        dbeta = cholesky_jac_solve(usejac,resid,weight=weight)
     elif method=='sparse':
-        dbeta = cholesky_jac_sparse_solve(jac,resid,weight=weight)        
+        dbeta = cholesky_jac_sparse_solve(usejac,resid,weight=weight)        
     else:
         raise ValueError(method+' not supported')
+
+    # Add back columns that were all zero
+    if len(badpars)>0:
+        origdbeta = dbeta.copy()
+        dbeta = np.zeros(npars,float)
+        dbeta[goodpars] = origdbeta
     
     return dbeta
 

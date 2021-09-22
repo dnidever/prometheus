@@ -52,9 +52,20 @@ class GroupFitter(object):
             fitradius = psf.fwhm()
         self.fitradius = fitradius
         self.nfitpix = int(np.ceil(fitradius))  # +/- nfitpix
+        # Star heights
+        if 'height' in cat.colnames:
+            starheight = cat['height'].copy()
+        else:
+            # estimate height from flux and fwhm
+            # area under 2D Gaussian is 2*pi*A*sigx*sigy
+            if 'fwhm' in cat.columns:
+                height = cat['flux']/(2*np.pi*(cat['fwhm']/2.35)**2)
+            else:
+                height = cat['flux']/(2*np.pi*(psf.fwhm()/2.35)**2)                
+            starheight = np.maximum(height,0)   # make sure it's positive
         # Initialize the parameter array
         pars = np.zeros(self.nstars*3,float) # height, xcen, ycen
-        pars[0::3] = cat['height']
+        pars[0::3] = starheight
         pars[1::3] = cat['x']
         pars[2::3] = cat['y']
         self.pars = pars
@@ -718,9 +729,9 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     start = time.time()
     
     # Check input catalog
-    for n in ['height','x','y']:
+    for n in ['x','y']:
         if n not in cat.keys():
-            raise ValueError('Cat must have height, x, and y columns')
+            raise ValueError('Cat must have x and y columns')
 
     # Check the method
     method = str(method).lower()    

@@ -24,6 +24,7 @@ import logging
 import time
 import matplotlib
 import sep
+from . import leastsquares as lsq
 
 # Fit a PSF model to multiple stars in an image
 
@@ -45,9 +46,14 @@ class PSFFitter(object):
             fitradius = psf.fwhm()
         self.fitradius = fitradius
         self.nfitpix = int(np.ceil(fitradius))  # +/- nfitpix
-        import pdb; pdb.set_trace()
         self.starheight = np.zeros(self.nstars,float)
-        self.starheight[:] = cat['height'].copy()
+        if 'height' in cat.colnames:
+            self.starheight[:] = cat['height'].copy()
+        else:
+            # estimate height from flux and fwhm
+            # area under 2D Gaussian is 2*pi*A*sigx*sigy
+            height = cat['flux']/(2*np.pi*(cat['fwhm']/2.35)**2)
+            self.starheight[:] = np.maximum(height,0)   # make sure it's positive
         self.starxcen = np.zeros(self.nstars,float)
         self.starxcen[:] = cat['x'].copy()
         self.starycen = np.zeros(self.nstars,float)
@@ -55,48 +61,63 @@ class PSFFitter(object):
         
         # Get xdata, ydata, error
         imdata = []
-        xydata = []
-        ntotpix = 0
-        for i in range(self.nstars):
-            xcen = self.starxcen[i]
-            ycen = self.starycen[i]
-            xlo = np.maximum(int(np.round(xcen)-self.nfitpix),0)
-            xhi = np.minimum(int(np.round(xcen)+self.nfitpix),nx-1)
-            ylo = np.maximum(int(np.round(ycen)-self.nfitpix),0)
-            yhi = np.minimum(int(np.round(ycen)+self.nfitpix),ny-1)
-            im = image[xlo:xhi,ylo:yhi]
-            ntotpix += im.size            
-            imdata.append(im)
-            xydata.append([[xlo,xhi-1],[ylo,yhi-1]])
- 
-        self.ntotpix = ntotpix
-        self.imdata = imdata
-        self.xydata = xydata
-        # flatten the image and error arrays
-        imflatten = np.zeros(ntotpix,float)
-        errflatten = np.zeros(ntotpix,float)
+        bboxdata = []
+        npixdata = []
+        xlist = []
+        ylist = []
+        pixstart = []
+        imflatten = np.zeros(self.nstars*(2*self.nfitpix+1)**2,float)
+        errflatten = np.zeros(self.nstars*(2*self.nfitpix+1)**2,float)
         count = 0
         for i in range(self.nstars):
-            npix = imdata[i].size
             xcen = self.starxcen[i]
             ycen = self.starycen[i]
-            im = imdata[i].data.copy()
-            err = imdata[i].error.copy()
-            xy = xydata[i]
+            bbox = psf.starbbox((xcen,ycen),image.shape,radius=self.nfitpix)
+            im = image[bbox.slices]
+            flux = image.data[bbox.slices]-image.sky[bbox.slices]
+            err = image.data[bbox.slices]            
+            imdata.append(im)
+            bboxdata.append(bbox)
+            # Trim to only the pixels that we want to fix
+            #flux = im.data.copy()-im.sky.copy()
+            #err = im.error.copy()
             # Zero-out anything beyond the fitting radius
-            x = np.arange(xy[0][0],xy[0][1]+1).astype(float)
-            y = np.arange(xy[1][0],xy[1][1]+1).astype(float)
-            rr = np.sqrt( (x-xcen).reshape(-1,1)**2 + (y-ycen).reshape(1,-1)**2 )
-            im[rr>self.fitradius] = 0.0
-            err[rr>self.fitradius] = 1e30
-            imflatten[count:count+npix] = im.flatten()
-            errflatten[count:count+npix] = err.flatten()
+            x,y = psf.bbox2xy(bbox)
+            rr = np.sqrt( (x-xcen)**2 + (y-ycen)**2 )
+            # Use image mask
+            #  mask=True for bad values
+            if image.mask is not None:           
+                gdmask = (rr<=self.fitradius) & (image.mask[y,x]==False)
+            else:
+                gdmask = rr<=self.fitradius                
+            x = x[gdmask]  # raveled
+            y = y[gdmask]
+            flux = flux[gdmask]
+            err = err[gdmask]
+            npix = len(flux)
+            imflatten[count:count+npix] = flux
+            errflatten[count:count+npix] = err
+            pixstart.append(count)
+            xlist.append(x)
+            ylist.append(y)
+            npixdata.append(npix)
             count += npix
+
+        #self.imdata = imdata
+        self.bboxdata = bboxdata            
+        imflatten = imflatten[0:count]
+        errflatten = errflatten[0:count]
         self.imflatten = imflatten
         self.errflatten = errflatten
+        self.ntotpix = count
+        self.xlist = xlist
+        self.ylist = ylist
+        self.npix = npixdata
+        self.pixstart = pixstart
+        self.imdata = imdata
 
         
-    def model(self,x,*args):
+    def model(self,x,*args,refit=True):
         """ model function."""
 
         if self.verbose:
@@ -110,47 +131,75 @@ class PSFFitter(object):
         for i in range(self.nstars):
             image = self.imdata[i]
             height = self.starheight[i]
-            xcen = self.starxcen[i]            
+            xcen = self.starxcen[i]   
             ycen = self.starycen[i]
-            xy = self.xydata[i]
-            x = np.arange(xy[0][0],xy[0][1]+1).astype(float)
-            y = np.arange(xy[1][0],xy[1][1]+1).astype(float)
-            rr = np.sqrt( (x-xcen).reshape(-1,1)**2 + (y-ycen).reshape(1,-1)**2 )
-            mask = rr>self.fitradius
+            bbox = self.bboxdata[i]
+            x = self.xlist[i]
+            y = self.ylist[i]
+            pixstart = self.pixstart[i]
+            npix = self.npix[i]
+            flux = self.imflatten[pixstart:pixstart+npix]
+            err = self.errflatten[pixstart:pixstart+npix]
+            
+            #xy = self.xydata[i]
+            #x = np.arange(xy[0][0],xy[0][1]+1).astype(float)
+            #y = np.arange(xy[1][0],xy[1][1]+1).astype(float)
+            #rr = np.sqrt( (x-xcen).reshape(-1,1)**2 + (y-ycen).reshape(1,-1)**2 )
+            #mask = rr>self.fitradius
 
-            x0 = xcen-xy[0][0]
-            y0 = ycen-xy[1][0]
+            #x0 = xcen-xy[0][0]
+            #y0 = ycen-xy[1][0]
+            x0 = xcen - bbox.ixmin
+            y0 = ycen - bbox.iymin
+
+            #import pdb; pdb.set_trace()
             
             # Fit height/xcen/ycen if niter=1
-            if self.niter<=1:
-                pars = psf.fit(image,[height,x0,y0],nosky=True)
-                xcen += (pars[1]-x0)
-                ycen += (pars[2]-y0)
-                height = pars[0]
-                self.starheight[i] = height
-                self.starxcen[i] = xcen
-                self.starycen[i] = ycen                
-            # Only fit height if niter>1
-            #   do it empirically
+            if refit:
+                if self.niter<=1:
+                    pars,perror,model = psf.fit(image,[height,x0,y0],nosky=True,retpararray=True)
+                    xcen += (pars[1]-x0)
+                    ycen += (pars[2]-y0)
+                    height = pars[0]
+                    self.starheight[i] = height
+                    self.starxcen[i] = xcen
+                    self.starycen[i] = ycen
+                    model = psf(x,y,pars=[height,xcen,ycen])                
+                # Only fit height if niter>1
+                #   do it empirically
+                else:
+                    #im1 = psf(pars=[1.0,xcen,ycen],bbox=bbox)
+                    #wt = 1/image.error**2
+                    #height = np.median(image.data[mask]/im1[mask])                
+                    model1 = psf(x,y,pars=[1.0,xcen,ycen])
+                    wt = 1/err**2
+                    height = np.median(flux/model1)
+                    #height = np.median(wt*flux/model1)/np.median(wt)
+                    #pars2,perror2,model2 = psf.fit(image,[height,x0,y0],nosky=True,retpararray=True)
+                    #height = pars2[0]
+                
+                    self.starheight[i] = height
+                    model = model1*height
+                    #self.starxcen[i] = pars2[1]+xy[0][0]
+                    #self.starycen[i] = pars2[2]+xy[1][0]       
+                    #print(count,self.starxcen[i],self.starycen[i])
+                    # updating the X/Y values after the first iteration
+                    #  causes problems.  bounces around too much
+                    
+                    if i==1: print(height)
+                    #if self.niter==2:
+                    #    import pdb; pdb.set_trace()
+
+            # No refit of stellar parameters
             else:
-                im1 = psf(pars=[1.0,xcen,ycen],xy=xy)
-                wt = 1/image.error**2
-                height = np.median(image.data[mask]/im1[mask])
-                pars2 = psf.fit(image,[height,x0,y0],nosky=True)
-                height = pars2[0]
+                model = psf(x,y,pars=[height,xcen,ycen])
                 
-                self.starheight[i] = height
-                #self.starxcen[i] = pars2[1]+xy[0][0]
-                #self.starycen[i] = pars2[2]+xy[1][0]       
-                #print(count,self.starxcen[i],self.starycen[i])
-                # updating the X/Y values after the first iteration
-                #  causes problems.  bounces around too much
-                
-            im = psf(pars=[height,xcen,ycen],xy=xy)
+            #model = psf(x,y,pars=[height,xcen,ycen])
             # Zero-out anything beyond the fitting radius
-            im[mask] = 0.0
-            npix = im.size
-            allim[pixcnt:pixcnt+npix] = im.flatten()
+            #im[mask] = 0.0
+            #npix = im.size
+            npix = len(x)
+            allim[pixcnt:pixcnt+npix] = model.flatten()
             pixcnt += npix
             
         self.niter += 1
@@ -158,7 +207,7 @@ class PSFFitter(object):
         return allim
 
     
-    def jac(self,x,*args,retmodel=False):
+    def jac(self,x,*args,retmodel=False,refit=True):
         """ jacobian."""
 
         if self.verbose:
@@ -171,19 +220,52 @@ class PSFFitter(object):
         if retmodel:
             allim = np.zeros(self.ntotpix,float)
         pixcnt = 0
+
+        # Need to run model() to calculate height/xcen/ycen for first couple iterations
+        if self.niter<=1 and refit:
+            dum = self.model(x,*args)
+            
         for i in range(self.nstars):
             height = self.starheight[i]
             xcen = self.starxcen[i]            
             ycen = self.starycen[i]
-            xy = self.xydata[i]
-            x2,y2 = psf.xylim2xy(xy)
-            xdata = np.vstack((x2.ravel(),y2.ravel()))
+            bbox = self.bboxdata[i]
+            x = self.xlist[i]
+            y = self.ylist[i]
+            pixstart = self.pixstart[i]
+            npix = self.npix[i]
+            flux = self.imflatten[pixstart:pixstart+npix]
+            err = self.errflatten[pixstart:pixstart+npix]
+            xdata = np.vstack((x,y))
+            
+            #xy = self.xydata[i]
+            #x2,y2 = psf.bbox2xy(bbox)
+            #xdata = np.vstack((x2.ravel(),y2.ravel()))
+
+            #x0 = xcen - bbox.ixmin
+            #y0 = ycen - bbox.iymin
+
+            #import pdb; pdb.set_trace()
+            
+            # Get the model and derivative
             allpars = np.concatenate((np.array([height,xcen,ycen]),np.array(args)))
-            if retmodel:
-                m,deriv = psf.jac(xdata,*allpars,allpars=True,retmodel=True)
-            else:
-                deriv = psf.jac(xdata,*allpars,allpars=True)                
+            m,deriv = psf.jac(xdata,*allpars,allpars=True,retmodel=True)            
+            #if retmodel:
+            #    m,deriv = psf.jac(xdata,*allpars,allpars=True,retmodel=True)
+            #else:
+            #    deriv = psf.jac(xdata,*allpars,allpars=True)                
             deriv = np.delete(deriv,[0,1,2],axis=1)  # remove stellar ht/xc/yc columns
+
+            # Solve for the best height, and then scale the derivatives (all scale with height)
+            if self.niter>1 and refit:
+                newheight = height*np.median(flux/m)
+                self.starheight[i] = newheight
+                m *= newheight
+                deriv *= newheight
+
+            #if i==1: print(newheight)
+            #import pdb; pdb.set_trace()
+            
             npix,dum = deriv.shape
             allderiv[pixcnt:pixcnt+npix,:] = deriv
             if retmodel:
@@ -235,67 +317,55 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
     pars,perror,newpsf = getpsf(psf,image,cat)
 
     """
-
-
-    # MAKE SURE THE PSF STARS AREN'T TOO CLOSE TO EACH OTHER!!!
     
-    nx,ny = image.data.shape
-    
-    # Get the background using SEP
-    bkg = sep.Background(image.data, bw=int(nx/10), bh=int(ny/10), fw=3, fh=3)
-    bkg_image = bkg.back()
-    
-    # Subtract the background
-    image0 = image.copy()
-    import pdb; pdb.set_trace()
-    #image.data -= bkg_image  # NO GOOD!!!
-    
-    psffitter = PSFFitter(psf,image,cat,verbose=verbose)
-    xdata = np.arange(psffitter.ntotpix)
+    pf = PSFFitter(psf,image,cat,verbose=verbose)
+    xdata = np.arange(pf.ntotpix)
     initpar = psf.params.copy()
-    
-    # Iterate
-    count = 0
-    percdiff = 1e10
-    bestpar = initpar.copy()
-    while (count<maxiter and percdiff>minpercdiff):
-        m,jac = psffitter.jac(xdata,*bestpar,retmodel=True)
-        dy = psffitter.imflatten-m
-        # QR decomposition
-        if str(method).lower()=='qr':
-            q,r = np.linalg.qr(jac)
-            rinv = np.linalg.inv(r)
-            dbeta = rinv @ (q.T @ dy)
-        # SVD:
-        elif str(method).lower()=='svd':
-            u,s,vt = np.linalg.svd(jac)
-            # u: [Npix,Npix]
-            # s: [Npars]
-            # vt: [Npars,Npars]
-            # dy: [Npix]
-            sinv = s.copy()*0  # pseudo-inverse
-            sinv[s!=0] = 1/s[s!=0]
-            npars = len(s)
-            dbeta = vt.T @ ((u.T @ dy)[0:npars]*sinv)
-        # Curve_fit
-        elif str(method).lower()=='curve_fit':
-            # Perform the fitting
-            bestpar,cov = curve_fit(psffitter.model,xdata,psffitter.imflatten,
-                                     sigma=psffitter.errflatten,p0=bestpar,jac=psffitter.jac)
-            perror = np.sqrt(np.diag(cov))
-            break
-        else:
-            raise ValueError('Only SVD or QR methods currently supported')
-            
-        oldpar = bestpar.copy()
-        bestpar += dbeta
-        diff = np.abs(bestpar-oldpar)
-        percdiff = np.max(diff/oldpar*100)
-        perror = diff  # rough estimate
-        count += 1
+    method = str(method).lower()
 
-        if verbose:
-            print(count,bestpar,percdiff)
+    print('KLUDGE!! FORCING CURVE_FIT FOR NOW')
+    #method = 'curve_fit'
+    method = 'cholesky'
+
+    # testing the derivative
+    #orig = PSFFitter(psf,image,cat,verbose=verbose)
+    #m = pf.model(xdata,*psf.params)
+    #m2,jac = orig.jac(xdata,*psf.params,retmodel=True)
+    #import pdb; pdb.set_trace()
+    
+    # Curve_fit
+    if method=='curve_fit':    
+        # Perform the fitting
+        bestpar,cov = curve_fit(pf.model,xdata,pf.imflatten,
+                                sigma=pf.errflatten,p0=initpar,jac=pf.jac)
+        perror = np.sqrt(np.diag(cov))
+        
+    # All other fitting methods
+    else:
+        # Iterate
+        count = 0
+        percdiff = 1e10
+        bestpar = initpar.copy()
+
+        while (count<maxiter and percdiff>minpercdiff):
+            # Get the Jacobian and model
+            m,jac = pf.jac(xdata,*bestpar,retmodel=True)
+            dy = pf.imflatten-m
+            # Weights
+            wt = 1/pf.errflatten**2
+            # Solve Jacobian
+            dbeta = lsq.jac_solve(jac,dy,method=method,weight=wt)
+
+            # Update the parameters
+            oldpar = bestpar.copy()
+            bestpar += dbeta
+            diff = np.abs(bestpar-oldpar)
+            percdiff = np.max(diff/oldpar*100)
+            perror = diff  # rough estimate
+            count += 1
+
+            if verbose:
+                print(count,bestpar,percdiff)
 
     pars = bestpar
     if verbose:
@@ -306,6 +376,8 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
     newpsf = psf.copy()
     newpsf._params = pars
 
+    import pdb; pdb.set_trace()
+    
     return newpsf, pars, perror
 
 

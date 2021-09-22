@@ -732,6 +732,15 @@ def empirical(x, y, pars, mpars, mcube, deriv=False, nderiv=None):
     # No derivative
     else:        
         return g
+
+
+def psfmodel(name,pars=None):
+    """ Select PSF model based on the name."""
+    if str(name).lower() in _models.keys():
+        return _models[name](pars)
+    else:
+        raise ValueError('PSF type '+str(name)+' not supported.  Select '+'.'.join(_models.keys()))
+
     
 
 #######################
@@ -1124,13 +1133,29 @@ class PSFBase:
 
         Returns
         -------
-        bestpars : numpy array
-          Array of best-fit values [height, xcen, ycen, sky].
+        outcat : catalog or numpy array
+            Output catalog of best-fit values (id, height, height_error, x, x_error, y, y_error,
+              sky, sky_error, niter).  If retpararray=True, then the parameters and parameter
+              uncertainties will be output as numpy arrays.
+        perror : numpy array
+            Array of uncertainties of the best-fit values.  Only if retpararray=True is set.
+        model : numpy array
+            The best-fitting model.
+        mpars : numpy array
+            Best-fit model parameter values.  Only if allpars=True and retpararray=False are set.
 
         Example
         -------
 
-        pars = psf.fit(image,[1002.0,520.0,734.0])
+        outcat,model = psf.fit(image,[1002.0,520.0,734.0])
+
+        or
+
+        pars,perror,model = psf.fit(image,[1002.0,520.0,734.0],retpararray=True)
+
+        or
+
+        outcat,model,mpars = psf.fit(image,[1002.0,520.0,734.0],allpars=True)
 
 
         """
@@ -1175,7 +1200,7 @@ class PSFBase:
 
         #subim = im[bbox.slices]
         flux = im.data[bbox.slices]
-        err = im.uncertainty.array[bbox.slices]
+        err = im.error[bbox.slices]
         wt = 1.0/np.maximum(err,1)**2  # weights
         sky = np.median(flux)
         if nosky: sky=0.0
@@ -1446,7 +1471,9 @@ class PSFMoffat(PSFBase):
         if mpars is None:
             mpars = np.array([1.0,1.0,0.0,2.5])
         if len(mpars)!=4:
-            raise ValueError('4 parameters required')
+            old = np.array(mpars).copy()
+            mpars = np.array([1.0,1.0,0.0,2.5])
+            mpars[0:len(old)] = old
         if mpars[0]<=0 or mpars[1]<=0:
             raise ValueError('sigma must be >0')
         if mpars[3]<0 or mpars[3]>6:
@@ -1499,7 +1526,9 @@ class PSFPenny(PSFBase):
         if mpars is None:
             mpars = np.array([1.0,2.5,2.5,0.0,0.02,5.0])
         if len(mpars)!=5:
-            raise ValueError('5 parameters required')
+            old = np.array(mpars).copy()
+            mpars = np.array([1.0,2.5,2.5,0.0,0.02,5.0])
+            mpars[0:len(old)] = old
         if mpars[0]<=0:
             raise ValueError('sigma must be >0')
         if mpars[3]<0 or mpars[3]>1:
@@ -1572,5 +1601,6 @@ class PSFEmpirical(PSFBase):
         if cube is None: cube = self.cube
         return empirical(x, y, pars, cube=cube, nderiv=nderiv)   
 
-
     
+# List of models
+_models = {'gaussian':PSFGaussian,'moffat':PSFMoffat,'penny':PSFPenny,'empirical':PSFEmpirical}

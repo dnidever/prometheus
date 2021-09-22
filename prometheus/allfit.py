@@ -101,9 +101,9 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     start = time.time()
     
     # Check input catalog
-    for n in ['height','x','y']:
+    for n in ['x','y']:
         if n not in cat.keys():
-            raise ValueError('Cat must have height, x, and y columns')
+            raise ValueError('Cat must have x and y columns')
 
     # Check the method
     method = str(method).lower()    

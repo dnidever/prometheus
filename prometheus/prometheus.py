@@ -21,7 +21,7 @@ from .ccddata import CCDData
 
 # run PSF fitting on an image
 
-def run(image,verbose=False):
+def run(image,psfname='gaussian',verbose=False):
     """ Run PSF photometry on an image."""
 
     # Load the file
@@ -45,7 +45,12 @@ def run(image,verbose=False):
     if verbose:
         print('Step 2: Aperture photometry')    
     objects = aperture.aperphot(image,objects)
-        
+    nobjects = len(objects)
+    # Bright and faint limit, use 5th and 95th percentile
+    minmag, maxmag = np.sort(objects['mag_auto'])[[int(np.round(0.05*nobjects)),int(np.round(0.95*nobjects))]]
+    if verbose:
+        print('Min/Max mag: %5.2f, %5.2f' % (minmag,maxmag))
+    
     # 2) Estimate FWHM
     if verbose:
         print('Step 3: Estimate FWHM')
@@ -63,8 +68,8 @@ def run(image,verbose=False):
     # 4) Construct the PSF iteratively
     if verbose:
         print('Step 4: Construct PSF')
-    initpsf = models.PSFGaussian([fwhm,fwhm,0.0])
-    psf = getpsf.getpsf(initpsf,image,psfobj)
+    initpsf = models.psfmodel(psfname,[fwhm,fwhm,0.0])
+    psf = getpsf.getpsf(initpsf,image,psfobj,verbose=verbose)
 
     import pdb; pdb.set_trace()
     

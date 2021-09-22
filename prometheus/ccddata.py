@@ -63,7 +63,7 @@ class CCDData(CCD):
 
 
     def __init__(self, data, *args, error=None, bbox=None, gain=None, rdnoise=None, sky=None,
-                 copy=True, skyfunc=None, **kwargs):
+                 copy=False, skyfunc=None, **kwargs):
         # Make sure the original version copies all of the input data
         # otherwise bad things will happen when we convert to native byte-order
 
@@ -126,7 +126,7 @@ class CCDData(CCD):
         else:
             raise ValueError('3D CCDData not supported')
         
-        self.native()
+        #self.native()
 
         # for sep we need to ensure that the data is "c-contiguous"
         # if we used a slice with no copy, then it won't be
@@ -286,6 +286,22 @@ class CCDData(CCD):
         """ Y-array."""
         return self._y 
 
+    def isnative(self,data):
+        """ Check if data has native byte order."""
+        sys_is_le = sys.byteorder == 'little'
+        native_code = sys_is_le and '<' or '>'
+        # = is native
+        # | is for not applicable
+        return (data.dtype.byteorder == native_code) or (data.dtype.byteorder=='=') or (data.dtype.byteorder=='|')
+
+    def isccont(self,data):
+        """ Check if data is c-continuous."""
+        return data.flags['C_CONTIGUOUS']
+
+    def issepready(self,data):
+        """ Check if data is ready for sep (native byte order and c-continuous)."""
+        return self.isnative(data) & self.isccont(data)
+    
     def native(self):
         """ Make sure that the arrays use native endian for sep."""
 
@@ -295,10 +311,10 @@ class CCDData(CCD):
         # data
         if self.data.dtype.byteorder != native_code:
             self.data = self.data.byteswap(inplace=True).newbyteorder()
-        # uncertainty
-        if self.uncertainty is not None:
-            if self.uncertainty.array.dtype.byteorder != native_code:
-                self.uncertainty.array = self.uncertainty.array.byteswap(inplace=True).newbyteorder()
+        # error
+        if self._error is not None:
+            if self._error.dtype.byteorder != native_code:
+                self._error = self._error.byteswap(inplace=True).newbyteorder()
         # mask
         if self.mask is not None:
             if self.mask.dtype.byteorder != native_code:
@@ -309,30 +325,89 @@ class CCDData(CCD):
                 self._sky = self._sky.byteswap(inplace=True).newbyteorder()            
 
     @property
-    def ccontdata(self):
+    def ccont(self):
         """ Return C-Continuous data for data, error, mask, sky."""
 
-        if self.data.flags['C_CONTIGUOUS']==False:
-            data = self.data.copy(order='C')
-        else:
-            data = self.data
-        if self.error.flags['C_CONTIGUOUS']==False:
-            error = self.error.copy(order='C')
-        else:
-            error = self.error
-        if self.mask is not None:
-            if self.mask.flags['C_CONTIGUOUS']==False:
-                mask = self.mask.copy(order='C')
-            else:
-                mask = self.mask
-        else:
-            mask = self.mask
-        if self.sky.flags['C_CONTIGUOUS']==False:
-            sky = self.sky.copy(order='C')
-        else:
-            sky = self.sky
+        return (self.sepready(self.data), self.sepready(self.error),
+                self.sepready(self.mask), self.sepready(self.sky))
+        
+        #if self.data.flags['C_CONTIGUOUS']==False:
+        #    data = self.data.copy(order='C')
+        #else:
+        #    data = self.data
+        #if self.error.flags['C_CONTIGUOUS']==False:
+        #    error = self.error.copy(order='C')
+        #else:
+        #    error = self.error
+        #if self.mask is not None:
+        #    if self.mask.flags['C_CONTIGUOUS']==False:
+        #        mask = self.mask.copy(order='C')
+        #    else:
+        #        mask = self.mask
+        #else:
+        #    mask = self.mask
+        #if self.sky.flags['C_CONTIGUOUS']==False:
+        #    sky = self.sky.copy(order='C')
+        #else:
+        #    sky = self.sky
 
         return (data,error,mask,sky)
+
+    def sepready(self,data=None):
+        """ Return sep-ready data (native byte order and c-continuous)."""
+
+        # No data nput, return a sep-ready version of the
+        #   the image object
+        if data is None:
+            # Check all data arrays
+            ready = True
+            for n in ['data','_error','mask','_sky']:
+                dat = getattr(self,n)
+                if dat is not None:
+                    ready &= self.sepready(dat)
+            # Already sep-ready
+            if ready:
+                return self
+            # Not ready, get sep-ready versions of the data
+            new = self.copy()
+            for n in ['data','_error','mask','_sky']:
+                dat = getattr(new,n)
+                if dat is not None:
+                    setattr(new,n,new.sepready(dat))
+            return new
+        
+        # Data array input
+        else:
+            if self.issepready(data)==False:
+                new = data.copy(order='C')
+                if self.isnative(new)==False:
+                    new = new.byteswap(inplace=True).newbyteorder()
+                return new
+                #return data.copy(order='C').byteswap(inplace=True).newbyteorder()
+            else:
+                return data
+                
+    @property
+    def sepdata(self):
+        """ Return C-Continuous and native byte order data for sep."""
+
+        # Deal with byte order for sep
+        sys_is_le = sys.byteorder == 'little'
+        native_code = sys_is_le and '<' or '>'
+        
+        # Loop over data types
+        out = []
+        for name in ['data','error','mask','_sky']:
+            data = getattr(self,name)
+            if data is not None:
+                # if not c-contiguous or not native byte order, copy + correct
+                if data.flags['C_CONTIGUOUS']==False or data.dtype.byteorder!=native_code:
+                    out.append(data.copy(order='C').byteswap(inplace=True).newbyteorder())
+                else:
+                    out.append(data)
+            else:
+                out.append(data)
+        return tuple(out)
             
     def copy(self):
         """

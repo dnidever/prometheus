@@ -93,7 +93,7 @@ def sepdetect(image,nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,
     #  NOTE! filter_type='matched' for some reason causes ploblems when 2D error array is input
 
     # Get C-continuous data
-    data,error,mask,sky = image.ccontdata
+    data,error,mask,sky = image.ccont
     out = sep.extract(data-sky, nsigma, filter_kernel=kernel,minarea=minarea,
                       clean=False,mask=mask, err=error,
                       maskthresh=maskthresh,deblend_nthresh=deblend_nthresh,
@@ -106,7 +106,7 @@ def sepdetect(image,nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,
     nobj = len(objects)
     objects = Table(objects)
     objects['id'] = np.arange(nobj)+1
-    objects['fwhm'] = np.sqrt(objects['a']**2+objects['b']**2)*2.35
+    objects['fwhm'] = np.sqrt(objects['a']*objects['b'])*2.35
     objects['flag'].name = 'flags'
 
     if segmentation_map:
@@ -198,7 +198,6 @@ def detect(image,method='sep',nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,d
     -------
 
     obj = detect(image,nsigma=1.5,fwhm=4.0)
-
 
     """
 

@@ -34,7 +34,7 @@ def aperphot(image,objects,aper=[3],gain=None,mag_zeropoint=25.0):
         raise ValueError("Image must be a CCDData object")
 
     # Get C-continuous data
-    data,error,mask,sky = image.ccontdata
+    data,error,mask,sky = image.ccont
     data_sub = data-sky
     
     # Get gain from image if possible
