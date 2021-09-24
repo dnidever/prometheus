@@ -774,6 +774,7 @@ class PSFBase:
         self.radius = npix//2
         self.verbose = verbose
         self.niter = 0
+        self._bounds = None
         
         # add a precomputed circular mask here to mask out the corners??
         
@@ -812,10 +813,10 @@ class PSFBase:
         ny,nx = imshape   # python images are (Y,X)
         if radius is None:
             radius = self.npix//2
-        xlo = np.maximum(int(np.round(xcen)-radius),0)
-        xhi = np.minimum(int(np.round(xcen)+radius),nx)
-        ylo = np.maximum(int(np.round(ycen)-radius),0)
-        yhi = np.minimum(int(np.round(ycen)+radius),ny)
+        xlo = np.maximum(int(np.round(xcen-radius)),0)
+        xhi = np.minimum(int(np.round(xcen+radius)),nx)
+        ylo = np.maximum(int(np.round(ycen-radius)),0)
+        yhi = np.minimum(int(np.round(ycen+radius)),ny)
         
         return BoundingBox(xlo,xhi,ylo,yhi)
         
@@ -1198,12 +1199,14 @@ class PSFBase:
         xdata = np.vstack((X.ravel(), Y.ravel()))
 
         #subim = im[bbox.slices]
+        ny,nx = im.shape
         flux = im.data[bbox.slices]
         err = im.error[bbox.slices]
         wt = 1.0/np.maximum(err,1)**2  # weights
-        sky = np.median(flux)
+        skyim = im.sky[bbox.slices]
+        sky = np.median(skyim)
         if nosky: sky=0.0
-        height = im.data[int(np.round(yc)),int(np.round(xc))]-sky   # python images are (Y,X)
+        height = flux[int(np.round(yc)),int(np.round(xc))]-sky   # python images are (Y,X)
         initpar = [height,xc,yc,sky]            
         
         # Fit PSF parameters as well
@@ -1220,13 +1223,16 @@ class PSFBase:
                        ('sky_error',float),('niter',int)])
         outcat = np.zeros(1,dtype=dt)
         outcat['id'] = 1
+
+        # Make bounds
+        bounds = self.mkbounds(initpar,im.shape)
         
         # Curve_fit
         if method=='curve_fit':
             self.niter = 0
             if allpars==False:
                 bestpar,cov = curve_fit(self.model,xdata,flux.ravel(),sigma=err.ravel(),
-                                        p0=initpar,jac=self.jac)
+                                        p0=initpar,jac=self.jac,bounds=bounds)
                 perror = np.sqrt(np.diag(cov))
                 model = self.model(xdata,*bestpar)
                 count = self.niter
@@ -1245,6 +1251,7 @@ class PSFBase:
             count = 0
             bestpar = initpar.copy()
             maxpercdiff = 1e10
+            maxsteps = self.steps(initpar,bounds)  # maximum steps
             while (count<niter and maxpercdiff>minpercdiff):
                 # Use Cholesky, QR or SVD to solve linear system of equations
                 if allpars:
@@ -1257,13 +1264,20 @@ class PSFBase:
 
                 # Update parameters
                 oldpar = bestpar.copy()
-                bestpar += dbeta
+                # limit the steps to the maximum step sizes and boundaries
+                bestpar = self.newpars(bestpar,dbeta,bounds,maxsteps)
+                #bestpar += dbeta
                 # Check differences and changes
                 diff = np.abs(bestpar-oldpar)
                 percdiff = diff.copy()/oldpar*100  # percent differences
                 percdiff[1:3] = diff[1:3]*100               # x/y
                 maxpercdiff = np.max(percdiff)
-            
+                
+                if verbose:
+                    print('N = ',count)
+                    print('bestpars = ',bestpar)
+                    print('dbeta = ',dbeta)
+                
                 count += 1
 
             # Get covariance and errors
@@ -1392,6 +1406,139 @@ class PSFBase:
     def flux(self,pars=None):
         """ Return the flux/volume of the model given the height.  Must be defined by subclass."""
         pass
+
+    def steps(self,pars=None,bounds=None):
+        """ Return step sizes to use when fitting the PSF model parameters (at least initial sizes)."""
+        # Check the initial steps against the parameters to make sure that don't
+        # go past the boundaries
+        if pars is None:
+            pars = self.params
+        if bounds is None:
+            bounds = self.mkbounds(pars)
+        npars = len(pars)
+        nmpars = len(self.params)
+        # Check if the parameters include stellar parameters
+        if npars>nmpars:
+            initsteps = np.zeros(npars,float)
+            initsteps[0:3] = [pars[0]*0.5,0.5,0.5]
+            if npars-nmpars==4:
+                initsteps[3] = pars[3]*0.5
+            initsteps[-nmpars:] = self._steps
+        else:
+            initsteps = self._steps
+        # Now compare to the boundaries
+        lcheck = self.checkbounds(pars-initsteps,bounds)
+        ucheck = self.checkbounds(pars+initsteps,bounds)        
+        # Final steps
+        fsteps = initsteps.copy()
+        # bad negative step
+        badneg = (lcheck!=0)
+        nbadneg = np.sum(badneg)
+        # reduce the step sizes until they are within bounds
+        count = 0
+        while (np.sum(badneg)>0):
+            fsteps[badneg] /= 2
+            lcheck = self.checkbounds(pars-fsteps,bounds)
+            badneg = (lcheck!=0)
+            count += 1
+        
+        # bad positive step
+        badpos = (ucheck!=0)
+        # reduce the steps sizes until they are within bounds
+        count = 0
+        while (np.sum(badpos)>0):
+            fsteps[badpos] /= 2
+            ucheck = self.checkbounds(pars+fsteps,bounds)
+            badpos = (ucheck!=0)            
+            count += 1
+            
+        return fsteps
+    
+    @property
+    def bounds(self):
+        """ Return the lower and upper bounds for the parameters."""
+        return self._bounds
+
+    def mkbounds(self,pars,imshape):
+        """ Make bounds for a set of input parameters."""
+
+        npars = len(pars)
+        nmpars = len(self.params)
+        # figure out if nosky is set
+        if npars-nmpars==3:
+            nosky = True
+        else:
+            nosky = False
+        ny,nx = imshape
+            
+        # Make bounds
+        lbounds = np.zeros(npars,float)
+        ubounds = np.zeros(npars,float)
+        ubounds[0:3] = [np.inf,nx-1,ny-1]
+        if nosky==False:
+            lbounds[3] = -np.inf
+            ubounds[3] = np.inf
+        if npars>4:
+            mlbounds,mubounds = self.bounds
+            if nosky:
+                lbounds[3:] = mlbounds
+                ubounds[3:] = mubounds
+            else:
+                lbounds[4:] = mlbounds
+                ubounds[4:] = mubounds            
+        bounds = (lbounds,ubounds)
+        return bounds
+
+    def checkbounds(self,pars,bounds=None):
+        """ Check the parameters against the bounds."""
+        # 0 means it's fine
+        # 1 means it's beyond the lower bound
+        # 2 means it's beyond the upper bound
+        if bounds is None:
+            bounds = self.mkbounds(pars)
+        npars = len(pars)
+        lbounds,ubounds = bounds
+        check = np.zeros(npars,int)
+        check[pars<=lbounds] = 1
+        check[pars>=ubounds] = 2
+        return check
+        
+    def limbounds(self,pars,bounds=None):
+        """ Limit the parameters to the boundaries."""
+        if bounds is None:
+            bounds = self.mkbounds(pars)
+        lbounds,ubounds = bounds
+        outpars = np.minimum(np.maximum(pars,lbounds),ubounds)
+        return outpars
+
+    def limsteps(self,steps,maxsteps):
+        """ Limit the parameter steps to maximum step sizes."""
+        signs = np.sign(steps)
+        outsteps = np.minimum(np.abs(steps),maxsteps)
+        outsteps *= signs
+        return outsteps
+
+    def newpars(self,pars,steps,bounds,maxsteps):
+        """ Get new parameters given initial parameters and constraints."""
+
+        # Limit the steps to maxsteps
+        limited_steps = self.limsteps(steps,maxsteps)
+        # Make sure that these don't cross the boundaries
+        lbounds,ubounds = bounds
+        check = self.checkbounds(pars+limited_steps,bounds)
+        # Reduce step size for any parameters to go beyond the boundaries
+        badpars = (check!=0)
+        # reduce the step sizes until they are within bounds
+        newsteps = limited_steps.copy()
+        count = 0
+        while (np.sum(badpars)>0):
+            newsteps[badpars] /= 2
+            newcheck = self.checkbounds(pars+newsteps,bounds)
+            badpars = (newcheck!=0)
+            count += 1
+        # Final parameters
+        newpars = pars + newsteps
+        return newpars
     
     def evaluate(self):
         """ Evaluate the function.  Must be defined by subclass."""
@@ -1440,7 +1587,12 @@ class PSFGaussian(PSFBase):
         if mpars[0]<=0 or mpars[1]<=0:
             raise ValueError('sigma parameters must be >0')
         super().__init__(mpars,npix=npix,binned=binned)
-
+        # Set the bounds
+        self._bounds = (np.array([0.0,0.0,-np.inf]),
+                        np.array([np.inf,np.inf,np.inf]))
+        # Set step sizes
+        self._steps = np.array([0.5,0.5,0.2])
+        
     #@property
     def fwhm(self,pars=None):
         """ Return the FWHM of the model."""
@@ -1456,7 +1608,7 @@ class PSFGaussian(PSFBase):
             pars = np.atleast_1d(pars)
             if pars.size==1:
                 pars = np.hstack(([pars[0], 0.0, 0.0], self.params))            
-        return gaussian2d_flux(pars)
+        return gaussian2d_flux(pars)        
     
     def evaluate(self,x, y, pars, binned=None, deriv=False, nderiv=None):
         """Two dimensional Gaussian model function"""
@@ -1510,7 +1662,12 @@ class PSFMoffat(PSFBase):
         if mpars[3]<0 or mpars[3]>6:
             raise ValueError('beta must be >0 and <6')
         super().__init__(mpars,npix=npix,binned=binned)
-
+        # Set the bounds
+        self._bounds = (np.array([0.0,0.0,-np.inf,0.01]),
+                        np.array([np.inf,np.inf,np.inf,np.inf]))
+        # Set step sizes
+        self._steps = np.array([0.5,0.5,0.2,0.1])
+        
     def fwhm(self,pars=None):
         """ Return the FWHM of the model."""
         if pars is None:
@@ -1577,7 +1734,12 @@ class PSFPenny(PSFBase):
         if mpars[3]<0 or mpars[3]>1:
             raise ValueError('relative amplitude must be >=0 and <=1')
         super().__init__(mpars,npix=npix,binned=binned)
-
+        # Set the bounds
+        self._bounds = (np.array([0.0,0.0,-np.inf,0.00,0.0]),
+                        np.array([np.inf,np.inf,np.inf,1.0,np.inf]))
+        # Set step sizes
+        self._steps = np.array([0.5,0.5,0.2,0.1,0.1])
+        
     def fwhm(self,pars=None):
         """ Return the FWHM of the model."""
         if pars is None:
@@ -1637,7 +1799,9 @@ class PSFEmpirical(PSFBase):
         # MPARS should be a two-element tuple with (parameters, psf cube)
         self.cube = mpars[1]
         ny,nx,npars = cube.shape    # Python images are (Y,X)
-        super().__init__(mpars[0],npix=npix)        
+        super().__init__(mpars[0],npix=npix)
+        self._bounds = None
+        self._steps = None
 
     def fwhm(self):
         """ Return the FWHM of the model."""

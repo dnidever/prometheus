@@ -186,7 +186,7 @@ class PSFFitter(object):
                     # updating the X/Y values after the first iteration
                     #  causes problems.  bounces around too much
                     
-                    if i==1: print(height)
+                    #if i==1: print(height)
                     #if self.niter==2:
                     #    import pdb; pdb.set_trace()
 

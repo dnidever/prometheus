@@ -11,21 +11,40 @@ __version__ = '20210908'  # yyyymmdd
 import numpy as np
 import scipy
 
+def ishermitian(A):
+    """ check if a matrix is Hermitian (equal to it's conjugate transpose)."""
+    return np.allclose(A, np.asmatrix(A).H)
+
+def isposdef(A):
+    """ Check if a matrix positive definite."""
+    if np.array_equal(A, A.T):
+        try:
+            np.linalg.cholesky(A)
+            return True
+        except np.linalg.LinAlgError:
+            return False
+    else:
+        return False
+
 
 def jac_solve(jac,resid,method=None,weight=None):
     """ Thin wrapper for the various jacobian solver method."""
 
     npix,npars = jac.shape
     
-    # Check the sample covariance to make sure that each
-    # columns is independent (and not zero)
-    # check if the sample covariance matrix is singular (has determinant of zero)
-    sample_cov = np.cov(jac.T)
-    sample_cov_det = np.linalg.det(sample_cov)
+    ## Check the sample covariance to make sure that each
+    ## columns is independent (and not zero)
+    ## check if the sample covariance matrix is singular (has determinant of zero)
+    #sample_cov = np.cov(jac.T)
+    #sample_cov_det = np.linalg.det(sample_cov)
+    # Just check if one entire column is zeros
+    badpars, = np.where(np.sum(jac==0,axis=0) == npix)
     usejac = jac
-    if sample_cov_det==0:
-        # Check if a whole row is zero
-        badpars, = np.where(np.diag(sample_cov)==0.0)
+    badpars = []
+    #if sample_cov_det==0:
+    #    # Check if a whole row is zero
+    #    badpars, = np.where(np.diag(sample_cov)==0.0)
+    if len(badpars)>0:
         if len(badpars)==npars:
             raise ValueError('All columns in the Jacobian matrix are zero')
         # Remove the offending column(s) in the Jacobian, solve and put zeros
@@ -34,7 +53,7 @@ def jac_solve(jac,resid,method=None,weight=None):
             usejac = jac.copy()
             usejac = np.delete(usejac,badpars,axis=1)
             goodpars, = np.where(np.diag(sample_cov)!=0.0)
-            print('removing '+str(len(badpars))+' parameters with all zeros in jacobian')
+            print('removing '+str(len(badpars))+' parameters ('+'.'.join(badpars)+') with all zeros in jacobian')
     else:
         badpars = []
 
@@ -49,11 +68,13 @@ def jac_solve(jac,resid,method=None,weight=None):
         dbeta = svd_jac_solve(usejac,resid,weight=weight)
     elif method=='cholesky':
         dbeta = cholesky_jac_solve(usejac,resid,weight=weight)
+    elif method=='lu':
+        dbeta = lu_jac_solve(usejac,resid,weight=weight)        
     elif method=='sparse':
         dbeta = cholesky_jac_sparse_solve(usejac,resid,weight=weight)        
     else:
         raise ValueError(method+' not supported')
-
+    
     # Add back columns that were all zero
     if len(badpars)>0:
         origdbeta = dbeta.copy()
@@ -158,9 +179,15 @@ def cholesky_jac_solve(jac,resid,weight=None):
     b = np.dot(jac.T,resid)
 
     # Now solve linear least squares with cholesky decomposition
-    # Ax = b    
-    return cholesky_solve(A,b)
-
+    # Ax = b
+    #  try Cholesky decomposition, but it can fail if the matrix
+    #  is not positive definite
+    try:
+        x = cholesky_solve(A,b)
+    # try LU decomposition if cholesky fails, LU works for more cases
+    except:
+        x = lu_solve(A,b)
+    return x
 
 def cholesky_solve(A,b):
     """ Solve linear least squares problem with Cholesky decomposition."""
@@ -173,11 +200,57 @@ def cholesky_solve(A,b):
     # solve Ly=b (where L*x=y) for y by forward substitution
     # finally solve L*x = y for x by back substitution
 
-    L = np.linalg.cholesky(A)
-    Lstar = L.T.conj()   # Lstar is conjugate transpose
-    y = scipy.linalg.solve_triangular(L,b)
-    x = scipy.linalg.solve_triangular(Lstar,y)
+    #L = np.linalg.cholesky(A)
+    #Lstar = L.T.conj()   # Lstar is conjugate transpose
+    #y = scipy.linalg.solve_triangular(L,b)
+    #x = scipy.linalg.solve_triangular(Lstar,y)
+
+    # this gives better results, not sure why
+    c, low = scipy.linalg.cho_factor(A)
+    x = scipy.linalg.cho_solve((c, low), b)
+    
     return x
+
+def lu_jac_solve(jac,resid,weight=None):
+    """ Solve part a non-linear least squares equation using LU decomposition
+        using the Jacobian."""
+    # jac: Jacobian matrix, first derivatives, [Npix, Npars]
+    # resid: residuals [Npix]
+
+    # Multipy dy and jac by weights
+    if weight is not None:
+        resid = resid * weight        
+        jac = jac * weight.reshape(-1,1)
+    
+    # J * x = resid
+    # J.T J x = J.T resid
+    # A = (J.T @ J)
+    # b = np.dot(J.T*dy)
+    A = jac.T @ jac
+    b = np.dot(jac.T,resid)
+
+    # Now solve linear least squares with cholesky decomposition
+    # Ax = b    
+    return lu_solve(A,b)
+
+def lu_solve(A,b):
+    """ Solve linear least squares problem with LU decomposition."""
+
+    lu, piv = scipy.linalg.lu_factor(A)
+    x = scipy.linalg.lu_solve((lu, piv), b)
+    
+    # Solve by two back substitution problems
+    # Ax = b
+    # Use LU decomposition to get A=LU
+    # LUx = b
+    # now break into two equations
+    # Ly = b, solve by forward substitution to get y
+    # Ux = y, solve by backward substitution to get x
+    #P,L,U = scipy.linalg.lu(A)
+    #y = scipy.linalg.solve_triangular(P@L,b)
+    #x = scipy.linalg.solve_triangular(U,y)
+    return x
+    
 
 def jac_covariance(jac,resid,wt=None):
     """
