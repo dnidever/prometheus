@@ -1465,12 +1465,12 @@ class PSFBase:
         npars = len(pars)
         nmpars = len(self.params)
         # figure out if nosky is set
-        if npars-nmpars==3:
+        if (npars==3) or (npars-nmpars==3):
             nosky = True
         else:
             nosky = False
         ny,nx = imshape
-            
+        
         # Make bounds
         lbounds = np.zeros(npars,float)
         ubounds = np.zeros(npars,float)

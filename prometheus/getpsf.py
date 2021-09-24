@@ -117,9 +117,10 @@ class PSFFitter(object):
         self.imdata = imdata
 
         
-    def model(self,x,*args,refit=True):
+    def model(self,x,*args,refit=True,verbose=False):
         """ model function."""
-
+        # input the model parameters
+        
         if self.verbose:
             print('model: ',self.niter,args)
         
@@ -164,7 +165,10 @@ class PSFFitter(object):
                     self.starheight[i] = height
                     self.starxcen[i] = xcen
                     self.starycen[i] = ycen
-                    model = psf(x,y,pars=[height,xcen,ycen])                
+                    model = psf(x,y,pars=[height,xcen,ycen])
+                    if verbose:
+                        print('Star '+str(i)+' Refitting all parameters')
+                        print([height,xcen,ycen])
                 # Only fit height if niter>1
                 #   do it empirically
                 else:
@@ -185,7 +189,11 @@ class PSFFitter(object):
                     #print(count,self.starxcen[i],self.starycen[i])
                     # updating the X/Y values after the first iteration
                     #  causes problems.  bounces around too much
-                    
+
+                    if verbose:
+                        print('Star '+str(i)+' Refitting height empirically')
+                        print(height)
+                        
                     #if i==1: print(height)
                     #if self.niter==2:
                     #    import pdb; pdb.set_trace()
@@ -209,6 +217,7 @@ class PSFFitter(object):
     
     def jac(self,x,*args,retmodel=False,refit=True):
         """ jacobian."""
+        # input the model parameters
 
         if self.verbose:
             print('jac: ',self.niter,args)
@@ -216,14 +225,18 @@ class PSFFitter(object):
         psf = self.psf.copy()
         psf._params = list(args)
         # Loop over the stars and generate the derivatives
+        #-------------------------------------------------
+
+        # Initalize output arrays
         allderiv = np.zeros((self.ntotpix,len(psf.params)),float)
         if retmodel:
             allim = np.zeros(self.ntotpix,float)
         pixcnt = 0
 
         # Need to run model() to calculate height/xcen/ycen for first couple iterations
-        if self.niter<=1 and refit:
-            dum = self.model(x,*args)
+        #if self.niter<=1 and refit:
+        #    dum = self.model(x,*args,refit=refit)
+        dum = self.model(x,*args,refit=True,verbose=True)            
             
         for i in range(self.nstars):
             height = self.starheight[i]
@@ -257,20 +270,23 @@ class PSFFitter(object):
             deriv = np.delete(deriv,[0,1,2],axis=1)  # remove stellar ht/xc/yc columns
 
             # Solve for the best height, and then scale the derivatives (all scale with height)
-            if self.niter>1 and refit:
-                newheight = height*np.median(flux/m)
-                self.starheight[i] = newheight
-                m *= newheight
-                deriv *= newheight
+            #if self.niter>1 and refit:
+            #    newheight = height*np.median(flux/m)
+            #    self.starheight[i] = newheight
+            #    m *= (newheight/height)
+            #    deriv *= (newheight/height)
 
-            #if i==1: print(newheight)
+            #if i==1: print(height,newheight)
             #import pdb; pdb.set_trace()
-            
+
             npix,dum = deriv.shape
             allderiv[pixcnt:pixcnt+npix,:] = deriv
             if retmodel:
                 allim[pixcnt:pixcnt+npix] = m
             pixcnt += npix
+
+        import pdb; pdb.set_trace()
+            
         if retmodel:
             return allim,allderiv
         else:
@@ -324,9 +340,11 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
     method = str(method).lower()
 
     print('KLUDGE!! FORCING CURVE_FIT FOR NOW')
-    method = 'curve_fit'
+    #method = 'curve_fit'
     #method = 'cholesky'
-
+    #method = 'svd'
+    method = 'qr'
+    
     # testing the derivative
     #orig = PSFFitter(psf,image,cat,verbose=verbose)
     #m = pf.model(xdata,*psf.params)
@@ -337,7 +355,7 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
     if method=='curve_fit':    
         # Perform the fitting
         bestpar,cov = curve_fit(pf.model,xdata,pf.imflatten,
-                                sigma=pf.errflatten,p0=initpar) #,jac=pf.jac)
+                                sigma=pf.errflatten,p0=initpar,jac=pf.jac)
         perror = np.sqrt(np.diag(cov))
         
     # All other fitting methods
