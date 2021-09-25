@@ -1140,7 +1140,7 @@ class PSFBase:
         perror : numpy array
             Array of uncertainties of the best-fit values.  Only if retpararray=True is set.
         model : numpy array
-            The best-fitting model.
+            The best-fitting model.  This does *not* include the sky.
         mpars : numpy array
             Best-fit model parameter values.  Only if allpars=True and retpararray=False are set.
 

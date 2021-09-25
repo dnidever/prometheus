@@ -39,7 +39,7 @@ class PSFFitter(object):
         self.nstars = np.size(cat)
         self.niter = 0
         self.npsfpix = psf.npix
-        nx,ny = image.data.shape
+        ny,nx = image.data.shape
         self.nx = nx
         self.ny = ny
         if fitradius is None:
@@ -75,10 +75,10 @@ class PSFFitter(object):
             bbox = psf.starbbox((xcen,ycen),image.shape,radius=self.nfitpix)
             im = image[bbox.slices]
             flux = image.data[bbox.slices]-image.sky[bbox.slices]
-            err = image.data[bbox.slices]            
+            err = image.error[bbox.slices]
             imdata.append(im)
             bboxdata.append(bbox)
-            # Trim to only the pixels that we want to fix
+            # Trim to only the pixels that we want to fit
             #flux = im.data.copy()-im.sky.copy()
             #err = im.error.copy()
             # Zero-out anything beyond the fitting radius
@@ -103,9 +103,9 @@ class PSFFitter(object):
             npixdata.append(npix)
             count += npix
 
-        #self.imdata = imdata
+        self.imdata = imdata
         self.bboxdata = bboxdata            
-        imflatten = imflatten[0:count]
+        imflatten = imflatten[0:count]    # remove extra elements
         errflatten = errflatten[0:count]
         self.imflatten = imflatten
         self.errflatten = errflatten
@@ -114,7 +114,6 @@ class PSFFitter(object):
         self.ylist = ylist
         self.npix = npixdata
         self.pixstart = pixstart
-        self.imdata = imdata
 
         
     def model(self,x,*args,refit=True,verbose=False):
@@ -158,7 +157,8 @@ class PSFFitter(object):
             # Fit height/xcen/ycen if niter=1
             if refit:
                 if self.niter<=1:
-                    pars,perror,model = psf.fit(image,[height,x0,y0],nosky=True,retpararray=True)
+                    # the image still has sky in it
+                    pars,perror,model = psf.fit(image,[height,x0,y0],nosky=False,retpararray=True,niter=5)
                     xcen += (pars[1]-x0)
                     ycen += (pars[2]-y0)
                     height = pars[0]
@@ -206,9 +206,11 @@ class PSFFitter(object):
             # Zero-out anything beyond the fitting radius
             #im[mask] = 0.0
             #npix = im.size
-            npix = len(x)
+            #npix = len(x)
             allim[pixcnt:pixcnt+npix] = model.flatten()
             pixcnt += npix
+
+            import pdb; pdb.set_trace()
             
         self.niter += 1
             
@@ -340,10 +342,10 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
     method = str(method).lower()
 
     print('KLUDGE!! FORCING CURVE_FIT FOR NOW')
-    #method = 'curve_fit'
+    method = 'curve_fit'
     #method = 'cholesky'
     #method = 'svd'
-    method = 'qr'
+    #method = 'qr'
     
     # testing the derivative
     #orig = PSFFitter(psf,image,cat,verbose=verbose)
@@ -431,8 +433,10 @@ def fitstar(im,cat,psf,radius=None,allpars=False):
     """ Fit a PSF model to a star in an image."""
 
     # IM should be an image with an uncertainty array as well
-    nx,ny = im.data.shape
+    ny,nx = im.data.shape
 
+    # THIS NEEDS TO BE REWRITTEN WITH THE CHANGES TO CCDDATA, ETC.!!
+    
     xc = cat['x']
     yc = cat['y']
     # use FWHM of PSF for the fitting radius
