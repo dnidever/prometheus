@@ -18,7 +18,7 @@ in Peter Stetson's DAOPHOT package.
    install
    gettingstarted
    modules
-      
+   
 
 Description
 ===========
@@ -60,6 +60,14 @@ Here are the various input arguments for command-line script `prometheus`::
     -v, --verbose         Verbose output
     -t, --timestamp       Add timestamp to Verbose output
 
+*****
+Index
+*****
+
+* :ref:`genindex`
+* :ref:`modindex`
+* :ref:`search`
+    
 .. rubric:: Footnotes
 
 .. [#f1] In Greek mythology, `Prometheus <https://en.wikipedia.org/wiki/Prometheus>`_ is a Titan that brings fire from the heavens down to humans on earth.
