@@ -755,6 +755,12 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     gf = GroupFitter(psf,image,cat,fitradius=fitradius,verbose=verbose)
     xdata = np.arange(gf.ntotpix)
 
+
+    # DO THE CONTRIBUTIONS OF WINGS OF THE PROFILE TO THE NEIGHBORING STARS FITTING PIXELS
+    # NEED TO BE TAKEN INTO ACCOUNT???  I THINK SO
+    print('TAKE WINGS INTO ACCOUNT IN FITTING PIXELS!!!')
+    import pdb; pdb.set_trace()
+    
     
     # Perform the fitting
     #--------------------

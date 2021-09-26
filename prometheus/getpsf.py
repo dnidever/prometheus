@@ -154,9 +154,10 @@ class PSFFitter(object):
 
             #import pdb; pdb.set_trace()
             
+            
             # Fit height/xcen/ycen if niter=1
             if refit:
-                if self.niter<=1:
+                if (self.niter<=1): # or self.niter%3==0):
                     # the image still has sky in it
                     pars,perror,model = psf.fit(image,[height,x0,y0],nosky=False,retpararray=True,niter=5)
                     xcen += (pars[1]-x0)
@@ -179,9 +180,24 @@ class PSFFitter(object):
                     wt = 1/err**2
                     height = np.median(flux/model1)
                     #height = np.median(wt*flux/model1)/np.median(wt)
-                    #pars2,perror2,model2 = psf.fit(image,[height,x0,y0],nosky=True,retpararray=True)
+
+
+                    #count = 0
+                    #percdiff = 1e30
+                    #while (count<3 and percdiff>0.1):                  
+                    #    m,jac = psf.jac(np.vstack((x,y)),*[height,xcen,ycen],retmodel=True)
+                    #    jac = np.delete(jac,[1,2],axis=1)
+                    #    dy = flux-m
+                    #    dbeta = lsq.jac_solve(jac,dy,method='cholesky',weight=wt)
+                    #    print(count,height,dbeta)
+                    #    height += dbeta
+                    #    percdiff = np.abs(dbeta)/np.abs(height)*100
+                    #    count += 1
+                        
+                    #pars2,perror2,model2 = psf.fit(image,[height,x0,y0],nosky=False,retpararray=True,niter=5)
                     #height = pars2[0]
-                
+                    #model = psf(x,y,pars=[height,xcen,ycen])
+                    
                     self.starheight[i] = height
                     model = model1*height
                     #self.starxcen[i] = pars2[1]+xy[0][0]
@@ -210,7 +226,7 @@ class PSFFitter(object):
             allim[pixcnt:pixcnt+npix] = model.flatten()
             pixcnt += npix
 
-            import pdb; pdb.set_trace()
+            #import pdb; pdb.set_trace()
             
         self.niter += 1
             
@@ -287,7 +303,7 @@ class PSFFitter(object):
                 allim[pixcnt:pixcnt+npix] = m
             pixcnt += npix
 
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
             
         if retmodel:
             return allim,allderiv
@@ -322,37 +338,29 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
 
     Returns
     -------
+    newpsf : PSF object
+       New PSF object with the best-fit model parameters.
     pars : numpy array
        Array of best-fit model parameters
     perror : numpy array
        Uncertainties in "pars".
-    newpsf : PSF object
-       New PSF object with the best-fit model parameters.
+    psfcat : table
+       Table of best-fitting height/xcen/ycen values for the PSF stars.
 
     Example
     -------
 
-    pars,perror,newpsf = getpsf(psf,image,cat)
+    newpsf,pars,perror,psfcat = getpsf(psf,image,cat)
 
     """
+
+    t0 = time.time()
     
     pf = PSFFitter(psf,image,cat,verbose=verbose)
     xdata = np.arange(pf.ntotpix)
     initpar = psf.params.copy()
     method = str(method).lower()
 
-    print('KLUDGE!! FORCING CURVE_FIT FOR NOW')
-    method = 'curve_fit'
-    #method = 'cholesky'
-    #method = 'svd'
-    #method = 'qr'
-    
-    # testing the derivative
-    #orig = PSFFitter(psf,image,cat,verbose=verbose)
-    #m = pf.model(xdata,*psf.params)
-    #m2,jac = orig.jac(xdata,*psf.params,retmodel=True)
-    #import pdb; pdb.set_trace()
-    
     # Curve_fit
     if method=='curve_fit':    
         # Perform the fitting
@@ -399,9 +407,23 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
     newpsf = psf.copy()
     newpsf._params = pars
 
-    import pdb; pdb.set_trace()
+    # Output best-fitting values for the PSF stars as well
+    dt = np.dtype([('id',int),('height',float),('x',float),('y',float)])
+    psfcat = np.zeros(len(cat),dtype=dt)
+    if 'id' in cat.colnames:
+        psfcat['id'] = cat['id']
+    else:
+        psfcat['id'] = np.arange(len(cat))+1
+    psfcat['height'] = pf.starheight
+    psfcat['x'] = pf.starycen
+    psfcat['y'] = pf.starxcen
     
-    return newpsf, pars, perror
+    if verbose:
+        print('dt = %.2f sec' % (time.time()-t0))
+
+    import pdb; pdb.set_trace()
+        
+    return newpsf, pars, perror, psfcat
 
 
 def curvefit_psf(func,*args,**kwargs):

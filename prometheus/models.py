@@ -1139,8 +1139,9 @@ class PSFBase:
               uncertainties will be output as numpy arrays.
         perror : numpy array
             Array of uncertainties of the best-fit values.  Only if retpararray=True is set.
-        model : numpy array
-            The best-fitting model.  This does *not* include the sky.
+        model : CCDData object
+            The best-fitting model. This only includes the model for the region that was used
+              in the fit.  To return the model for the full image set retfullmodel=True.
         mpars : numpy array
             Best-fit model parameter values.  Only if allpars=True and retpararray=False are set.
 
@@ -1196,14 +1197,18 @@ class PSFBase:
             radius = self.fwhm()
         bbox = self.starbbox((xc,yc),im.shape,radius)
         X,Y = self.bbox2xy(bbox)
-        xdata = np.vstack((X.ravel(), Y.ravel()))
 
-        #subim = im[bbox.slices]
-        ny,nx = im.shape
+        # Get subimage of pixels to fix
+        # xc/yc might be offset
         flux = im.data[bbox.slices]
         err = im.error[bbox.slices]
         wt = 1.0/np.maximum(err,1)**2  # weights
         skyim = im.sky[bbox.slices]
+        xc -= bbox.ixmin  # offset for the subimage
+        yc -= bbox.iymin
+        X -= bbox.ixmin
+        Y -= bbox.iymin
+        xdata = np.vstack((X.ravel(), Y.ravel()))        
         sky = np.median(skyim)
         if nosky: sky=0.0
         height = flux[int(np.round(yc)),int(np.round(xc))]-sky   # python images are (Y,X)
@@ -1220,12 +1225,12 @@ class PSFBase:
         # Initialize the output catalog
         dt = np.dtype([('id',int),('height',float),('height_error',float),('x',float),
                        ('x_error',float),('y',float),('y_error',float),('sky',float),
-                       ('sky_error',float),('niter',int)])
+                       ('sky_error',float),('niter',int),('nfitpix',int),('chisq',float)])
         outcat = np.zeros(1,dtype=dt)
         outcat['id'] = 1
 
         # Make bounds
-        bounds = self.mkbounds(initpar,im.shape)
+        bounds = self.mkbounds(initpar,flux.shape)
         
         # Curve_fit
         if method=='curve_fit':
@@ -1289,6 +1294,10 @@ class PSFBase:
             cov = lsq.jac_covariance(jac,dy,wt.ravel())
             perror = np.sqrt(np.diag(cov))
 
+        # Offset the final coordinates for the subimage offset
+        bestpar[1] += bbox.ixmin
+        bestpar[2] += bbox.iymin        
+            
         # Image offsets for absolute X/Y coordinates
         if absolute:
             bestpar[1] += imx0
@@ -1305,7 +1314,9 @@ class PSFBase:
             outcat['sky'] = bestpar[3]
             outcat['sky_error'] = perror[3]        
         outcat['niter'] = count
-
+        outcat['nfitpix'] = flux.size
+        outcat['chisq'] = np.sum((flux-model.reshape(flux.shape))**2/err**2)
+        
         # Return full model
         if retfullmodel:
             bbox = self.starbbox((bestpar[1],bestpar[2]),im.shape)
