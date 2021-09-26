@@ -17,7 +17,8 @@ in Peter Stetson's DAOPHOT package.
 
    install
    gettingstarted
-	      
+   modules
+      
 
 Description
 ===========
