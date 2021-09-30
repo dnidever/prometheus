@@ -1470,11 +1470,12 @@ class PSFBase:
         """ Return the lower and upper bounds for the parameters."""
         return self._bounds
 
-    def mkbounds(self,pars,imshape):
+    def mkbounds(self,pars,imshape:
         """ Make bounds for a set of input parameters."""
 
         npars = len(pars)
         nmpars = len(self.params)
+        
         # figure out if nosky is set
         if (npars==3) or (npars-nmpars==3):
             nosky = True
@@ -1492,12 +1493,13 @@ class PSFBase:
         if npars>4:
             mlbounds,mubounds = self.bounds
             if nosky:
-                lbounds[3:] = mlbounds
-                ubounds[3:] = mubounds
+                 lbounds[3:] = mlbounds
+                 ubounds[3:] = mubounds
             else:
-                lbounds[4:] = mlbounds
-                ubounds[4:] = mubounds            
+                 lbounds[4:] = mlbounds
+                 ubounds[4:] = mubounds            
         bounds = (lbounds,ubounds)
+                 
         return bounds
 
     def checkbounds(self,pars,bounds=None):

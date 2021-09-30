@@ -89,16 +89,18 @@ def qr_jac_solve(jac,resid,weight=None):
     # jac: Jacobian matrix, first derivatives, [Npix, Npars]
     # resid: residuals [Npix]
     # weight: weights, ~1/error**2 [Npix]
-    
-    # Multipy dy and jac by weights
-    if weight is not None:
-        resid = resid * weight
-        jac = jac * weight.reshape(-1,1)
-    
+        
     # QR decomposition
-    q,r = np.linalg.qr(jac)
-    rinv = np.linalg.inv(r)
-    dbeta = rinv @ (q.T @ resid)
+    if weight is None:
+        q,r = np.linalg.qr(jac)
+        rinv = np.linalg.inv(r)
+        dbeta = rinv @ (q.T @ resid)
+    # Weights input, multiply resid and jac by weights        
+    else:
+        q,r = np.linalg.qr( jac * weight.reshape(-1,1) )
+        rinv = np.linalg.inv(r)
+        dbeta = rinv @ (q.T @ (resid*weight))
+        
     return dbeta
 
 def svd_jac_solve(jac,resid,weight=None):
@@ -109,22 +111,27 @@ def svd_jac_solve(jac,resid,weight=None):
 
     # Precondition??
     
-    # Multipy dy and jac by weights
-    if weight is not None:
-        resid = resid * weight        
-        jac = jac * weight.reshape(-1,1)
-    
     # Singular Value decomposition (SVD)
-    u,s,vt = np.linalg.svd(jac)
-    #u,s,vt = sparse.linalg.svds(jac)
-    # u: [Npix,Npix]
-    # s: [Npars]
-    # vt: [Npars,Npars]
-    # dy: [Npix]
-    sinv = s.copy()*0  # pseudo-inverse
-    sinv[s!=0] = 1/s[s!=0]
-    npars = len(s)
-    dbeta = vt.T @ ((u.T @ resid)[0:npars]*sinv)
+    if weight is None:
+        u,s,vt = np.linalg.svd(jac)
+        #u,s,vt = sparse.linalg.svds(jac)
+        # u: [Npix,Npix]
+        # s: [Npars]
+        # vt: [Npars,Npars]
+        # dy: [Npix]
+        sinv = s.copy()*0  # pseudo-inverse
+        sinv[s!=0] = 1/s[s!=0]
+        npars = len(s)
+        dbeta = vt.T @ ((u.T @ resid)[0:npars]*sinv)
+
+    # multply resid and jac by weights
+    else:
+        u,s,vt = np.linalg.svd( jac * weight.reshape(-1,1) )
+        sinv = s.copy()*0  # pseudo-inverse
+        sinv[s!=0] = 1/s[s!=0]
+        npars = len(s)
+        dbeta = vt.T @ ((u.T @ (resid*weight))[0:npars]*sinv)
+        
     return dbeta
 
 def cholesky_jac_sparse_solve(jac,resid,weight=None):
@@ -135,28 +142,40 @@ def cholesky_jac_sparse_solve(jac,resid,weight=None):
 
     # Precondition??
 
+    from scipy import sparse
+    
     # Multipy dy and jac by weights
     if weight is not None:
         resid = resid * weight        
         jac = jac * weight.reshape(-1,1)
-    
-    # J * x = resid
-    # J.T J x = J.T resid
-    # A = (J.T @ J)
-    # b = np.dot(J.T*dy)
-    # J is [3*Nstar,Npix]
-    # A is [3*Nstar,3*Nstar]
-    from scipy import sparse
-    jac = sparse.csc_matrix(jac)  # make it sparse
-    A = jac.T @ jac
-    b = jac.T.dot(resid)
-    # Now solve linear least squares with sparse
-    # Ax = b
-    from sksparse.cholmod import cholesky
-    factor = cholesky(A)
-    dbeta = factor(b)
-    
-    # Precondition?
+
+    if weight is None:
+        # J * x = resid
+        # J.T J x = J.T resid
+        # A = (J.T @ J)
+        # b = np.dot(J.T*dy)
+        # J is [3*Nstar,Npix]
+        # A is [3*Nstar,3*Nstar]
+        jac = sparse.csc_matrix(jac)  # make it sparse
+        A = jac.T @ jac
+        b = jac.T.dot(resid)
+        # Now solve linear least squares with sparse
+        # Ax = b
+        from sksparse.cholmod import cholesky
+        factor = cholesky(A)
+        dbeta = factor(b)
+
+    # multply resid and jac by weights
+    else:
+        wjac = jac * weight.reshape(-1,1)        
+        wjac = sparse.csc_matrix(wjac)  # make it sparse
+        A = wjac.T @ wjac
+        b = wjac.T.dot(resid*weight)
+        # Now solve linear least squares with sparse
+        # Ax = b
+        from sksparse.cholmod import cholesky
+        factor = cholesky(A)
+        dbeta = factor(b)
 
     return dbeta
     
@@ -166,17 +185,19 @@ def cholesky_jac_solve(jac,resid,weight=None):
     # jac: Jacobian matrix, first derivatives, [Npix, Npars]
     # resid: residuals [Npix]
 
-    # Multipy dy and jac by weights
-    if weight is not None:
-        resid = resid * weight        
-        jac = jac * weight.reshape(-1,1)
-    
-    # J * x = resid
-    # J.T J x = J.T resid
-    # A = (J.T @ J)
-    # b = np.dot(J.T*dy)
-    A = jac.T @ jac
-    b = np.dot(jac.T,resid)
+    if weight is None:
+        # J * x = resid
+        # J.T J x = J.T resid
+        # A = (J.T @ J)
+        # b = np.dot(J.T*dy)
+        A = jac.T @ jac
+        b = np.dot(jac.T,resid)
+
+    # multply resid and jac by weights        
+    else:
+        wjac = jac * weight.reshape(-1,1)
+        A = wjac.T @ wjac
+        b = np.dot(wjac.T,resid*weight)        
 
     # Now solve linear least squares with cholesky decomposition
     # Ax = b
@@ -292,9 +313,8 @@ def jac_covariance(jac,resid,wt=None):
     #   J.T * W * J
     #   where W = I/sig_i**2
     if wt is not None:
-        if wt.ndim==1:
-            wt = np.diag(wt)
-        hess = jac.T @ (wt @ jac)
+        wt2 = wt.reshape(-1,1) + np.zeros(npars)
+        hess = jac.T @ (wt2 * jac)
     else:
         hess = jac.T @ jac  # not weighted
 

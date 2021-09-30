@@ -58,6 +58,7 @@ class PSFFitter(object):
         self.starxcen[:] = cat['x'].copy()
         self.starycen = np.zeros(self.nstars,float)
         self.starycen[:] = cat['y'].copy()
+        self.starchisq = np.zeros(self.nstars,float)
         
         # Get xdata, ydata, error
         imdata = []
@@ -217,7 +218,11 @@ class PSFFitter(object):
             # No refit of stellar parameters
             else:
                 model = psf(x,y,pars=[height,xcen,ycen])
-                
+
+            # Relculate redyced chi squared
+            chisq = np.sum((flux-model.ravel())**2/err**2)/npix
+            self.starchisq[i] = chisq
+            
             #model = psf(x,y,pars=[height,xcen,ycen])
             # Zero-out anything beyond the fitting radius
             #im[mask] = 0.0
@@ -254,7 +259,7 @@ class PSFFitter(object):
         # Need to run model() to calculate height/xcen/ycen for first couple iterations
         #if self.niter<=1 and refit:
         #    dum = self.model(x,*args,refit=refit)
-        dum = self.model(x,*args,refit=True,verbose=True)            
+        dum = self.model(x,*args,refit=True) #,verbose=True)            
             
         for i in range(self.nstars):
             height = self.starheight[i]
@@ -309,7 +314,7 @@ class PSFFitter(object):
             return allim,allderiv
         else:
             return allderiv
-    
+
     
 def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
     """
@@ -356,7 +361,7 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
 
     t0 = time.time()
     
-    pf = PSFFitter(psf,image,cat,verbose=verbose)
+    pf = PSFFitter(psf,image,cat,verbose=False) #verbose)
     xdata = np.arange(pf.ntotpix)
     initpar = psf.params.copy()
     method = str(method).lower()
@@ -375,9 +380,14 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
         percdiff = 1e10
         bestpar = initpar.copy()
 
-        while (count<maxiter and percdiff>minpercdiff):
+        dchisq = -1
+        oldchisq = 1e30
+        bounds = psf.bounds
+        maxsteps = psf._steps
+        while (count<maxiter and percdiff>minpercdiff and dchisq<0):
             # Get the Jacobian and model
             m,jac = pf.jac(xdata,*bestpar,retmodel=True)
+            chisq = np.sum((pf.imflatten-m)**2/pf.errflatten**2)
             dy = pf.imflatten-m
             # Weights
             wt = 1/pf.errflatten**2
@@ -387,17 +397,27 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
             
             # Update the parameters
             oldpar = bestpar.copy()
-            bestpar += dbeta
+            bestpar = psf.newpars(bestpar,dbeta,bounds,maxsteps)
+            #bestpar += dbeta
             diff = np.abs(bestpar-oldpar)
             denom = np.abs(oldpar.copy())
             denom[denom==0] = 1.0  # deal with zeros
             percdiff = np.max(diff/denom*100)
-            perror = diff  # rough estimate
+            dchisq = chisq-oldchisq
+            percdiffchisq = dchisq/oldchisq*100
+            oldchisq = chisq
             count += 1
 
-            if verbose:
-                print(count,bestpar,percdiff)
-
+            #if verbose:
+            #    print(count,bestpar,percdiff,chisq)
+            print(chisq,dchisq)
+            
+    # Estimate uncertainties
+    if method != 'curve_fit':
+        # Calculate covariance matrix
+        cov = lsq.jac_covariance(jac,dy,wt=wt)
+        perror = np.sqrt(np.diag(cov))
+                
     pars = bestpar
     if verbose:
         print('Best-fitting parameters: ',pars)

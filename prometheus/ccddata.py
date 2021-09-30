@@ -134,7 +134,20 @@ class CCDData(CCD):
         # can make it c-contiguous by doing
         # foo = foo.copy(order='C')
 
+
+        #maybe have CCDData have both a relative and absolute BoundingBox.  The relative being of the
+        #last image that it was sliced from (what I'm using now), and the absolute one keeping track of
+        #the position in the *original* image.
+
         
+    def __repr__(self):
+        prefix = self.__class__.__name__ + '('
+        body = np.array2string(self.data, separator=', ', prefix=prefix)
+        out = ''.join([prefix, body, ')']) +'\n'
+        out += self.bbox.__repr__()
+        return out
+
+    
     # for the string representation also print out the bbox values
         
     def __getitem__(self, item):
