@@ -158,7 +158,8 @@ class PSFFitter(object):
             
             # Fit height/xcen/ycen if niter=1
             if refit:
-                if (self.niter<=1): # or self.niter%3==0):
+                #if (self.niter<=1): # or self.niter%3==0):
+                if self.niter>-1:
                     # the image still has sky in it
                     pars,perror,model = psf.fit(image,[height,x0,y0],nosky=False,retpararray=True,niter=5)
                     xcen += (pars[1]-x0)
@@ -219,6 +220,9 @@ class PSFFitter(object):
             else:
                 model = psf(x,y,pars=[height,xcen,ycen])
 
+            if self.niter>1:
+                import pdb; pdb.set_trace()
+                
             # Relculate redyced chi squared
             chisq = np.sum((flux-model.ravel())**2/err**2)/npix
             self.starchisq[i] = chisq
@@ -393,10 +397,12 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
             wt = 1/pf.errflatten**2
             # Solve Jacobian
             dbeta = lsq.jac_solve(jac,dy,method=method,weight=wt)
+            print('pars = ',bestpar)
             print('dbeta = ',dbeta)
             
             # Update the parameters
             oldpar = bestpar.copy()
+            #import pdb; pdb.set_trace()
             bestpar = psf.newpars(bestpar,dbeta,bounds,maxsteps)
             #bestpar += dbeta
             diff = np.abs(bestpar-oldpar)
@@ -408,10 +414,11 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
             oldchisq = chisq
             count += 1
 
-            #if verbose:
-            #    print(count,bestpar,percdiff,chisq)
-            print(chisq,dchisq)
-            
+            if verbose:
+                print(count,bestpar,percdiff,chisq)
+
+    #import pdb; pdb.set_trace()
+                
     # Estimate uncertainties
     if method != 'curve_fit':
         # Calculate covariance matrix
@@ -428,20 +435,25 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
     newpsf._params = pars
 
     # Output best-fitting values for the PSF stars as well
-    dt = np.dtype([('id',int),('height',float),('x',float),('y',float)])
+    dt = np.dtype([('id',int),('height',float),('x',float),('y',float),
+                   ('ixmin',int),('ixmax',int),('iymin',int),('iymax',int)])
     psfcat = np.zeros(len(cat),dtype=dt)
     if 'id' in cat.colnames:
         psfcat['id'] = cat['id']
     else:
         psfcat['id'] = np.arange(len(cat))+1
     psfcat['height'] = pf.starheight
-    psfcat['x'] = pf.starycen
-    psfcat['y'] = pf.starxcen
+    psfcat['x'] = pf.starxcen
+    psfcat['y'] = pf.starycen
+    for i in range(len(cat)):
+        bbox = pf.bboxdata[i]
+        psfcat['ixmin'][i] = bbox.ixmin
+        psfcat['ixmax'][i] = bbox.ixmax
+        psfcat['iymin'][i] = bbox.iymin
+        psfcat['iymax'][i] = bbox.iymax        
     
     if verbose:
         print('dt = %.2f sec' % (time.time()-t0))
-
-    import pdb; pdb.set_trace()
         
     return newpsf, pars, perror, psfcat
 

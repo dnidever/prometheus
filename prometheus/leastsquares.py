@@ -71,7 +71,9 @@ def jac_solve(jac,resid,method=None,weight=None):
     elif method=='lu':
         dbeta = lu_jac_solve(usejac,resid,weight=weight)        
     elif method=='sparse':
-        dbeta = cholesky_jac_sparse_solve(usejac,resid,weight=weight)        
+        dbeta = cholesky_jac_sparse_solve(usejac,resid,weight=weight)
+    elif method=='kkt':
+        dbeta = kkt_jac_solve(usejac,resid,weight=weight)        
     else:
         raise ValueError(method+' not supported')
     
@@ -178,7 +180,32 @@ def cholesky_jac_sparse_solve(jac,resid,weight=None):
         dbeta = factor(b)
 
     return dbeta
-    
+
+def kkt_jac_solve(jac,resid,weight=None,maxiter=None):
+    """ Solve part a non-linear least squares equation using KKT (Karush-Kuhn-Tucker)
+        method with the Jacobian."""
+    # jac: Jacobian matrix, first derivatives, [Npix, Npars]
+    # resid: residuals [Npix]
+
+    if weight is None:
+        # J * x = resid
+        # J.T J x = J.T resid
+        # A = (J.T @ J)
+        # b = np.dot(J.T*dy)
+        A = jac.T @ jac
+        b = np.dot(jac.T,resid)
+
+    # multply resid and jac by weights        
+    else:
+        wjac = jac * weight.reshape(-1,1)
+        A = wjac.T @ wjac
+        b = np.dot(wjac.T,resid*weight)        
+
+    # Use KKT method
+    x = scipy.optimize.nnls(A,b,maxiter=maxiter)
+
+    return x
+
 def cholesky_jac_solve(jac,resid,weight=None):
     """ Solve part a non-linear least squares equation using Cholesky decomposition
         using the Jacobian."""

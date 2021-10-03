@@ -1470,7 +1470,7 @@ class PSFBase:
         """ Return the lower and upper bounds for the parameters."""
         return self._bounds
 
-    def mkbounds(self,pars,imshape:
+    def mkbounds(self,pars,imshape):
         """ Make bounds for a set of input parameters."""
 
         npars = len(pars)
@@ -1679,7 +1679,7 @@ class PSFMoffat(PSFBase):
         self._bounds = (np.array([0.0,0.0,-np.inf,0.01]),
                         np.array([np.inf,np.inf,np.inf,np.inf]))
         # Set step sizes
-        self._steps = np.array([0.5,0.5,0.2,0.1])
+        self._steps = np.array([0.5,0.5,0.2,0.2])
         
     def fwhm(self,pars=None):
         """ Return the FWHM of the model."""
