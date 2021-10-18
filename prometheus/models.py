@@ -141,7 +141,7 @@ def gaussian2d_flux(pars):
     # Volume is 2*pi*A*sigx*sigy
     amp = pars[0]
     xsig = pars[3]
-    ysig = pars[4]
+    ysig = pars[4]    
     volume = 2*np.pi*amp*xsig*ysig
     
     return volume
@@ -230,8 +230,9 @@ def gaussian2d_abc2sigtheta(a,b,c):
 def gaussian2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
     """ Two dimensional Gaussian model function integrated over the pixels."""
 
-    # Use Error function
-
+    x = np.atleast_1d(x)
+    y = np.atleast_1d(y)
+    
     # Deal with the shape, must be 1D to function properly
     shape = x.shape
     ndim = x.ndim
@@ -253,8 +254,8 @@ def gaussian2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
     sin2t = np.sin(2. * theta)
     xstd2 = pars[3] ** 2
     ystd2 = pars[4] ** 2
-    xdiff = x - pars[1]
-    ydiff = y - pars[2]
+    xdiff = x2 - pars[1]
+    ydiff = y2 - pars[2]
     a = 0.5 * ((cost2 / xstd2) + (sint2 / ystd2))
     b = 0.5 * ((sin2t / xstd2) - (sin2t / ystd2))
     c = 0.5 * ((sint2 / xstd2) + (cost2 / ystd2))
@@ -274,13 +275,13 @@ def gaussian2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
         derivative = []
         if nderiv>=1:
             dg_dA = g / pars[0]
-            derivative.append(dg_dA)
+            derivative.append(np.sum(np.sum(dg_dA,axis=0),axis=0)/osamp2)
         if nderiv>=2:        
             dg_dx_mean = g * ((2. * a * xdiff) + (b * ydiff))
-            derivative.append(dg_dx_mean)
+            derivative.append(np.sum(np.sum(dg_dx_mean,axis=0),axis=0)/osamp2)
         if nderiv>=3:
             dg_dy_mean = g * ((b * xdiff) + (2. * c * ydiff))
-            derivative.append(dg_dy_mean)
+            derivative.append(np.sum(np.sum(dg_dy_mean,axis=0),axis=0)/osamp2)
         if nderiv>=4:
             cost = np.cos(theta)
             sint = np.sin(theta)
@@ -291,7 +292,7 @@ def gaussian2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
             dg_dx_stddev = g * (-(da_dx_stddev * xdiff2 +
                                   db_dx_stddev * xdiff * ydiff +
                                   dc_dx_stddev * ydiff2))
-            derivative.append(dg_dx_stddev)
+            derivative.append(np.sum(np.sum(dg_dx_stddev,axis=0),axis=0)/osamp2)
         if nderiv>=5:
             ystd3 = pars[2] ** 3            
             da_dy_stddev = -sint2 / ystd3
@@ -300,7 +301,7 @@ def gaussian2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
             dg_dy_stddev = g * (-(da_dy_stddev * xdiff2 +
                                   db_dy_stddev * xdiff * ydiff +
                                   dc_dy_stddev * ydiff2))
-            derivative.append(dg_dy_stddev)
+            derivative.append(np.sum(np.sum(dg_dy_stddev,axis=0),axis=0)/osamp2)
         if nderiv>=6:
             cos2t = np.cos(2. * theta)            
             da_dtheta = (sint * cost * ((1. / ystd2) - (1. / xstd2)))
@@ -309,14 +310,24 @@ def gaussian2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
             dg_dtheta = g * (-(da_dtheta * xdiff2 +
                                db_dtheta * xdiff * ydiff +
                                dc_dtheta * ydiff2))
-            derivative.append(dg_dtheta)
+            derivative.append(np.sum(np.sum(dg_dtheta,axis=0),axis=0)/osamp2)
 
+        g = np.sum(np.sum(g,axis=0),axis=0)/osamp2
+
+        # Reshape
+        if ndim>1:
+            g = g.reshape(shape)
+            derivative = [d.reshape(shape) for d in derivative]
+        
         return g,derivative
-            
-    # No derivative
-    else:        
-        return g
 
+    # No derivative
+    else:
+        g = np.sum(np.sum(g,axis=0),axis=0)/osamp2
+        # Reshape
+        if ndim>1:
+            g = g.reshape(shape)
+        return g
     
 
 def moffat2d(x, y, pars, deriv=False, nderiv=None):
@@ -681,6 +692,423 @@ def penny2d_flux(pars):
     
     return volume
 
+def penny2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
+    """ Gaussian core and Lorentzian-like wings, only Gaussian is tilted integrated over the pixels."""
+    # Lorentzian are azimuthally symmetric.
+    # Lorentzian cannot be normalized, use Moffat beta=1.2 instead
+    # pars = [amp,x0,y0,xsig,ysig,theta, relamp,sigma]
+
+    x = np.atleast_1d(x)
+    y = np.atleast_1d(y)
+    
+    # Deal with the shape, must be 1D to function properly
+    shape = x.shape
+    ndim = x.ndim
+    if ndim>1:
+        x = x.flatten()
+        y = y.flatten()
+    
+    osamp2 = float(osamp)**2
+    nx = x.size
+    dx = (np.arange(osamp).astype(float)+1)/osamp-(1/(2*osamp))-0.5
+    dx2 = np.tile(dx,(osamp,1))
+    x2 = np.tile(x,(osamp,osamp,1)) + np.tile(dx2.T,(nx,1,1)).T
+    y2 = np.tile(y,(osamp,osamp,1)) + np.tile(dx2,(nx,1,1)).T
+    
+    xdiff = x2 - pars[1]
+    ydiff = y2 - pars[2]
+    amp = pars[0]
+    xsig = pars[3]
+    ysig = pars[4]
+    theta = pars[5]
+    cost2 = np.cos(theta) ** 2
+    sint2 = np.sin(theta) ** 2
+    sin2t = np.sin(2. * theta)
+    xsig2 = xsig ** 2
+    ysig2 = ysig ** 2
+    a = ((cost2 / xsig2) + (sint2 / ysig2))
+    b = ((sin2t / xsig2) - (sin2t / ysig2))    
+    c = ((sint2 / xsig2) + (cost2 / ysig2))
+    relamp = pars[6]    
+    # Gaussian component
+    g = amp * (1-relamp) * np.exp(-0.5*((a * xdiff ** 2) + (b * xdiff*ydiff) +
+                                        (c * ydiff ** 2)))
+    # Add Lorentzian/Moffat beta=1.2 wings
+    sigma = pars[7]
+    rr_gg = (xdiff ** 2 + ydiff ** 2) / sigma ** 2
+    beta = 1.2
+    l = amp * relamp / (1 + rr_gg)**(beta)
+    # Sum of Gaussian + Lorentzian
+    f = g + l
+
+   
+    # Compute derivative as well
+    if deriv is True:
+
+        # How many derivative terms to return
+        if nderiv is not None:
+            if nderiv <=0:
+                nderiv = 8
+        else:
+            nderiv = 8
+            
+        derivative = []
+        if nderiv>=1:
+            df_dA = f / amp
+            derivative.append(np.sum(np.sum(df_dA,axis=0),axis=0)/osamp2)
+        if nderiv>=2:
+            #df_dx_mean = ( g * 0.5*((2 * a * xdiff) + (b * ydiff)) +
+            #               2*l*xdiff/(sigma**2 * (1+rr_gg)) )
+            df_dx_mean = ( g * 0.5*((2 * a * xdiff) + (b * ydiff)) +                           
+                           2*beta*l*xdiff/(sigma**2 * (1+rr_gg)) )            
+            derivative.append(np.sum(np.sum(df_dx_mean,axis=0),axis=0)/osamp2)
+        if nderiv>=3:
+            #df_dy_mean = ( g * 0.5*((2 * c * ydiff) + (b * xdiff)) +
+            #               2*l*ydiff/(sigma**2 * (1+rr_gg)) )
+            df_dy_mean = ( g * 0.5*((2 * c * ydiff) + (b * xdiff)) +
+                           2*beta*l*ydiff/(sigma**2 * (1+rr_gg)) )            
+            derivative.append(np.sum(np.sum(df_dy_mean,axis=0),axis=0)/osamp2)
+        if nderiv>=4:
+            xdiff2 = xdiff ** 2
+            ydiff2 = ydiff ** 2
+            xsig3 = xsig ** 3
+            da_dxsig = -cost2 / xsig3
+            db_dxsig = -sin2t / xsig3            
+            dc_dxsig = -sint2 / xsig3            
+            df_dxsig = g * (-(da_dxsig * xdiff2 +
+                              db_dxsig * xdiff * ydiff +
+                              dc_dxsig * ydiff2))
+            derivative.append(np.sum(np.sum(df_dxsig,axis=0),axis=0)/osamp2)
+        if nderiv>=5:
+            ysig3 = ysig ** 3
+            da_dysig = -sint2 / ysig3
+            db_dysig = sin2t / ysig3            
+            dc_dysig = -cost2 / ysig3            
+            df_dysig = g * (-(da_dysig * xdiff2 +
+                              db_dysig * xdiff * ydiff +
+                              dc_dysig * ydiff2))
+            derivative.append(np.sum(np.sum(df_dysig,axis=0),axis=0)/osamp2)
+        if nderiv>=6:
+            sint = np.sin(theta)
+            cost = np.cos(theta)
+            cos2t = np.cos(2.0*theta)
+            da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
+            db_dtheta = (cos2t / xsig2) - (cos2t / ysig2)            
+            dc_dtheta = -da_dtheta            
+            df_dtheta = g * (-(da_dtheta * xdiff2 +
+                               db_dtheta * xdiff * ydiff +
+                               dc_dtheta * ydiff2))
+            derivative.append(np.sum(np.sum(df_dtheta,axis=0),axis=0)/osamp2)
+        if nderiv>=7:
+            df_drelamp = -g/(1-relamp) + l/relamp
+            derivative.append(df_drelamp)
+        if nderiv>=8:
+            #df_dsigma = l/(1+rr_gg) * 2*rr_gg/sigma
+            df_dsigma = beta*l/(1+rr_gg) * 2*(xdiff2+ydiff2)/sigma**3 
+            derivative.append(np.sum(np.sum(df_dsigma,axis=0),axis=0)/osamp2)
+
+        f = np.sum(np.sum(g,axis=0),axis=0)/osamp2
+
+        # Reshape
+        if ndim>1:
+            f = f.reshape(shape)
+            derivative = [d.reshape(shape) for d in derivative]
+        
+        return f,derivative
+
+    # No derivative
+    else:
+        f = np.sum(np.sum(f,axis=0),axis=0)/osamp2
+        # Reshape
+        if ndim>1:
+            f = f.reshape(shape)
+        return f
+
+
+
+def gausspow2d(x, y, pars, deriv=False, nderiv=None):
+    """ DoPHOT PSF, sum of elliptical Gaussians."""
+    # Schechter, Mateo & Saha (1993), eq. 1 on pg.4
+    # I(x,y) = Io * (1+z2+0.5*beta4*z2**2+(1/6)*beta6*z2**3)**(-1)
+    # z2 = [0.5*(x**2/sigx**2 + 2*sigxy*x*y + y**2/sigy**2]
+    # x = (x'-x0)
+    # y = (y'-y0)
+    # nominal center of image at (x0,y0)
+    # if beta4=beta6=1, then it's just a truncated power series for a Gaussian
+    # 8 free parameters
+    # pars = [amplitude, x0, y0, sigx, sigy, theta, beta4, beta6]
+    
+    xdiff = x - pars[1]
+    ydiff = y - pars[2]
+    amp = pars[0]
+    xsig = pars[3]
+    ysig = pars[4]
+    theta = pars[5]
+    beta4 = pars[6]
+    beta6 = pars[7]
+    xdiff2 = xdiff**2
+    ydiff2 = ydiff**2
+
+    # convert sigx, sigy and theta to a, b, c terms
+    cost2 = np.cos(theta) ** 2
+    sint2 = np.sin(theta) ** 2
+    sin2t = np.sin(2. * theta)
+    xsig2 = xsig ** 2
+    ysig2 = ysig ** 2
+    a = ((cost2 / xsig2) + (sint2 / ysig2))
+    b = ((sin2t / xsig2) - (sin2t / ysig2))    
+    c = ((sint2 / xsig2) + (cost2 / ysig2))
+    
+    z2 = 0.5*(a*xdiff2 + b*xdiff*ydiff + c*ydiff2)
+    gxy = (1+z2+0.5*beta4*z2**2+(1.0/6.0)*beta6*z2**3)
+    g = amp / gxy
+
+    
+    # Compute derivative as well
+    if deriv is True:
+
+        # How many derivative terms to return
+        if nderiv is not None:
+            if nderiv <=0:
+                nderiv = 8
+        else:
+            nderiv = 8
+        
+        derivative = []
+        if nderiv>=1:
+            dg_dA = g / amp
+            derivative.append(dg_dA)
+        if nderiv>=2:
+            dg_dx_0 = g * (1+beta4*z2+0.5*beta6*z2**2)*(2*a*xdiff+b*ydiff) / gxy
+            derivative.append(dg_dx_0)            
+        if nderiv>=3:
+            dg_dy_0 = g * (1+beta4*z2+0.5*beta6*z2**2)*(2*c*ydiff+b*xdiff) / gxy            
+            derivative.append(dg_dy_0)
+        if nderiv>=4:
+            xsig3 = xsig ** 3
+            da_dxsig = -cost2 / xsig3
+            db_dxsig = -sin2t / xsig3            
+            dc_dxsig = -sint2 / xsig3         
+            dg_dxsig = -g * (1+beta4*z2+0.5*beta6*z2**2)*(da_dxsig*xdiff2+db_dxsig*xdiff*ydiff+dc_dxsig*ydiff2) / gxy     
+            derivative.append(dg_dxsig)
+        if nderiv>=5:
+            ysig3 = ysig ** 3
+            da_dysig = -sint2 / ysig3
+            db_dysig = sin2t / ysig3            
+            dc_dysig = -cost2 / ysig3        
+            dg_dysig = -g * (1+beta4*z2+0.5*beta6*z2**2)*(da_dysig*xdiff2+db_dysig*xdiff*ydiff+dc_dysig*ydiff2) / gxy     
+            derivative.append(dg_dysig)
+        if nderiv>=6:
+            sint = np.sin(theta)
+            cost = np.cos(theta)
+            cos2t = np.cos(2.0*theta)
+            da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
+            db_dtheta = (cos2t / xsig2) - (cos2t / ysig2)            
+            dc_dtheta = -da_dtheta 
+            dg_dtheta = -g * (1+beta4*z2+0.5*beta6*z2**2)*(da_dtheta*xdiff2+db_dtheta*xdiff*ydiff+dc_dtheta*ydiff2) / gxy     
+            derivative.append(dg_dtheta)
+        if nderiv>=7:            
+            dg_dbeta4 = -g * (0.5*z2**2) / gxy
+            derivative.append(dg_dbeta4)
+        if nderiv>=8:            
+            dg_dbeta6 = -g * ((1.0/6.0)*z2**3) / gxy
+            derivative.append(dg_dbeta6) 
+            
+        return g,derivative
+
+    # No derivative
+    else:
+        return g
+
+
+def gausspow2d_fwhm(pars):
+    """ Return the FWHM of a 2D DoPHOT Gausspow function."""
+    # pars = [amplitude, x0, y0, xsig, ysig, theta, beta4, beta6]    
+
+    amp = pars[0]
+    xsig = pars[3]
+    ysig = pars[4]
+    theta = pars[5]
+    beta4 = pars[6]
+    beta6 = pars[7]
+
+    # convert sigx, sigy and theta to a, b, c terms
+    cost2 = np.cos(theta) ** 2
+    sint2 = np.sin(theta) ** 2
+    sin2t = np.sin(2. * theta)
+    xsig2 = xsig ** 2
+    ysig2 = ysig ** 2
+    a = ((cost2 / xsig2) + (sint2 / ysig2))
+    b = ((sin2t / xsig2) - (sin2t / ysig2))    
+    c = ((sint2 / xsig2) + (cost2 / ysig2))
+    
+    # The mean radius of an ellipse is: (2a+b)/3
+    sig_major = np.max([xsig,ysig])
+    sig_minor = np.min([xsig,ysig])
+    mnsig = (2.0*sig_major+sig_minor)/3.0
+    # Convert sigma to FWHM
+    # FWHM = 2*sqrt(2*ln(2))*sig ~ 2.35482*sig
+    gfwhm = mnsig*2.35482
+
+    # Generate a small profile along one axis with xsig=mnsig
+    x = np.arange(gfwhm/2.35/2, gfwhm, 0.5)
+    z2 = 0.5*(x/mnsig)**2
+    gxy = (1+z2+0.5*beta4*z2**2+(1.0/6.0)*beta6*z2**3)
+    f = amp / gxy
+
+    hwhm = np.interp(0.5,f[::-1],x[::-1])
+    fwhm = 2*hwhm
+    
+    return fwhm
+
+def gausspow2d_flux(pars):
+    """ Return the flux of a 2D DoPHOT Gausspow function."""
+    # pars = [amplitude, x0, y0, xsig, ysig, theta, beta4, beta6]
+
+    amp = pars[0]
+    xsig = pars[3]
+    ysig = pars[4]
+    beta4 = pars[6]
+    beta6 = pars[7]
+
+    # Theta angle doesn't matter
+
+    # Integral from 0 to +infinity of
+    # dx/(1+0.5*x+beta4/8*x^2+beta6/48*x^3)
+    # I calculated the integral for various values of beta4 and beta6 using
+    # WolframAlpha, https://www.wolframalpha.com/
+    # Integrate 1/(1+0.5*x+beta4*Power[x,2]/8+beta6*Power[x,3]/48)dx, x=0 to inf
+    p = [0.20326739, 0.019689948, 0.023564239, 0.63367201, 0.044905046, 0.28862448]
+    integral = p[0]/(p[1]+p[2]*beta4**p[3]+p[4]*beta6**p[5])
+    # The integral is then multiplied by amp*pi*xsig*ysig
+
+    # This seems to be accurate to ~0.5%
+    
+    volume = np.pi*amp*xsig*ysig*integral
+    
+    return volume
+
+    
+def gausspow2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
+    """ DoPHOT PSF, integrated over the pixels."""
+    # Schechter, Mateo & Saha (1993), eq. 1 on pg.4
+    # I(x,y) = Io * (1+z2+0.5*beta4*z2**2+(1/6)*beta6*z2**3)**(-1)
+    # z2 = [0.5*(x**2/sigx**2 + 2*sigxy*x*y + y**2/sigy**2]
+    # x = (x'-x0)
+    # y = (y'-y0)
+    # nominal center of image at (x0,y0)
+    # if beta4=beta6=1, then it's just a truncated power series for a Gaussian
+    # 8 free parameters
+    # pars = [amplitude, x0, y0, sigx, sigy, theta, beta4, beta6]
+
+    # Deal with the shape, must be 1D to function properly
+    shape = x.shape
+    ndim = x.ndim
+    if ndim>1:
+        x = x.flatten()
+        y = y.flatten()
+
+    osamp2 = float(osamp)**2
+    nx = x.size
+    dx = (np.arange(osamp).astype(float)+1)/osamp-(1/(2*osamp))-0.5
+    dx2 = np.tile(dx,(osamp,1))
+    x2 = np.tile(x,(osamp,osamp,1)) + np.tile(dx2.T,(nx,1,1)).T
+    y2 = np.tile(y,(osamp,osamp,1)) + np.tile(dx2,(nx,1,1)).T    
+
+    # pars = [amplitude, x0, y0, sigx, sigy, theta, beta4, beta6]    
+    xdiff = x2 - pars[1]
+    ydiff = y2 - pars[2]
+    amp = pars[0]
+    xsig = pars[3]
+    ysig = pars[4]
+    theta = pars[5]
+    beta4 = pars[6]
+    beta6 = pars[7]
+    xdiff2 = xdiff**2
+    ydiff2 = ydiff**2
+
+    # convert sigx, sigy and theta to a, b, c terms
+    cost2 = np.cos(theta) ** 2
+    sint2 = np.sin(theta) ** 2
+    sin2t = np.sin(2. * theta)
+    xsig2 = xsig ** 2
+    ysig2 = ysig ** 2
+    a = ((cost2 / xsig2) + (sint2 / ysig2))
+    b = ((sin2t / xsig2) - (sin2t / ysig2))    
+    c = ((sint2 / xsig2) + (cost2 / ysig2))
+    
+    z2 = 0.5*(a*xdiff2 + b*xdiff*ydiff + c*ydiff2)
+    gxy = (1+z2+0.5*beta4*z2**2+(1.0/6.0)*beta6*z2**3)
+    g = amp / gxy
+
+    
+    # Compute derivative as well
+    if deriv is True:
+
+        # How many derivative terms to return
+        if nderiv is not None:
+            if nderiv <=0:
+                nderiv = 8
+        else:
+            nderiv = 8
+        
+        derivative = []
+        if nderiv>=1:
+            dg_dA = g / amp
+            derivative.append(np.sum(np.sum(dg_dA,axis=0),axis=0)/osamp2)
+        if nderiv>=2:
+            dg_dx_0 = g * (1+beta4*z2+0.5*beta6*z2**2)*(2*a*xdiff+b*ydiff) / gxy
+            derivative.append(np.sum(np.sum(dg_dx_0,axis=0),axis=0)/osamp2)
+        if nderiv>=3:
+            dg_dy_0 = g * (1+beta4*z2+0.5*beta6*z2**2)*(2*c*ydiff+b*xdiff) / gxy            
+            derivative.append(np.sum(np.sum(dg_dy_0,axis=0),axis=0)/osamp2)
+        if nderiv>=4:
+            xsig3 = xsig ** 3
+            da_dxsig = -cost2 / xsig3
+            db_dxsig = -sin2t / xsig3            
+            dc_dxsig = -sint2 / xsig3         
+            dg_dxsig = -g * (1+beta4*z2+0.5*beta6*z2**2)*(da_dxsig*xdiff2+db_dxsig*xdiff*ydiff+dc_dxsig*ydiff2) / gxy     
+            derivative.append(np.sum(np.sum(dg_dxsig,axis=0),axis=0)/osamp2)
+        if nderiv>=5:
+            ysig3 = ysig ** 3
+            da_dysig = -sint2 / ysig3
+            db_dysig = sin2t / ysig3            
+            dc_dysig = -cost2 / ysig3        
+            dg_dysig = -g * (1+beta4*z2+0.5*beta6*z2**2)*(da_dysig*xdiff2+db_dysig*xdiff*ydiff+dc_dysig*ydiff2) / gxy     
+            derivative.append(np.sum(np.sum(dg_dysig,axis=0),axis=0)/osamp2)
+        if nderiv>=6:
+            sint = np.sin(theta)
+            cost = np.cos(theta)
+            cos2t = np.cos(2.0*theta)
+            da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
+            db_dtheta = (cos2t / xsig2) - (cos2t / ysig2)            
+            dc_dtheta = -da_dtheta 
+            dg_dtheta = -g * (1+beta4*z2+0.5*beta6*z2**2)*(da_dtheta*xdiff2+db_dtheta*xdiff*ydiff+dc_dtheta*ydiff2) / gxy     
+            derivative.append(np.sum(np.sum(dg_dtheta,axis=0),axis=0)/osamp2)
+        if nderiv>=7:            
+            dg_dbeta4 = -g * (0.5*z2**2) / gxy
+            derivative.append(np.sum(np.sum(dg_dbeta4,axis=0),axis=0)/osamp2)
+        if nderiv>=8:            
+            dg_dbeta6 = -g * ((1.0/6.0)*z2**3) / gxy
+            derivative.append(np.sum(np.sum(dg_dbeta6,axis=0),axis=0)/osamp2)
+            
+        g = np.sum(np.sum(g,axis=0),axis=0)/osamp2
+
+        # Reshape
+        if ndim>1:
+            g = g.reshape(shape)
+            derivative = [d.reshape(shape) for d in derivative]
+            
+        return g,derivative
+
+    # No derivative
+    else:
+        g = np.sum(np.sum(g,axis=0),axis=0)/osamp2
+        # Reshape
+        if ndim>1:
+            g = g.reshape(shape)
+        return g
+
 
 def empirical(x, y, pars, mpars, mcube, deriv=False, nderiv=None):
     """Empirical look-up table"""
@@ -775,8 +1203,14 @@ class PSFBase:
         self.verbose = verbose
         self.niter = 0
         self._bounds = None
+        self._unitfootflux = None  # unit flux in footprint
         
         # add a precomputed circular mask here to mask out the corners??
+
+
+        
+    # ADD AN EMPIRICAL ATTRIBUTE THAT SPECIFIES IF THERE IS AN EMPIRICAL
+    # LOOK-UP TABLE, separate parameter for what variation level (constant or linear)
         
     @property
     def params(self):
@@ -1410,14 +1844,28 @@ class PSFBase:
     def __repr__(self):
         return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+')'        
 
+    @property
+    def unitfootflux(self):
+        """ Return the unit flux inside the footprint."""
+        if self._unitfootflux is None:
+            self._unitfootflux = np.sum(self()) # sum up footprint flux
+        return self._unitfootflux 
+            
     def fwhm(self):
         """ Return the FWHM of the model function. Must be defined by subclass"""
         pass
 
-    def flux(self,pars=None):
+    def flux(self,pars=None,footprint=False):
         """ Return the flux/volume of the model given the height.  Must be defined by subclass."""
         pass
 
+    # Do we also want the flux within the footprint!
+    # could calculate the unit flux within the footprint the first time it's
+    # called and save that.
+    # could use fluxtot for the total flux
+    # or fluxfoot for the footprint flux
+    # or even have footprint=True to use the footprint flux
+    
     def steps(self,pars=None,bounds=None):
         """ Return step sizes to use when fitting the PSF model parameters (at least initial sizes)."""
         # Check the initial steps against the parameters to make sure that don't
@@ -1607,21 +2055,24 @@ class PSFGaussian(PSFBase):
         self._steps = np.array([0.5,0.5,0.2])
         
     #@property
-    def fwhm(self,pars=None):
+    def fwhm(self,pars=None,footprint=False):
         """ Return the FWHM of the model."""
         if pars is None:
             pars = np.hstack(([1.0,0.0,0.0],self.params))
         return gaussian2d_fwhm(pars)
 
-    def flux(self,pars=None):
+    def flux(self,pars=None,footprint=False):
         """ Return the flux/volume of the model given the height or parameters."""
         if pars is None:
             pars = np.hstack(([1.0, 0.0, 0.0], self.params))
         else:
             pars = np.atleast_1d(pars)
             if pars.size==1:
-                pars = np.hstack(([pars[0], 0.0, 0.0], self.params))            
-        return gaussian2d_flux(pars)        
+                pars = np.hstack(([pars[0], 0.0, 0.0], self.params))
+        if footprint:
+            return self.unitfootflux*pars[0]
+        else:
+            return gaussian2d_flux(pars)        
     
     def evaluate(self,x, y, pars, binned=None, deriv=False, nderiv=None):
         """Two dimensional Gaussian model function"""
@@ -1687,15 +2138,18 @@ class PSFMoffat(PSFBase):
             pars = np.hstack(([1.0,0.0,0.0],self.params))
         return moffat2d_fwhm(pars)
 
-    def flux(self,pars=None):
+    def flux(self,pars=None,footprint=False):
         """ Return the flux/volume of the model given the height or parameters."""
         if pars is None:
             pars = np.hstack(([1.0, 0.0, 0.0], self.params))
         else:
             pars = np.atleast_1d(pars)
             if pars.size==1:
-                pars = np.hstack(([pars[0], 0.0, 0.0], self.params))            
-        return moffat2d_flux(pars)
+                pars = np.hstack(([pars[0], 0.0, 0.0], self.params))
+        if footprint:
+            return self.unitfootflux*pars[0]
+        else: 
+            return moffat2d_flux(pars)
     
     def evaluate(self,x, y, pars, binned=None, deriv=False, nderiv=None):
         """Two dimensional Moffat model function"""
@@ -1759,15 +2213,18 @@ class PSFPenny(PSFBase):
             pars = np.hstack(([1.0,0.0,0.0],self.params))
         return penny2d_fwhm(pars)
 
-    def flux(self,pars=None):
+    def flux(self,pars=None,footprint=False):
         """ Return the flux/volume of the model given the height or parameters."""
         if pars is None:
             pars = np.hstack(([1.0, 0.0, 0.0], self.params))
         else:
             pars = np.atleast_1d(pars)
             if pars.size==1:
-                pars = np.hstack(([pars[0], 0.0, 0.0], self.params))            
-        return penny2d_flux(pars)
+                pars = np.hstack(([pars[0], 0.0, 0.0], self.params))
+        if footprint:
+            return self.unitfootflux*pars[0]
+        else:
+            return penny2d_flux(pars)
         
     def evaluate(self,x, y, pars=None, binned=None, deriv=False, nderiv=None):
         """Two dimensional Penny model function"""
@@ -1800,7 +2257,84 @@ class PSFPenny(PSFBase):
         hdulist[0].header['NPIX'] = self.npix        
         hdulist.writeto(filename,overwrite=overwrite)
         hdulist.close()
+
+       
+# PSF Ellipower class
+class PSFGausspow(PSFBase):
+    """ DoPHOT PSF, sum of Gaussian ellipses."""
+    # PARS are model parameters
     
+    # Initalize the object
+    def __init__(self,mpars=None,npix=101,binned=False):
+        # mpars = [sigx,sigy,sigxy,beta4,beta6]
+        if mpars is None:
+            mpars = np.array([1.0,2.5,2.5,0.0,1.0,1.0])
+        if len(mpars)!=5:
+            old = np.array(mpars).copy()
+            mpars = np.array([1.0,2.5,2.5,0.0,1.0,1.0])
+            mpars[0:len(old)] = old
+        if mpars[0]<=0 or mpars[1]<=0:
+            raise ValueError('sigma parameters must be >0')        
+        super().__init__(mpars,npix=npix,binned=binned)
+        # Set the bounds
+        #  should be allow negative values for beta4 and beta6??
+        self._bounds = (np.array([0.0,0.0,-np.inf,0.00,0.0]),
+                        np.array([np.inf,np.inf,np.inf,np.inf,np.inf]))
+        # Set step sizes
+        self._steps = np.array([0.5,0.5,0.2,0.1,0.1])
+        
+    def fwhm(self,pars=None):
+        """ Return the FWHM of the model."""
+        if pars is None:
+            pars = np.hstack(([1.0,0.0,0.0],self.params))
+        return gausspow2d_fwhm(pars)
+
+    def flux(self,pars=None,footprint=False):
+        """ Return the flux/volume of the model given the height or parameters."""
+        if pars is None:
+            pars = np.hstack(([1.0, 0.0, 0.0], self.params))
+        else:
+            pars = np.atleast_1d(pars)
+            if pars.size==1:
+                pars = np.hstack(([pars[0], 0.0, 0.0], self.params))
+        if footprint:
+            return self.unitfootflux*pars[0]
+        else:              
+            return gausspow2d_flux(pars)
+        
+    def evaluate(self,x, y, pars=None, binned=None, deriv=False, nderiv=None):
+        """Two dimensional DoPHOT Gausspow model function"""
+        # pars = [amplitude, x0, y0, xsig, ysig, theta, relamp, sigma]
+        if pars is None: pars = self.params
+        if binned is None: binned = self.binned
+        if binned is True:
+            return gausspow2d_integrate(x, y, pars, deriv=deriv, nderiv=nderiv)
+        else:
+            return gausspow2d(x, y, pars, deriv=deriv, nderiv=nderiv)
+
+    def deriv(self,x, y, pars=None, binned=None, nderiv=None):
+        """Two dimensional DoPHOT Gausspow model derivative with respect to parameters"""
+        if pars is None: pars = self.params
+        if binned is None: binned = self.binned
+        if binned is True:
+            g, derivative = gausspow2d_integrate(x, y, pars, deriv=True, nderiv=nderiv)
+        else:
+            g, derivative = gausspow2d(x, y, pars, deriv=True, nderiv=nderiv)
+        return derivative
+
+    def write(self,filename,overwrite=True):
+        """ Write a PSF to a file."""
+        if os.path.exists(filename) and overwrite==False:
+            raise ValueError(filename+' already exists and overwrite=False')
+        hdulist = fits.HDUList()
+        hdulist.append(fits.PrimaryHDU(self.params))
+        hdulist[0].header['PSFTYPE'] = 'Ellipower'
+        hdulist[0].header['BINNED'] = self.binned
+        hdulist[0].header['NPIX'] = self.npix        
+        hdulist.writeto(filename,overwrite=overwrite)
+        hdulist.close()
+    
+        
     
 class PSFEmpirical(PSFBase):
     """ Empirical look-up table PSF, can vary spatially."""
@@ -1850,4 +2384,4 @@ class PSFEmpirical(PSFBase):
 read = PSFBase.read    
     
 # List of models
-_models = {'gaussian':PSFGaussian,'moffat':PSFMoffat,'penny':PSFPenny,'empirical':PSFEmpirical}
+_models = {'gaussian':PSFGaussian,'moffat':PSFMoffat,'penny':PSFPenny,'gausspow':PSFGausspow,'empirical':PSFEmpirical}
