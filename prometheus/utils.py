@@ -59,11 +59,11 @@ def neighbors(objects,nnei=1,max_dist=50):
     # closest neighbor is always itself, remove it
     dist = dist[:,1:]
     ind = ind[:,1:]
+    magdiff = objects['mag_auto'][ind[:,0]]-objects['mag_auto']  # negative means neighbor is brighter
     if nnei==1:
         dist = dist.flatten()
         ind = ind.flatten()
-    return dist,ind
-    
+    return dist,ind,magdiff
     
 def pickpsfstars(objects,fwhm,nstars=100,logger=None):
     """ Pick PSF stars."""
@@ -74,8 +74,8 @@ def pickpsfstars(objects,fwhm,nstars=100,logger=None):
     # -no close neighbors
 
     # Use KD-tree to figure out closest neighbors
-    neidist,neiind = neighbors(objects)
-
+    neidist,neiind,neimagdiff = neighbors(objects)
+    
     # Select good sources
     gdobjects1 = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.10))
     ngdobjects1 = np.sum(gdobjects1)
@@ -89,7 +89,7 @@ def pickpsfstars(objects,fwhm,nstars=100,logger=None):
     gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.1) & 
                  (objects['fwhm']>0.5*fwhm) & (objects['fwhm']<1.5*fwhm) &
                  (objects['mag_auto']>(minmag+1.0)) & (objects['mag_auto']<(maxmag-0.5)) &
-                 (objects['flags']==0) & (neidist>25.0))
+                 (objects['flags']==0) & (neidist>15.0) & (neimagdiff>1.0))
     ngdobjects = np.sum(gdobjects)
     # No candidate, loosen cuts
     if ngdobjects<10:
@@ -97,11 +97,11 @@ def pickpsfstars(objects,fwhm,nstars=100,logger=None):
         gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.15) & 
                      (objects['fwhm']>0.2*fwhm) & (objects['fwhm']<1.8*fwhm) &
                      (objects['mag_auto']>(minmag+0.5)) & (objects['mag_auto']<(maxmag-0.5)) &
-                     (neidist>10))
+                     (neidist>10) & (neimagdiff>1.0))
         ngdobjects = np.sum(gdobjects)
     # No candidate, loosen cuts again
     if ngdobjects<10:
-        print("Too few PSF stars on first try. Loosening cuts")
+        print("Too few PSF stars on second try. Loosening cuts")
         gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.15) & 
                      (objects['fwhm']>0.2*fwhm) & (objects['fwhm']<1.8*fwhm) &
                      (objects['mag_auto']>(minmag+0.5)) & (objects['mag_auto']<(maxmag-0.5)))

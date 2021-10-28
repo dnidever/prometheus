@@ -59,6 +59,7 @@ class PSFFitter(object):
         self.starycen = np.zeros(self.nstars,float)
         self.starycen[:] = cat['y'].copy()
         self.starchisq = np.zeros(self.nstars,float)
+        self.starchi = np.zeros(self.nstars,float)        
         self.starnpix = np.zeros(self.nstars,int)
         
         # Get xdata, ydata, error
@@ -228,6 +229,9 @@ class PSFFitter(object):
             # Relculate reduced chi squared
             chisq = np.sum((flux-model.ravel())**2/err**2)/npix
             self.starchisq[i] = chisq
+            # chi value, RMS of the residuals as a fraction of the height
+            chi = np.sqrt(np.mean(((flux-model.ravel())/self.starheight[i])**2))
+            self.starchi[i] = chi
             
             #model = psf(x,y,pars=[height,xcen,ycen])
             # Zero-out anything beyond the fitting radius
@@ -459,7 +463,7 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
     newpsf._params = pars
 
     # Output best-fitting values for the PSF stars as well
-    dt = np.dtype([('id',int),('height',float),('x',float),('y',float),('npix',int),
+    dt = np.dtype([('id',int),('height',float),('x',float),('y',float),('npix',int),('chi',float),
                    ('chisq',float),('ixmin',int),('ixmax',int),('iymin',int),('iymax',int)])
     psfcat = np.zeros(len(cat),dtype=dt)
     if 'id' in cat.colnames:
@@ -470,6 +474,7 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
     psfcat['x'] = pf.starxcen
     psfcat['y'] = pf.starycen
     psfcat['chisq'] = pf.starchisq
+    psfcat['chi'] = pf.starchi
     psfcat['npix'] = pf.starnpix    
     for i in range(len(cat)):
         bbox = pf.bboxdata[i]
