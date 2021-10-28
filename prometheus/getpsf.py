@@ -59,6 +59,7 @@ class PSFFitter(object):
         self.starycen = np.zeros(self.nstars,float)
         self.starycen[:] = cat['y'].copy()
         self.starchisq = np.zeros(self.nstars,float)
+        self.starnpix = np.zeros(self.nstars,int)
         
         # Get xdata, ydata, error
         imdata = []
@@ -96,6 +97,7 @@ class PSFFitter(object):
             flux = flux[gdmask]
             err = err[gdmask]
             npix = len(flux)
+            self.starnpix[i] = npix
             imflatten[count:count+npix] = flux
             errflatten[count:count+npix] = err
             pixstart.append(count)
@@ -220,10 +222,10 @@ class PSFFitter(object):
             else:
                 model = psf(x,y,pars=[height,xcen,ycen])
 
-            if self.niter>1:
-                import pdb; pdb.set_trace()
+            #if self.niter>1:
+            #    import pdb; pdb.set_trace()
                 
-            # Relculate redyced chi squared
+            # Relculate reduced chi squared
             chisq = np.sum((flux-model.ravel())**2/err**2)/npix
             self.starchisq[i] = chisq
             
@@ -318,6 +320,26 @@ class PSFFitter(object):
             return allim,allderiv
         else:
             return allderiv
+
+    def starmodel(self,star=None):
+        """ Generate 2D star model images that can be compared to the original cutouts.
+             if star=None, then it will return all of them as a list."""
+
+        model = []
+        if star is None:
+            star = np.arange(self.nstars)
+        else:
+            star = [star]
+
+        for i in star:
+            image = self.imdata[i]
+            height = self.starheight[i]
+            xcen = self.starxcen[i]   
+            ycen = self.starycen[i]
+            bbox = self.bboxdata[i]
+            model1 = self.psf(pars=[height,xcen,ycen],bbox=bbox)
+            model.append(model1)
+        return model
 
     
 def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
@@ -417,8 +439,10 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
             if verbose:
                 print(count,bestpar,percdiff,chisq)
 
-    #import pdb; pdb.set_trace()
-                
+    # Make the best model
+    bestmodel = pf.model(xdata,*bestpar)
+    pf.psf.params = bestpar
+    
     # Estimate uncertainties
     if method != 'curve_fit':
         # Calculate covariance matrix
@@ -435,8 +459,8 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
     newpsf._params = pars
 
     # Output best-fitting values for the PSF stars as well
-    dt = np.dtype([('id',int),('height',float),('x',float),('y',float),
-                   ('ixmin',int),('ixmax',int),('iymin',int),('iymax',int)])
+    dt = np.dtype([('id',int),('height',float),('x',float),('y',float),('npix',int),
+                   ('chisq',float),('ixmin',int),('ixmax',int),('iymin',int),('iymax',int)])
     psfcat = np.zeros(len(cat),dtype=dt)
     if 'id' in cat.colnames:
         psfcat['id'] = cat['id']
@@ -445,6 +469,8 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
     psfcat['height'] = pf.starheight
     psfcat['x'] = pf.starxcen
     psfcat['y'] = pf.starycen
+    psfcat['chisq'] = pf.starchisq
+    psfcat['npix'] = pf.starnpix    
     for i in range(len(cat)):
         bbox = pf.bboxdata[i]
         psfcat['ixmin'][i] = bbox.ixmin
@@ -455,7 +481,10 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
     if verbose:
         print('dt = %.2f sec' % (time.time()-t0))
         
-    return newpsf, pars, perror, psfcat
+    # Make the star models
+    starmodels = pf.starmodel()
+        
+    return newpsf, pars, perror, psfcat, pf, bestmodel, starmodels
 
 
 def curvefit_psf(func,*args,**kwargs):

@@ -1869,43 +1869,48 @@ class PSFBase:
     def steps(self,pars=None,bounds=None):
         """ Return step sizes to use when fitting the PSF model parameters (at least initial sizes)."""
         # Check the initial steps against the parameters to make sure that don't
-        # go past the boundaries
+        #   go past the boundaries
         if pars is None:
             pars = self.params
         if bounds is None:
             bounds = self.mkbounds(pars)
         npars = len(pars)
         nmpars = len(self.params)
-        # Check if the parameters include stellar parameters
+        # Have stellar parameters
         if npars>nmpars:
             initsteps = np.zeros(npars,float)
-            initsteps[0:3] = [pars[0]*0.5,0.5,0.5]
-            if npars-nmpars==4:
-                initsteps[3] = pars[3]*0.5
-            initsteps[-nmpars:] = self._steps
+            initsteps[0:3] = [pars[0]*0.5,0.5,0.5]  # amp, x, y
+            if npars-nmpars==4:  # with sky
+                initsteps[3] = pars[3]*0.5          # sky
+            initsteps[-nmpars:] = self._steps       # model parameters
+        # Only model parameters
         else:
             initsteps = self._steps
         # Now compare to the boundaries
+        # NOTE: it's okay if the step crosses the boundary
+        #   newpars() can figure out that it needs to limit
+        #   any new parameter value at the boundary
         lcheck = self.checkbounds(pars-initsteps,bounds)
         ucheck = self.checkbounds(pars+initsteps,bounds)        
         # Final steps
         fsteps = initsteps.copy()
-        # bad negative step
+        # bad negative step, crosses lower boundary
         badneg = (lcheck!=0)
         nbadneg = np.sum(badneg)
         # reduce the step sizes until they are within bounds
+        maxiter = 2
         count = 0
-        while (np.sum(badneg)>0):
+        while (np.sum(badneg)>0 and count<=maxiter):
             fsteps[badneg] /= 2
             lcheck = self.checkbounds(pars-fsteps,bounds)
             badneg = (lcheck!=0)
             count += 1
-        
-        # bad positive step
+            
+        # bad positive step, crosses upper boundary
         badpos = (ucheck!=0)
         # reduce the steps sizes until they are within bounds
         count = 0
-        while (np.sum(badpos)>0):
+        while (np.sum(badpos)>0 and count<=maxiter):
             fsteps[badpos] /= 2
             ucheck = self.checkbounds(pars+fsteps,bounds)
             badpos = (ucheck!=0)            
@@ -1980,7 +1985,7 @@ class PSFBase:
         return outsteps
 
     def newpars(self,pars,steps,bounds,maxsteps):
-        """ Get new parameters given initial parameters and constraints."""
+        """ Get new parameters given initial parameters, steps and constraints."""
 
         # Limit the steps to maxsteps
         limited_steps = self.limsteps(steps,maxsteps)
@@ -1992,13 +1997,22 @@ class PSFBase:
         # reduce the step sizes until they are within bounds
         newsteps = limited_steps.copy()
         count = 0
-        while (np.sum(badpars)>0):
+        maxiter = 2
+        while (np.sum(badpars)>0 and count<=maxiter):
             newsteps[badpars] /= 2
             newcheck = self.checkbounds(pars+newsteps,bounds)
             badpars = (newcheck!=0)
             count += 1
+            
         # Final parameters
         newpars = pars + newsteps
+            
+        # Make sure to limit them to the boundaries
+        check = self.checkbounds(newpars,bounds)
+        badpars = (check!=0)
+        if np.sum(badpars)>0:
+            # add a tiny offset so it doesn't fit right on the boundary
+            newpars = np.minimum(np.maximum(newpars,lbounds+1e-30),ubounds-1e-30)
         return newpars
     
     def evaluate(self):

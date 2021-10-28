@@ -15,6 +15,7 @@ from astropy.wcs import WCS
 from astropy.io import fits
 from photutils.aperture import BoundingBox as BBox
 from copy import deepcopy
+from dlnpyutils import utils as dln
 from . import sky as psky
 
 
@@ -299,6 +300,54 @@ class CCDData(CCD):
         """ Y-array."""
         return self._y 
 
+    @property
+    def min(self):
+        """ Calculate the min of the image data.  Uses only unmasked data."""
+        if self.mask is not None:
+            return np.min(self.data[~self.mask])
+        else:
+            return np.min(self.data)
+
+    @property
+    def max(self):
+        """ Calculate the max of the image data.  Uses only unmasked data."""
+        if self.mask is not None:
+            return np.max(self.data[~self.mask])
+        else:        
+            return np.max(self.data)
+
+    @property
+    def mean(self):
+        """ Calculate the mean of the image data.  Uses only unmasked data."""
+        if self.mask is not None:
+            return np.mean(self.data[~self.mask])
+        else:        
+            return np.mean(self.data)
+
+    @property
+    def median(self):
+        """ Calculate the median of the image data.  Uses only unmasked data."""
+        if self.mask is not None:
+            return np.median(self.data[~self.mask])
+        else:        
+            return np.median(self.data)
+
+    @property
+    def std(self):
+        """ Calculate the standard deviation of the image data.  Uses only unmasked data."""
+        if self.mask is not None:
+            return np.std(self.data[~self.mask])
+        else:        
+            return np.std(self.data)
+
+    @property
+    def mad(self):
+        """ Calculate the MAD of the image data.  Uses only unmasked data."""
+        if self.mask is not None:
+            return dln.mad(self.data[~self.mask])
+        else:        
+            return dln.mad(self.data)
+    
     def isnative(self,data):
         """ Check if data has native byte order."""
         sys_is_le = sys.byteorder == 'little'
