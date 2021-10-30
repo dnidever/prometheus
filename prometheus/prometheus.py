@@ -64,11 +64,13 @@ def run(image,psfname='gaussian',verbose=False):
     psfobj = utils.pickpsfstars(objects,fwhm)
     #if verbose:
     #    print(str(len(psfobj))+' PSF stars found')
+
+    import pdb; pdb.set_trace()
     
     # 4) Construct the PSF iteratively
     if verbose:
         print('Step 4: Construct PSF')
-    initpsf = models.psfmodel(psfname,[fwhm,fwhm,0.0])
+    initpsf = models.psfmodel(psfname,[fwhm/2.35,fwhm/2.35,0.0])
     import pdb; pdb.set_trace()
     psf = getpsf.getpsf(initpsf,image,psfobj,verbose=verbose)
 

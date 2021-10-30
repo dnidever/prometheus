@@ -54,12 +54,18 @@ class PSFFitter(object):
             # area under 2D Gaussian is 2*pi*A*sigx*sigy
             height = cat['flux']/(2*np.pi*(cat['fwhm']/2.35)**2)
             self.starheight[:] = np.maximum(height,0)   # make sure it's positive
+        # Original X/Y values
+        self.starxcenorig = np.zeros(self.nstars,float)
+        self.starxcenorig[:] = cat['x'].copy()
+        self.starycenorig = np.zeros(self.nstars,float)
+        self.starycenorig[:] = cat['y'].copy()
+        # current best-fit values
         self.starxcen = np.zeros(self.nstars,float)
         self.starxcen[:] = cat['x'].copy()
         self.starycen = np.zeros(self.nstars,float)
-        self.starycen[:] = cat['y'].copy()
+        self.starycen[:] = cat['y'].copy()        
         self.starchisq = np.zeros(self.nstars,float)
-        self.starchi = np.zeros(self.nstars,float)        
+        self.starrms = np.zeros(self.nstars,float)        
         self.starnpix = np.zeros(self.nstars,int)
         
         # Get xdata, ydata, error
@@ -135,8 +141,10 @@ class PSFFitter(object):
         for i in range(self.nstars):
             image = self.imdata[i]
             height = self.starheight[i]
+            xcenorig = self.starxcenorig[i]   
+            ycenorig = self.starycenorig[i]
             xcen = self.starxcen[i]   
-            ycen = self.starycen[i]
+            ycen = self.starycen[i]            
             bbox = self.bboxdata[i]
             x = self.xlist[i]
             y = self.ylist[i]
@@ -151,23 +159,23 @@ class PSFFitter(object):
             #rr = np.sqrt( (x-xcen).reshape(-1,1)**2 + (y-ycen).reshape(1,-1)**2 )
             #mask = rr>self.fitradius
 
-            #x0 = xcen-xy[0][0]
-            #y0 = ycen-xy[1][0]
+            x0orig = xcenorig - bbox.ixmin
+            y0orig = ycenorig - bbox.iymin
             x0 = xcen - bbox.ixmin
-            y0 = ycen - bbox.iymin
-
-            #import pdb; pdb.set_trace()
-            
+            y0 = ycen - bbox.iymin            
             
             # Fit height/xcen/ycen if niter=1
             if refit:
                 #if (self.niter<=1): # or self.niter%3==0):
                 if self.niter>-1:
-                    # the image still has sky in it
-                    pars,perror,model = psf.fit(image,[height,x0,y0],nosky=False,retpararray=True,niter=5)
+                    # force the positions to stay within +/-2 pixels of the original values
+                    bounds = (np.array([0,np.maximum(x0orig-2,0),np.maximum(y0orig-2,0),-np.inf]),
+                              np.array([np.inf,np.minimum(x0orig+2,bbox.shape[1]),np.minimum(y0orig+2,bbox.shape[0]),np.inf]))
+                    # the image still has sky in it, use sky (nosky=False)                    
+                    pars,perror,model = psf.fit(image,[height,x0,y0],nosky=False,retpararray=True,niter=5,bounds=bounds)
                     xcen += (pars[1]-x0)
                     ycen += (pars[2]-y0)
-                    height = pars[0]
+                    height = pars[0]                    
                     self.starheight[i] = height
                     self.starxcen[i] = xcen
                     self.starycen[i] = ycen
@@ -230,8 +238,8 @@ class PSFFitter(object):
             chisq = np.sum((flux-model.ravel())**2/err**2)/npix
             self.starchisq[i] = chisq
             # chi value, RMS of the residuals as a fraction of the height
-            chi = np.sqrt(np.mean(((flux-model.ravel())/self.starheight[i])**2))
-            self.starchi[i] = chi
+            rms = np.sqrt(np.mean(((flux-model.ravel())/self.starheight[i])**2))
+            self.starrms[i] = rms
             
             #model = psf(x,y,pars=[height,xcen,ycen])
             # Zero-out anything beyond the fitting radius
@@ -325,10 +333,14 @@ class PSFFitter(object):
         else:
             return allderiv
 
-    def starmodel(self,star=None):
+    def starmodel(self,star=None,pars=None):
         """ Generate 2D star model images that can be compared to the original cutouts.
              if star=None, then it will return all of them as a list."""
 
+        psf = self.psf.copy()
+        if pars is not None:
+            psf._params = pars
+        
         model = []
         if star is None:
             star = np.arange(self.nstars)
@@ -341,12 +353,11 @@ class PSFFitter(object):
             xcen = self.starxcen[i]   
             ycen = self.starycen[i]
             bbox = self.bboxdata[i]
-            model1 = self.psf(pars=[height,xcen,ycen],bbox=bbox)
+            model1 = psf(pars=[height,xcen,ycen],bbox=bbox)
             model.append(model1)
         return model
 
-    
-def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
+def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
     """
     Fit PSF model to stars in an image.
 
@@ -358,6 +369,160 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
        Image to use to fit PSF model to stars.
     cat : table
        Catalog with initial height/x/y values for the stars to use to fit the PSF.
+    fitradius : float, table
+       The fitting radius.  If none is input then the initial PSF FWHM will be used.
+    method : str, optional
+       Method to use for solving the non-linear least squares problem: "qr",
+       "svd", and "curve_fit".  Default is "qr".
+    maxiter : int, optional
+       Maximum number of iterations to allow.  Only for methods "qr" or "svd".
+       Default is 10.
+    minpercdiff : float, optional
+       Minimum percent change in the parameters to allow until the solution is
+       considered converged and the iteration loop is stopped.  Only for methods
+       "qr" and "svd".  Default is 1.0.
+    verbose : boolean, optional
+       Verbose output.
+
+    Returns
+    -------
+    newpsf : PSF object
+       New PSF object with the best-fit model parameters.
+    pars : numpy array
+       Array of best-fit model parameters
+    perror : numpy array
+       Uncertainties in "pars".
+    psfcat : table
+       Table of best-fitting height/xcen/ycen values for the PSF stars.
+
+    Example
+    -------
+
+    newpsf,pars,perror,psfcat = fitpsf(psf,image,cat)
+
+    """
+
+    t0 = time.time()
+
+    # Fitting the PSF to the stars
+    #-----------------------------
+    pf = PSFFitter(psf,image,cat,fitradius=fitradius,verbose=False) #verbose)
+    xdata = np.arange(pf.ntotpix)
+    initpar = psf.params.copy()
+    method = str(method).lower()
+
+    # Curve_fit
+    if method=='curve_fit':    
+        # Perform the fitting
+        bestpar,cov = curve_fit(pf.model,xdata,pf.imflatten,
+                                sigma=pf.errflatten,p0=initpar,jac=pf.jac)
+        perror = np.sqrt(np.diag(cov))
+        
+    # All other fitting methods
+    else:
+        # Iterate
+        count = 0
+        percdiff = 1e10
+        bestpar = initpar.copy()
+
+        dchisq = -1
+        oldchisq = 1e30
+        bounds = psf.bounds
+        maxsteps = psf._steps
+        while (count<maxiter and percdiff>minpercdiff and dchisq<0):
+            # Get the Jacobian and model
+            m,jac = pf.jac(xdata,*bestpar,retmodel=True)
+            chisq = np.sum((pf.imflatten-m)**2/pf.errflatten**2)
+            dy = pf.imflatten-m
+            # Weights
+            wt = 1/pf.errflatten**2
+            # Solve Jacobian
+            dbeta = lsq.jac_solve(jac,dy,method=method,weight=wt)
+            print('  pars = ',bestpar)
+            print('  dbeta = ',dbeta)
+            
+            # Update the parameters
+            oldpar = bestpar.copy()
+            #import pdb; pdb.set_trace()
+            bestpar = psf.newpars(bestpar,dbeta,bounds,maxsteps)
+            #bestpar += dbeta
+            diff = np.abs(bestpar-oldpar)
+            denom = np.abs(oldpar.copy())
+            denom[denom==0] = 1.0  # deal with zeros
+            percdiff = np.max(diff/denom*100)
+            dchisq = chisq-oldchisq
+            percdiffchisq = dchisq/oldchisq*100
+            oldchisq = chisq
+            count += 1
+            
+            if verbose:
+                print('  ',count+1,bestpar,percdiff,chisq)
+
+    # Make the best model
+    bestmodel = pf.model(xdata,*bestpar)
+    
+    # Estimate uncertainties
+    if method != 'curve_fit':
+        # Calculate covariance matrix
+        cov = lsq.jac_covariance(jac,dy,wt=wt)
+        perror = np.sqrt(np.diag(cov))
+                
+    pars = bestpar
+    if verbose:
+        print('Best-fitting parameters: ',pars)
+        print('Errors: ',perror)
+        print('Median RMS: ',np.median(pf.starrms))
+
+    # create the best-fitting PSF
+    newpsf = psf.copy()
+    newpsf._params = pars                
+
+    # Output best-fitting values for the PSF stars as well
+    dt = np.dtype([('id',int),('height',float),('x',float),('y',float),('npix',int),('rms',float),
+                   ('chisq',float),('ixmin',int),('ixmax',int),('iymin',int),('iymax',int)])
+    psfcat = np.zeros(len(cat),dtype=dt)
+    if 'id' in cat.colnames:
+        psfcat['id'] = cat['id']
+    else:
+        psfcat['id'] = np.arange(len(cat))+1
+    psfcat['height'] = pf.starheight
+    psfcat['x'] = pf.starxcen
+    psfcat['y'] = pf.starycen
+    psfcat['chisq'] = pf.starchisq
+    psfcat['rms'] = pf.starrms
+    psfcat['npix'] = pf.starnpix    
+    for i in range(len(cat)):
+        bbox = pf.bboxdata[i]
+        psfcat['ixmin'][i] = bbox.ixmin
+        psfcat['ixmax'][i] = bbox.ixmax
+        psfcat['iymin'][i] = bbox.iymin
+        psfcat['iymax'][i] = bbox.iymax        
+    psfcat = Table(psfcat)
+        
+    if verbose:
+        print('dt = %.2f sec' % (time.time()-t0))
+        
+    # Make the star models
+    #starmodels = pf.starmodel(pars=pars)
+    
+    return newpsf, pars, perror, psfcat
+
+    
+def getpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
+           verbose=False,reject=True,maxrejiter=3):
+    """
+    Fit PSF model to stars in an image with outlier rejection of badly-fit stars.
+
+    Parameters
+    ----------
+    psf : PSF object
+       PSF object with initial parameters to use.
+    image : CCDData object
+       Image to use to fit PSF model to stars.
+    cat : table
+       Catalog with initial height/x/y values for the stars to use to fit the PSF.
+    fitradius : float, table
+       The fitting radius.  If none is input then the initial PSF FWHM will be used.
     method : str, optional
        Method to use for solving the non-linear least squares problem: "qr",
        "svd", and "curve_fit".  Default is "qr".
@@ -390,106 +555,94 @@ def getpsf(psf,image,cat,method='qr',maxiter=10,minpercdiff=1.0,verbose=False):
     """
 
     t0 = time.time()
-    
-    pf = PSFFitter(psf,image,cat,verbose=False) #verbose)
-    xdata = np.arange(pf.ntotpix)
-    initpar = psf.params.copy()
-    method = str(method).lower()
 
-    # Curve_fit
-    if method=='curve_fit':    
-        # Perform the fitting
-        bestpar,cov = curve_fit(pf.model,xdata,pf.imflatten,
-                                sigma=pf.errflatten,p0=initpar,jac=pf.jac)
-        perror = np.sqrt(np.diag(cov))
+    # Fitting radius
+    if fitradius is None:
+        fitradius = psf.fwhm()
+    
+    if 'id' not in cat.colnames:
+        cat['id'] = np.arange(len(cat))+1
+    psfcat = cat.copy()
+
+    # Initializing output PSF star catalog
+    dt = np.dtype([('id',int),('height',float),('x',float),('y',float),('npix',int),('rms',float),
+                   ('chisq',float),('ixmin',int),('ixmax',int),('iymin',int),('iymax',int),('reject',int)])
+    outcat = np.zeros(len(cat),dtype=dt)
+    outcat = Table(outcat)
+    for n in ['id','x','y']:
+        outcat[n] = cat[n]
+    
+    # Remove stars that are too close to the edge
+    ny,nx = image.shape
+    bd = (psfcat['x']<fitradius) | (psfcat['x']>(nx-1-fitradius)) | \
+         (psfcat['y']<fitradius) | (psfcat['y']>(ny-1-fitradius))
+    nbd = np.sum(bd)
+    if nbd > 0:
+        if verbose:
+            print('Removing '+str(nbd)+' stars near the edge')
+        psfcat = psfcat[~bd]
+
+    # Outlier rejection iterations
+    curpsf = psf.copy()
+    nrejiter = 0
+    flag = 0
+    nrejstar = 100
+    fitrad = fitradius
+    while (flag==0):
+        if verbose:
+            print('--- Iteration '+str(nrejiter+1)+' ---')                
+
+        # Update the fitting radius
+        if nrejiter>0:
+            fitrad = curpsf.fwhm()
+        if verbose:
+            print('  Fitting radius = %5.3f' % (fitrad))
         
-    # All other fitting methods
-    else:
-        # Iterate
-        count = 0
-        percdiff = 1e10
-        bestpar = initpar.copy()
-
-        dchisq = -1
-        oldchisq = 1e30
-        bounds = psf.bounds
-        maxsteps = psf._steps
-        while (count<maxiter and percdiff>minpercdiff and dchisq<0):
-            # Get the Jacobian and model
-            m,jac = pf.jac(xdata,*bestpar,retmodel=True)
-            chisq = np.sum((pf.imflatten-m)**2/pf.errflatten**2)
-            dy = pf.imflatten-m
-            # Weights
-            wt = 1/pf.errflatten**2
-            # Solve Jacobian
-            dbeta = lsq.jac_solve(jac,dy,method=method,weight=wt)
-            print('pars = ',bestpar)
-            print('dbeta = ',dbeta)
             
-            # Update the parameters
-            oldpar = bestpar.copy()
-            #import pdb; pdb.set_trace()
-            bestpar = psf.newpars(bestpar,dbeta,bounds,maxsteps)
-            #bestpar += dbeta
-            diff = np.abs(bestpar-oldpar)
-            denom = np.abs(oldpar.copy())
-            denom[denom==0] = 1.0  # deal with zeros
-            percdiff = np.max(diff/denom*100)
-            dchisq = chisq-oldchisq
-            percdiffchisq = dchisq/oldchisq*100
-            oldchisq = chisq
-            count += 1
-
+        # Reject outliers
+        if reject and nrejiter>0:
+            medrms = np.median(pcat['rms'])
+            sigrms = dln.mad(pcat['rms'].data)
+            gd, = np.where(pcat['rms'] < medrms+3*sigrms)
+            nrejstar = len(psfcat)-len(gd)
             if verbose:
-                print(count,bestpar,percdiff,chisq)
+                print('  RMS = %6.4f +/- %6.4f' % (medrms,sigrms))
+                print('  Threshold RMS = '+str(medrms+3*sigrms))
+                print('  Rejecting '+str(nrejstar)+' stars')
+            if nrejstar>0:
+                psfcat = psfcat[gd]
 
-    # Make the best model
-    bestmodel = pf.model(xdata,*bestpar)
-    pf.psf.params = bestpar
-    
-    # Estimate uncertainties
-    if method != 'curve_fit':
-        # Calculate covariance matrix
-        cov = lsq.jac_covariance(jac,dy,wt=wt)
-        perror = np.sqrt(np.diag(cov))
-                
-    pars = bestpar
-    if verbose:
-        print('Best-fitting parameters: ',pars)
-        print('Errors: ',perror)
-    
-    # create the best-fitting PSF
-    newpsf = psf.copy()
-    newpsf._params = pars
+        # Fitting the PSF to the stars
+        #-----------------------------
+        newpsf,pars,perror,pcat = fitpsf(curpsf,image,psfcat,fitradius=fitrad,method=method,
+                                         maxiter=maxiter,minpercdiff=minpercdiff,verbose=verbose)
 
-    # Output best-fitting values for the PSF stars as well
-    dt = np.dtype([('id',int),('height',float),('x',float),('y',float),('npix',int),('chi',float),
-                   ('chisq',float),('ixmin',int),('ixmax',int),('iymin',int),('iymax',int)])
-    psfcat = np.zeros(len(cat),dtype=dt)
-    if 'id' in cat.colnames:
-        psfcat['id'] = cat['id']
-    else:
-        psfcat['id'] = np.arange(len(cat))+1
-    psfcat['height'] = pf.starheight
-    psfcat['x'] = pf.starxcen
-    psfcat['y'] = pf.starycen
-    psfcat['chisq'] = pf.starchisq
-    psfcat['chi'] = pf.starchi
-    psfcat['npix'] = pf.starnpix    
-    for i in range(len(cat)):
-        bbox = pf.bboxdata[i]
-        psfcat['ixmin'][i] = bbox.ixmin
-        psfcat['ixmax'][i] = bbox.ixmax
-        psfcat['iymin'][i] = bbox.iymin
-        psfcat['iymax'][i] = bbox.iymax        
-    
+        # Add information into the output catalog
+        ind1,ind2 = dln.match(outcat['id'],pcat['id'])
+        outcat['reject'] = 1
+        for n in pcat.columns:
+            outcat[ind1][n] = pcat[ind2][n]
+        outcat['reject'][ind1] = 0
+        
+        # Initialize the output PSF catalog
+        #  with entries for all of the stars
+        if nrejiter==0:
+            outcat = pcat.copy()
+
+        # Compare PSF parameters
+        pardiff = newpsf.params-curpsf.params
+        sumpardiff = np.sum(np.abs(pardiff))
+        curpsf = newpsf.copy()
+        
+        # Stopping criteria
+        if reject is False or sumpardiff<0.05 or nrejiter>=maxrejiter or nrejstar==0: flag=1
+
+        nrejiter += 1
+
     if verbose:
         print('dt = %.2f sec' % (time.time()-t0))
-        
-    # Make the star models
-    starmodels = pf.starmodel()
-        
-    return newpsf, pars, perror, psfcat, pf, bestmodel, starmodels
+    
+    return newpsf, pars, perror, psfcat
 
 
 def curvefit_psf(func,*args,**kwargs):

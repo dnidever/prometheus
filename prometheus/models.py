@@ -1526,7 +1526,7 @@ class PSFBase:
     
     def fit(self,im,pars,niter=2,radius=None,allpars=False,method='qr',nosky=False,
             minpercdiff=0.5,absolute=False,retpararray=False,retfullmodel=False,
-            verbose=False):
+            verbose=False,bounds=None):
         """
         Method to fit a single star using the PSF model.
 
@@ -1562,6 +1562,9 @@ class PSFBase:
               as a catalog.
         retfullmodel : boolean, optional
             Return model over the full PSF region.  Default is False.
+        bounds : list, optional
+            Input lower and upper bounds/constraints on the fitting parameters (tuple of two
+              lists (e.g., ([height_lo,x_low,y_low],[height_hi,x_hi,y_hi])).
         verbose : boolean, optional
             Verbose output to the screen.  Default is False.
 
@@ -1627,12 +1630,17 @@ class PSFBase:
         if absolute:  # offset
             xc -= imx0
             yc -= imy0
+            if bounds is not None:
+                bounds[0][1] -= imx0  # lower
+                bounds[0][2] -= imy0
+                bounds[1][1] -= imx0  # upper
+                bounds[1][2] -= imy0                
         if radius is None:
             radius = self.fwhm()
         bbox = self.starbbox((xc,yc),im.shape,radius)
         X,Y = self.bbox2xy(bbox)
 
-        # Get subimage of pixels to fix
+        # Get subimage of pixels to fit
         # xc/yc might be offset
         flux = im.data[bbox.slices]
         err = im.error[bbox.slices]
@@ -1642,12 +1650,17 @@ class PSFBase:
         yc -= bbox.iymin
         X -= bbox.ixmin
         Y -= bbox.iymin
+        if bounds is not None:
+            bounds[0][1] -= bbox.ixmin  # lower
+            bounds[0][2] -= bbox.iymin
+            bounds[1][1] -= bbox.ixmin  # upper
+            bounds[1][2] -= bbox.iymin            
         xdata = np.vstack((X.ravel(), Y.ravel()))        
         sky = np.median(skyim)
         if nosky: sky=0.0
         height = flux[int(np.round(yc)),int(np.round(xc))]-sky   # python images are (Y,X)
         initpar = [height,xc,yc,sky]            
-        
+            
         # Fit PSF parameters as well
         if allpars:
             initpar = np.hstack(([height,xc,yc,sky],self.params.copy()))
@@ -1664,7 +1677,8 @@ class PSFBase:
         outcat['id'] = 1
 
         # Make bounds
-        bounds = self.mkbounds(initpar,flux.shape)
+        if bounds is None:
+            bounds = self.mkbounds(initpar,flux.shape)
         
         # Curve_fit
         if method=='curve_fit':
