@@ -1507,6 +1507,7 @@ class PSFBase:
             jac[:,0:3] = deriv[:,0:3]
             jac[:,3] = 1
             jac[:,4:] = deriv[:,3:]
+            
         # Return
         if retmodel:   # return model as well
             return m,jac

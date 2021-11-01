@@ -676,8 +676,8 @@ class GroupFitter(object):
 
         
     
-def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,reskyiter=2,
-        nofreeze=False,absolute=False,verbose=False):
+def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minpercdiff=0.5,
+        reskyiter=2,nofreeze=False,absolute=False,verbose=False):
     """
     Fit PSF to group of stars in an image.
 
@@ -694,6 +694,8 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
        "qr", "svd", and "curve_fit".  Default is "cholesky".
     fitradius: float, optional
        The fitting radius in pixels.  By default the PSF FWHM is used.
+    recenter : boolean, optional
+       Allow the centroids to be fit.  Default is True.
     maxiter : int, optional
        Maximum number of iterations to allow.  Only for methods "cholesky", "qr" or "svd".
        Default is 10.
@@ -757,7 +759,11 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     gf = GroupFitter(psf,image,cat,fitradius=fitradius,verbose=verbose)
     xdata = np.arange(gf.ntotpix)
 
-
+    # Centroids fits
+    if recenter==False:
+        gf.freezepars[1::3] = True  # freeze X values
+        gf.freezepars[2::3] = True  # freeze Y values
+    
     # DO THE CONTRIBUTIONS OF WINGS OF THE PROFILE TO THE NEIGHBORING STARS FITTING PIXELS
     # NEED TO BE TAKEN INTO ACCOUNT???  I THINK SO
     print('TAKE WINGS INTO ACCOUNT IN FITTING PIXELS!!!')
@@ -780,10 +786,16 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
         bounds = [np.zeros(gf.nstars*3,float)-np.inf,
                   np.zeros(gf.nstars*3,float)+np.inf]
         bounds[0][0::3] = 0
-        bounds[0][1::3] = cat['x']-2
-        bounds[1][1::3] = cat['x']+2
-        bounds[0][2::3] = cat['y']-2
-        bounds[1][2::3] = cat['y']+2
+        if recenter:
+            bounds[0][1::3] = cat['x']-2
+            bounds[1][1::3] = cat['x']+2
+            bounds[0][2::3] = cat['y']-2
+            bounds[1][2::3] = cat['y']+2
+        else:
+            bounds[0][1::3] = cat['x']-1e-7
+            bounds[1][1::3] = cat['x']+1e-7
+            bounds[0][2::3] = cat['y']-1e-7
+            bounds[1][2::3] = cat['y']+1e-7         
         bestpar,cov = curve_fit(gf.model,xdata,gf.imflatten-gf.skyflatten,bounds=bounds,
                                 sigma=gf.errflatten,p0=initpar,jac=gf.jac)
         bestmodel = gf.model(xdata,*bestpar)

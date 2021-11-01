@@ -21,7 +21,7 @@ from . import detection, models, getpsf, allfit
 from .ccddata import CCDData
 
 
-def estimatefwhm(objects):
+def estimatefwhm(objects,verbose=False):
     """ Estimate FWHM using objects."""
 
     # Check that we have all of the columns that we need
@@ -42,7 +42,8 @@ def estimatefwhm(objects):
         gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.08))
         ngdobjects = np.sum(gdobjects)            
     medfwhm = np.median(objects[gdobjects]['fwhm'])
-    print('FWHM = %5.2f pixels (%d sources)' % (medfwhm, ngdobjects))
+    if verbose:
+        print('FWHM = %5.2f pixels (%d sources)' % (medfwhm, ngdobjects))
 
     return medfwhm
 
@@ -65,7 +66,7 @@ def neighbors(objects,nnei=1,max_dist=50):
         ind = ind.flatten()
     return dist,ind,magdiff
     
-def pickpsfstars(objects,fwhm,nstars=100,logger=None):
+def pickpsfstars(objects,fwhm,nstars=100,logger=None,verbose=False):
     """ Pick PSF stars."""
 
     # -morph cuts
@@ -93,7 +94,8 @@ def pickpsfstars(objects,fwhm,nstars=100,logger=None):
     ngdobjects = np.sum(gdobjects)
     # No candidate, loosen cuts
     if ngdobjects<10:
-        print("Too few PSF stars on first try. Loosening cuts")
+        if verbose:
+            print("Too few PSF stars on first try. Loosening cuts")
         gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.15) & 
                      (objects['fwhm']>0.2*fwhm) & (objects['fwhm']<1.8*fwhm) &
                      (objects['mag_auto']>(minmag+0.5)) & (objects['mag_auto']<(maxmag-0.5)) &
@@ -101,7 +103,8 @@ def pickpsfstars(objects,fwhm,nstars=100,logger=None):
         ngdobjects = np.sum(gdobjects)
     # No candidate, loosen cuts again
     if ngdobjects<10:
-        print("Too few PSF stars on second try. Loosening cuts")
+        if verbose:
+            print("Too few PSF stars on second try. Loosening cuts")
         gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.15) & 
                      (objects['fwhm']>0.2*fwhm) & (objects['fwhm']<1.8*fwhm) &
                      (objects['mag_auto']>(minmag+0.5)) & (objects['mag_auto']<(maxmag-0.5)))
@@ -114,6 +117,7 @@ def pickpsfstars(objects,fwhm,nstars=100,logger=None):
     si = np.argsort(objects[gdobjects]['mag_auto'])
     psfobjects = objects[gdobjects][si]
     if ngdobjects>nstars: psfobjects=psfobjects[0:nstars]
-    print(str(len(psfobjects))+" PSF stars found")
+    if verbose:
+        print(str(len(psfobjects))+" PSF stars found")
     
     return psfobjects

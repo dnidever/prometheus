@@ -536,7 +536,7 @@ class CCDData(CCD):
         """
 
         # Data and header
-        hdu = fits.PrimaryHDU(self.data,self.header))        
+        hdu = fits.PrimaryHDU(self.data,self.header) 
         hdu.header['IMAGTYPE'] = 'Prometheus'        
         return hdu
         

@@ -53,9 +53,9 @@ def run(image,psfname='gaussian',verbose=False):
 
     # Load the file
     if isinstance(image,str):
+        filename = image
         if verbose:
             print('Loading image from '+filename)
-        filename = image
         image = CCDData.read(filename)
     if isinstance(image,CCDData) is False:
         raise ValueError('Input image must be a filename or CCDData object')
@@ -86,28 +86,20 @@ def run(image,psfname='gaussian',verbose=False):
     #-----------------
     if verbose:
         print('Step 3: Estimate FWHM')
-    fwhm = utils.estimatefwhm(objects)
-    if verbose:
-        print('FWHM = %10.3f' % fwhm)
+    fwhm = utils.estimatefwhm(objects,verbose=verbose)
     
     # 3) Pick PSF stars
     #------------------
     if verbose:
         print('Step 3: Pick PSF stars')
-    psfobj = utils.pickpsfstars(objects,fwhm)
-    if verbose:
-        print(str(len(psfobj))+' PSF stars found')
-
-    import pdb; pdb.set_trace()
+    psfobj = utils.pickpsfstars(objects,fwhm,verbose=verbose)
     
     # 4) Construct the PSF iteratively
     #---------------------------------
     if verbose:
         print('Step 4: Construct PSF')
     initpsf = models.psfmodel(psfname,[fwhm/2.35,fwhm/2.35,0.0])
-    psf = getpsf.getpsf(initpsf,image,psfobj,verbose=verbose)
-
-    import pdb; pdb.set_trace()
+    psf,psfpars,psfperror,psfcat = getpsf.getpsf(initpsf,image,psfobj,verbose=verbose)
     
     # 5) Run on all sources
     #----------------------

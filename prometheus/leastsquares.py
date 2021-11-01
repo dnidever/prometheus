@@ -31,19 +31,15 @@ def jac_solve(jac,resid,method=None,weight=None):
     """ Thin wrapper for the various jacobian solver method."""
 
     npix,npars = jac.shape
+
+    #if npars==3:
+    #    import pdb; pdb.set_trace()
     
     ## Check the sample covariance to make sure that each
-    ## columns is independent (and not zero)
+    ## column is independent (and not zero)
     ## check if the sample covariance matrix is singular (has determinant of zero)
-    #sample_cov = np.cov(jac.T)
-    #sample_cov_det = np.linalg.det(sample_cov)
     # Just check if one entire column is zeros
     badpars, = np.where(np.sum(jac==0,axis=0) == npix)
-    usejac = jac
-    badpars = []
-    #if sample_cov_det==0:
-    #    # Check if a whole row is zero
-    #    badpars, = np.where(np.diag(sample_cov)==0.0)
     if len(badpars)>0:
         if len(badpars)==npars:
             raise ValueError('All columns in the Jacobian matrix are zero')
@@ -52,15 +48,12 @@ def jac_solve(jac,resid,method=None,weight=None):
         if len(badpars)>0:
             usejac = jac.copy()
             usejac = np.delete(usejac,badpars,axis=1)
-            goodpars, = np.where(np.diag(sample_cov)!=0.0)
-            print('removing '+str(len(badpars))+' parameters ('+'.'.join(badpars)+') with all zeros in jacobian')
+            goodpars, = np.where(np.sum(jac==0,axis=0) != npix)
+            #print('removing '+str(len(badpars))+' parameters ('+'.'.join(badpars.astype(str))+') with all zeros in jacobian')
     else:
         badpars = []
+        usejac = jac
 
-    if npars==6:
-        import pdb; pdb.set_trace()
-    #print('badpars = ',badpars)
-    
     # Solve the problem
     if method=='qr':
         dbeta = qr_jac_solve(usejac,resid,weight=weight)
@@ -100,9 +93,15 @@ def qr_jac_solve(jac,resid,weight=None):
     # Weights input, multiply resid and jac by weights        
     else:
         q,r = np.linalg.qr( jac * weight.reshape(-1,1) )
+        # If one of the dimensions is zero in the R matrix [Npars,Npars]
+        # then replace it with a "dummy" value.  A large value in R
+        # will give a small value in inverse of R.
+        badpar, = np.where(np.diag(r)==0)
+        if len(badpar)>0:
+            r[badpar,badpar] = 1e10
         rinv = np.linalg.inv(r)
         dbeta = rinv @ (q.T @ (resid*weight))
-        
+            
     return dbeta
 
 def svd_jac_solve(jac,resid,weight=None):

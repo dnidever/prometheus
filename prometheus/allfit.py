@@ -52,8 +52,8 @@ def cutoutbbox(image,psf,cat):
     return BoundingBox(xlo,xhi,ylo,yhi)
     
     
-def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,reskyiter=2,
-        nofreeze=False,verbose=False):
+def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minpercdiff=0.5,
+        reskyiter=2,nofreeze=False,verbose=False):
     """
     Fit PSF to all stars in an image.
 
@@ -73,6 +73,8 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
        "qr", "svd", and "curve_fit".  Default is "cholesky".
     fitradius : float, optional
        The fitting radius in pixels.  By default the PSF FWHM is used.
+    recenter : boolean, optional
+       Allow the centroids to be fit.  Default is True.
     maxiter : int, optional
        Maximum number of iterations to allow.  Only for methods "qr" or "svd".
        Default is 10.
@@ -156,6 +158,9 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
         
         # Single Star
         if nind==1:
+            if recenter==False:
+                # set the bounds so only height is fit
+                import pdb; pdb.set_trace()
             out,model = psf.fit(resid,cat1,niter=3,verbose=verbose,retfullmodel=True)
             model.data -= out['sky']   # remove sky
             outmodel[model.bbox.slices].data += model.data
@@ -165,8 +170,9 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
         else:
             bbox = cutoutbbox(image,psf,cat1)
             out,model,sky = groupfit.fit(psf,resid[bbox.slices],cat1,method=method,fitradius=fitradius,
-                                         maxiter=maxiter,minpercdiff=minpercdiff,reskyiter=reskyiter,
-                                         nofreeze=nofreeze,verbose=verbose,absolute=True)
+                                         recenter=recenter,maxiter=maxiter,minpercdiff=minpercdiff,
+                                         reskyiter=reskyiter,nofreeze=nofreeze,verbose=verbose,
+                                         absolute=True)
             outmodel[model.bbox.slices].data += model.data
             outsky[model.bbox.slices].data = sky
             

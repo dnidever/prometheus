@@ -303,7 +303,7 @@ class PSFFitter(object):
             
             # Get the model and derivative
             allpars = np.concatenate((np.array([height,xcen,ycen]),np.array(args)))
-            m,deriv = psf.jac(xdata,*allpars,allpars=True,retmodel=True)            
+            m,deriv = psf.jac(xdata,*allpars,allpars=True,retmodel=True)
             #if retmodel:
             #    m,deriv = psf.jac(xdata,*allpars,allpars=True,retmodel=True)
             #else:
@@ -373,9 +373,9 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,v
        The fitting radius.  If none is input then the initial PSF FWHM will be used.
     method : str, optional
        Method to use for solving the non-linear least squares problem: "qr",
-       "svd", and "curve_fit".  Default is "qr".
+       "svd", "cholesky", and "curve_fit".  Default is "qr".
     maxiter : int, optional
-       Maximum number of iterations to allow.  Only for methods "qr" or "svd".
+       Maximum number of iterations to allow.  Only for methods "qr", "svd", and "cholesky".
        Default is 10.
     minpercdiff : float, optional
        Minimum percent change in the parameters to allow until the solution is
@@ -525,14 +525,14 @@ def getpsf(psf,image,cat,fitradius=None,method='qr',subnei=False,allcat=None,
        The fitting radius.  If none is input then the initial PSF FWHM will be used.
     method : str, optional
        Method to use for solving the non-linear least squares problem: "qr",
-       "svd", and "curve_fit".  Default is "qr".
+       "svd", "cholesky", and "curve_fit".  Default is "qr".
     subnei : boolean, optional
        Subtract stars neighboring the PSF stars.  Default is False.
     allcat : table, optional
        Catalog of all objects in the image.  This is needed for bad PSF star
        rejection.
     maxiter : int, optional
-       Maximum number of iterations to allow.  Only for methods "qr" or "svd".
+       Maximum number of iterations to allow.  Only for methods "qr", "svd", and "cholesky".
        Default is 10.
     minpercdiff : float, optional
        Minimum percent change in the parameters to allow until the solution is
