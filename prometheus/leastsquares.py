@@ -26,6 +26,23 @@ def isposdef(A):
     else:
         return False
 
+def inverse(a):
+    """ Safely take the inverse of a square 2D matrix."""
+    # This checks for zeros on the diagonal and "fixes" them.
+    
+    # If one of the dimensions is zero in the R matrix [Npars,Npars]
+    # then replace it with a "dummy" value.  A large value in R
+    # will give a small value in inverse of R.
+    badpar, = np.where(np.diag(a)==0)
+    if len(badpar)>0:
+        a[badpar,badpar] = 1e10
+    ainv = np.linalg.inv(a)
+    # Fix values
+    a[badpar,badpar] = 0  # put values back
+    ainv[badpar,badpar] = 0
+    
+    return ainv
+    
 
 def jac_solve(jac,resid,method=None,weight=None):
     """ Thin wrapper for the various jacobian solver method."""
@@ -88,18 +105,12 @@ def qr_jac_solve(jac,resid,weight=None):
     # QR decomposition
     if weight is None:
         q,r = np.linalg.qr(jac)
-        rinv = np.linalg.inv(r)
+        rinv = inverse(r)
         dbeta = rinv @ (q.T @ resid)
     # Weights input, multiply resid and jac by weights        
     else:
         q,r = np.linalg.qr( jac * weight.reshape(-1,1) )
-        # If one of the dimensions is zero in the R matrix [Npars,Npars]
-        # then replace it with a "dummy" value.  A large value in R
-        # will give a small value in inverse of R.
-        badpar, = np.where(np.diag(r)==0)
-        if len(badpar)>0:
-            r[badpar,badpar] = 1e10
-        rinv = np.linalg.inv(r)
+        rinv = inverse(r)
         dbeta = rinv @ (q.T @ (resid*weight))
             
     return dbeta
@@ -345,7 +356,7 @@ def jac_covariance(jac,resid,wt=None):
         hess = jac.T @ jac  # not weighted
 
     # cov = H-1, covariance matrix is inverse of Hessian matrix
-    cov_orig = np.linalg.inv(hess)
+    cov_orig = inverse(hess)
 
     # Rescale to get an unbiased estimate
     # cov_scaled = cov * (RSS/(m-n)), where m=number of measurements, n=number of parameters

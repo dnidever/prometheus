@@ -79,9 +79,9 @@ class GroupFitter(object):
         self.pixused = None   # initialize pixused
         
         # Get xdata, ydata
-        bboxdata = []
-        xlist = []
-        ylist = []
+        bboxdata0 = []
+        xlist0 = []
+        ylist0 = []
         fbboxdata = []
         fxlist = []
         fylist = []
@@ -118,25 +118,26 @@ class GroupFitter(object):
             x = x[mask]  # raveled
             y = y[mask]
             ntotpix += x.size
-            bboxdata.append(bbox)  # this still includes the corners
-            xlist.append(x)
-            ylist.append(y)
+            bboxdata0.append(bbox)  # this still includes the corners
+            xlist0.append(x)
+            ylist0.append(y)
 
-        self.fxlist = fxlist
+        self.fxlist = fxlist  # full PSF region
         self.fylist = fylist
-        self.xlist = xlist
-        self.ylist = ylist
-            
-        # Combine all of the X and Y values into one array
+        self.xlist0 = xlist0  # fitting region
+        self.ylist0 = ylist0
+        self.bboxdata0 = bboxdata0
+        
+        # Combine all of the X and Y values (of the pixels we are fitting) into one array
         xall = np.zeros(ntotpix,int)
         yall = np.zeros(ntotpix,int)
         count = 0
         for i in range(self.nstars):
-            n = len(xlist[i])
-            xall[count:count+n] = xlist[i]
-            yall[count:count+n] = ylist[i]
+            n = len(xlist0[i])
+            xall[count:count+n] = xlist0[i]
+            yall[count:count+n] = ylist0[i]
             count += n
-            
+        
         # Create 1D unraveled indices, python images are (Y,X)
         ind1 = np.ravel_multi_index((yall,xall),image.shape)
         # Get unique indexes and inverse indices
@@ -156,20 +157,44 @@ class GroupFitter(object):
         self.ind1 = uind1
         self.x = x
         self.y = y
-        self.invindex = invindex  # takes you from duplicates to unique pixels
+
+        # We want to know for each star which pixels (that are being fit)
+        # are affected by it (within it's full pixel list, not just
+        # "its fitted pixels").
         invindexlist = []
-        count = 0
+        xlist = []
+        ylist = []
+        pixim = np.zeros(image.shape,bool)        
         for i in range(self.nstars):
-            n = len(self.xlist[i])
-            invindexlist.append(invindex[count:count+n])
-            count += n
+            fx,fy = fxlist[i],fylist[i]
+            # which of these are contained within the final, unique
+            # list of fitted pixels (X,Y)?
+            pixim[fy,fx] = True
+            used, = np.where(pixim[y,x]==True)
+            invindexlist.append(used)
+            xlist.append(x[used])
+            ylist.append(y[used])
+            pixim[fy,fx] = False  # reset
         self.invindexlist = invindexlist
-        self.bbox = BoundingBox(np.min(x),np.max(x),np.min(y),np.max(y))
-        self.bboxdata = bboxdata
+        self.xlist = xlist
+        self.ylist = ylist
+            
+        #self.invindex = invindex  # takes you from duplicates to unique pixels
+        #invindexlist = []
+        #count = 0
+        #for i in range(self.nstars):
+        #    n = len(self.xlist[i])
+        #    invindexlist.append(invindex[count:count+n])
+        #    count += n
+        #self.invindexlist = invindexlist
+        
+        self.bbox = BoundingBox(np.min(x),np.max(x)+1,np.min(y),np.max(y)+1)
+        #self.bboxdata = bboxdata
 
         # Create initial sky image
         self.sky()
 
+        
     @property
     def starpars(self):
         """ Return the [height,xcen,ycen] parameters in [Nstars,3] array.
@@ -309,7 +334,7 @@ class GroupFitter(object):
             for i in newfreezestars:
                 # Save on what iteration this star was frozen
                 self.starniter[i] = self.niter+1
-                print('freeze: subtracting model for star ',i)
+                #print('freeze: subtracting model for star ',i)
                 pars1 = self.pars[i*3:(i+1)*3]
                 #xind = self.xlist[i]
                 #yind = self.ylist[i]
@@ -377,8 +402,8 @@ class GroupFitter(object):
         
         x0,x1 = self.bbox.xrange
         y0,y1 = self.bbox.yrange
-        nx = x1-x0
-        ny = y1-y0
+        nx = x1-x0-1
+        ny = y1-y0-1
         #im = np.zeros((nx,ny),float)    # image covered by star
         allim = np.zeros(self.ntotpix,float)
         usepix = np.zeros(self.ntotpix,bool)
@@ -434,8 +459,8 @@ class GroupFitter(object):
         
         x0,x1 = self.bbox.xrange
         y0,y1 = self.bbox.yrange
-        nx = x1-x0
-        ny = y1-y0
+        nx = x1-x0-1
+        ny = y1-y0-1
         #jac = np.zeros((nx,ny,len(args)),float)    # image covered by star
         jac = np.zeros((self.ntotpix,len(self.pars)),float)    # image covered by star
         usepix = np.zeros(self.ntotpix,bool)
@@ -450,7 +475,7 @@ class GroupFitter(object):
             dostars = np.arange(self.nstars)
         for i in dostars:
             pars = allpars[i*3:(i+1)*3]
-            bbox = self.bboxdata[i]
+            #bbox = self.bboxdata[i]
             xind = self.xlist[i]
             yind = self.ylist[i]
             invindex = self.invindexlist[i]
@@ -658,7 +683,7 @@ class GroupFitter(object):
         hess = mjac.T @ (wt @ mjac)
         #hess = mjac.T @ mjac  # not weighted
         # cov = H-1, covariance matrix is inverse of Hessian matrix
-        cov_orig = np.linalg.inv(hess)
+        cov_orig = lsq.inverse(hess)
         # Rescale to get an unbiased estimate
         # cov_scaled = cov * (RSS/(m-n)), where m=number of measurements, n=number of parameters
         # RSS = residual sum of squares
@@ -747,35 +772,29 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
         image = CCDData(image)
     
     nstars = np.array(cat).size
-
+    
     # Image offsets
     if absolute:
         imx0 = image.bbox.xrange[0]
         imy0 = image.bbox.yrange[0]
         cat['x'] -= imx0
         cat['y'] -= imy0        
-     
+        
     # Start the Group Fitter
-    gf = GroupFitter(psf,image,cat,fitradius=fitradius,verbose=verbose)
+    gf = GroupFitter(psf,image,cat,fitradius=fitradius,verbose=(verbose>=2))
     xdata = np.arange(gf.ntotpix)
 
-    # Centroids fits
+    # Centroids fixed
     if recenter==False:
         gf.freezepars[1::3] = True  # freeze X values
         gf.freezepars[2::3] = True  # freeze Y values
-    
-    # DO THE CONTRIBUTIONS OF WINGS OF THE PROFILE TO THE NEIGHBORING STARS FITTING PIXELS
-    # NEED TO BE TAKEN INTO ACCOUNT???  I THINK SO
-    print('TAKE WINGS INTO ACCOUNT IN FITTING PIXELS!!!')
-    import pdb; pdb.set_trace()
-    
-    
+        
     # Perform the fitting
     #--------------------
     
     # Initial estimates
     initpar = np.zeros(nstars*3,float)
-    initpar[0::3] = cat['height']
+    initpar[0::3] = gf.starheight
     initpar[1::3] = cat['x']
     initpar[2::3] = cat['y']
     
@@ -867,9 +886,10 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
                 freeparsind, = np.where(~gf.freezepars)
                 bestpar = gf.freeze(bestpar,frzpars)
                 npar = len(bestpar)
-                print('Nfrozen pars = ',gf.nfreezepars)
-                print('Nfrozen stars = ',gf.nfreezestars)
-                print('Nfree pars = ',npar)
+                if verbose:
+                    print('Nfrozen pars = ',gf.nfreezepars)
+                    print('Nfrozen stars = ',gf.nfreezestars)
+                    print('Nfree pars = ',npar)
             else:
                 gf.pars = bestpar            
             maxpercdiff = np.max(percdiff)
@@ -892,11 +912,11 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
             if gf.niter % reskyiter == 0:
                 print('Re-estimating the sky')
                 gf.sky()
-        
-            print('iter dt = ',time.time()-start0)
+
+            if verbose:
+                print('iter dt = ',time.time()-start0)
 
             gf.niter += 1     # increment counter
-
 
     # Check that all starniter are set properly
     #  if we stopped "prematurely" then not all stars were frozen
@@ -922,7 +942,8 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     # Put in catalog
     # Initialize catalog
     dt = np.dtype([('id',int),('height',float),('height_error',float),('x',float),
-                   ('x_error',float),('y',float),('y_error',float),('sky',float),('niter',int)])
+                   ('x_error',float),('y',float),('y_error',float),('sky',float),
+                   ('rms',float),('chisq',float),('niter',int)])
     outcat = np.zeros(nstars,dtype=dt)
     if 'id' in cat.keys():
         outcat['id'] = cat['id']
@@ -936,14 +957,30 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     outcat['y_error'] = perror[2::3]
     outcat['sky'] = gf.starsky
     outcat['niter'] = gf.starniter  # what iteration it converged on
+    outcat = Table(outcat)
 
+    # Relculate chi-squared and RMS of fit
+    for i in range(nstars):
+        xlist = gf.xlist0[i]
+        ylist = gf.ylist0[i]
+        flux = image.data[ylist,xlist].copy()
+        err = image.error[ylist,xlist]
+        xdata = (xlist,ylist)
+        model1 = psf(xlist,ylist,pars=[outcat['height'][i],outcat['x'][i],outcat['y'][i]])
+        chisq = np.sum((flux-outcat['sky'][i]-model1.ravel())**2/err**2)/len(xlist)
+        outcat['chisq'][i] = chisq
+        # chi value, RMS of the residuals as a fraction of the height
+        rms = np.sqrt(np.mean(((flux-outcat['sky'][i]-model1.ravel())/outcat['height'][i])**2))
+        outcat['rms'][i] = rms
+        
     # Image offsets for absolute X/Y coordinates
     if absolute:
         outcat['x'] += imx0
         outcat['y'] += imy0
         cat['x'] += imx0
         cat['y'] += imy0        
-    
-    print('dt = ',time.time()-start)
+
+    if verbose:
+        print('dt = ',time.time()-start)
     
     return outcat,model,gf.skyim

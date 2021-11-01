@@ -116,13 +116,14 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
         
     nstars = np.array(cat).size
     nx,ny = image.data.shape
-
+    
     # Groups
     if 'group_id' not in cat.keys():
         daogroup = DAOGroup(crit_separation=2.5*psf.fwhm())
         starlist = cat.copy()
         starlist['x_0'] = cat['x']
-        starlist['y_0'] = cat['y']        
+        starlist['y_0'] = cat['y']
+        # THIS TAKES ~4 SECONDS!!!!!! WAY TOO LONG!!!!
         star_groups = daogroup(starlist)
         cat['group_id'] = star_groups['group_id']
 
@@ -132,13 +133,13 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     ngroups = len(groups)
     if verbose:
         print(str(ngroups)+' star groups')
-
         
     # Initialize catalog
     dt = np.dtype([('id',int),('height',float),('height_error',float),('x',float),
                    ('x_error',float),('y',float),('y_error',float),('sky',float),
-                   ('niter',int),('group_id',int),('ngroup',int)])
+                   ('niter',int),('group_id',int),('ngroup',int),('rms',float),('chisq',float)])
     outcat = np.zeros(nstars,dtype=dt)
+    outcat = Table(outcat)
     if 'id' in cat.keys():
         outcat['id'] = cat['id']
     else:
@@ -152,40 +153,54 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     for g,grp in enumerate(groups):
         ind = starindex['index'][starindex['lo'][g]:starindex['hi'][g]+1]
         nind = len(ind)
-        cat1 = cat[ind]
+        inpcat = cat[ind].copy()
+        if 'height' not in inpcat.columns:
+            # Estimate height from flux and fwhm
+            # area under 2D Gaussian is 2*pi*A*sigx*sigy
+            if 'fwhm' in inpcat.columns:
+                height = inpcat['flux']/(2*np.pi*(inpcat['fwhm']/2.35)**2)
+            else:
+                height = inpcat['flux']/(2*np.pi*(psf.fwhm()/2.35)**2)                
+            starheight = np.maximum(height,0)   # make sure it's positive
+            inpcat['height'] = starheight
+        
         if verbose:
-            print('Group '+str(grp)+': '+str(nind)+' stars')
+            print('-- Group '+str(grp)+'/'+str(len(groups))+' : '+str(nind)+' star(s) --')
         
         # Single Star
         if nind==1:
+            inpcat = [inpcat['height'][0],inpcat['x'][0],inpcat['y'][0]]            
             if recenter==False:
                 # set the bounds so only height is fit
-                import pdb; pdb.set_trace()
-            out,model = psf.fit(resid,cat1,niter=3,verbose=verbose,retfullmodel=True)
+                bounds = ([0.0,inpcat[1]-1e-7,inpcat[2]-1e-7],
+                          [np.inf,inpcat[1]+1e-7,inpcat[2]+1e-7])
+            else:
+                bounds = None
+            out,model = psf.fit(resid,inpcat,niter=3,verbose=verbose,retfullmodel=True,bounds=bounds)
             model.data -= out['sky']   # remove sky
-            outmodel[model.bbox.slices].data += model.data
-            outsky[model.bbox.slices].data = out['sky'] 
+            outmodel.data[model.bbox.slices] += model.data
+            outsky.data[model.bbox.slices] = out['sky']
             
         # Group
         else:
-            bbox = cutoutbbox(image,psf,cat1)
-            out,model,sky = groupfit.fit(psf,resid[bbox.slices],cat1,method=method,fitradius=fitradius,
+            bbox = cutoutbbox(image,psf,inpcat)
+            out,model,sky = groupfit.fit(psf,resid[bbox.slices],inpcat,method=method,fitradius=fitradius,
                                          recenter=recenter,maxiter=maxiter,minpercdiff=minpercdiff,
                                          reskyiter=reskyiter,nofreeze=nofreeze,verbose=verbose,
                                          absolute=True)
-            outmodel[model.bbox.slices].data += model.data
-            outsky[model.bbox.slices].data = sky
-            
+            outmodel.data[model.bbox.slices] += model.data
+            outsky.data[model.bbox.slices] = sky
 
         # Subtract the best model for the group/star
         resid[model.bbox.slices].data -= model.data
-                
+        
         # Put in catalog
-        cols = ['height','height_error','x','x_error','y','y_error','sky','niter']        
+        cols = ['height','height_error','x','x_error','y','y_error','sky','niter','rms','chisq']
         for c in cols:
             outcat[c][ind] = out[c]
         outcat['group_id'] = grp
         outcat['ngroup'] = nind
+        outcat = Table(outcat)
         
     if verbose:
         print('dt = ',time.time()-start)

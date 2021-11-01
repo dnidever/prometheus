@@ -438,8 +438,9 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,v
             wt = 1/pf.errflatten**2
             # Solve Jacobian
             dbeta = lsq.jac_solve(jac,dy,method=method,weight=wt)
-            print('  pars = ',bestpar)
-            print('  dbeta = ',dbeta)
+            if verbose:
+                print('  pars = ',bestpar)
+                print('  dbeta = ',dbeta)
             
             # Update the parameters
             oldpar = bestpar.copy()

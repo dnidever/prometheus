@@ -21,7 +21,7 @@ from .ccddata import CCDData
 
 # run PSF fitting on an image
 
-def run(image,psfname='gaussian',verbose=False):
+def run(image,psfname='gaussian',fitradius=None,recenter=True,verbose=False):
     """
     Run PSF photometry on an image.
 
@@ -32,6 +32,10 @@ def run(image,psfname='gaussian',verbose=False):
     psfname : string, optional
       The name of the PSF type to use.  The options are "gaussian", "moffat",
       "penny" and "gausspow".  Default is "gaussian".
+    fitradius: float, optional
+       The fitting radius in pixels.  By default the PSF FWHM is used.
+    recenter : boolean, optional
+       Allow the centroids to be fit.  Default is True.
     verbose : boolean, optional
       Verbose output to the screen.  Default is False.
 
@@ -51,6 +55,8 @@ def run(image,psfname='gaussian',verbose=False):
 
     """
 
+    start = time.time()
+    
     # Load the file
     if isinstance(image,str):
         filename = image
@@ -86,25 +92,35 @@ def run(image,psfname='gaussian',verbose=False):
     #-----------------
     if verbose:
         print('Step 3: Estimate FWHM')
-    fwhm = utils.estimatefwhm(objects,verbose=verbose)
+    fwhm = utils.estimatefwhm(objects,verbose=(verbose>=2))
     
     # 3) Pick PSF stars
     #------------------
     if verbose:
         print('Step 3: Pick PSF stars')
-    psfobj = utils.pickpsfstars(objects,fwhm,verbose=verbose)
+    psfobj = utils.pickpsfstars(objects,fwhm,verbose=(verbose>=2))
     
     # 4) Construct the PSF iteratively
     #---------------------------------
     if verbose:
         print('Step 4: Construct PSF')
     initpsf = models.psfmodel(psfname,[fwhm/2.35,fwhm/2.35,0.0])
-    psf,psfpars,psfperror,psfcat = getpsf.getpsf(initpsf,image,psfobj,verbose=verbose)
+    psf,psfpars,psfperror,psfcat = getpsf.getpsf(initpsf,image,psfobj,verbose=(verbose>=2))
+    if verbose:
+        print('Final PSF: '+str(psf))
     
     # 5) Run on all sources
     #----------------------
     if verbose:
         print('Step 5: Get PSF photometry for all objects')
-    out,model,sky = allfit.fit(psf,image,objects)
+    psfout,model,sky = allfit.fit(psf,image,objects,fitradius=fitradius,recenter=recenter,verbose=(verbose>=2))
 
+    # Combine aperture and PSF columns
+    out = objects.copy()
+    for n in psfout.columns:
+        out[n] = psfout[n]
+    
+    if verbose:
+        print('dt = ',time.time()-start)              
+    
     return out,model,sky

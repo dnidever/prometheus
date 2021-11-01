@@ -1527,7 +1527,7 @@ class PSFBase:
     
     def fit(self,im,pars,niter=2,radius=None,allpars=False,method='qr',nosky=False,
             minpercdiff=0.5,absolute=False,retpararray=False,retfullmodel=False,
-            verbose=False,bounds=None):
+            bounds=None,verbose=False):
         """
         Method to fit a single star using the PSF model.
 
@@ -1673,7 +1673,8 @@ class PSFBase:
         # Initialize the output catalog
         dt = np.dtype([('id',int),('height',float),('height_error',float),('x',float),
                        ('x_error',float),('y',float),('y_error',float),('sky',float),
-                       ('sky_error',float),('niter',int),('nfitpix',int),('chisq',float)])
+                       ('sky_error',float),('niter',int),('nfitpix',int),('rms',float),
+                       ('chisq',float)])
         outcat = np.zeros(1,dtype=dt)
         outcat['id'] = 1
 
@@ -1764,7 +1765,10 @@ class PSFBase:
             outcat['sky_error'] = perror[3]        
         outcat['niter'] = count
         outcat['nfitpix'] = flux.size
-        outcat['chisq'] = np.sum((flux-model.reshape(flux.shape))**2/err**2)
+        outcat['chisq'] = np.sum((flux-model.reshape(flux.shape))**2/err**2)/len(flux)
+        # chi value, RMS of the residuals as a fraction of the height
+        rms = np.sqrt(np.mean(((flux-model.reshape(flux.shape))/bestpar[0])**2))
+        outcat['rms'] = rms
         
         # Return full model
         if retfullmodel:
