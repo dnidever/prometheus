@@ -508,8 +508,8 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,v
     return newpsf, pars, perror, psfcat
 
     
-def getpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
-           verbose=False,reject=True,maxrejiter=3):
+def getpsf(psf,image,cat,fitradius=None,method='qr',subnei=False,allcat=None,
+           maxiter=10,minpercdiff=1.0,reject=False,maxrejiter=3,verbose=False):
     """
     Fit PSF model to stars in an image with outlier rejection of badly-fit stars.
 
@@ -526,6 +526,11 @@ def getpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
     method : str, optional
        Method to use for solving the non-linear least squares problem: "qr",
        "svd", and "curve_fit".  Default is "qr".
+    subnei : boolean, optional
+       Subtract stars neighboring the PSF stars.  Default is False.
+    allcat : table, optional
+       Catalog of all objects in the image.  This is needed for bad PSF star
+       rejection.
     maxiter : int, optional
        Maximum number of iterations to allow.  Only for methods "qr" or "svd".
        Default is 10.
@@ -533,6 +538,10 @@ def getpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
        Minimum percent change in the parameters to allow until the solution is
        considered converged and the iteration loop is stopped.  Only for methods
        "qr" and "svd".  Default is 1.0.
+    reject : boolean, optional
+       Reject PSF stars with high RMS values.  Default is False.
+    maxrejiter : int, boolean
+       Maximum number of PSF star rejection iterations.  Default is 3.
     verbose : boolean, optional
        Verbose output.
 
@@ -559,7 +568,11 @@ def getpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
     # Fitting radius
     if fitradius is None:
         fitradius = psf.fwhm()
-    
+
+    # subnei but no allcat input
+    if subnei and allcat is None:
+        raise ValueError('allcat is needed for PSF neighbor star subtraction')
+        
     if 'id' not in cat.colnames:
         cat['id'] = np.arange(len(cat))+1
     psfcat = cat.copy()
@@ -588,6 +601,7 @@ def getpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
     flag = 0
     nrejstar = 100
     fitrad = fitradius
+    useimage = image.copy()
     while (flag==0):
         if verbose:
             print('--- Iteration '+str(nrejiter+1)+' ---')                
@@ -612,9 +626,18 @@ def getpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
             if nrejstar>0:
                 psfcat = psfcat[gd]
 
+        # Subtract neighbors
+        if nrejiter>0 and subnei:
+            if verbose:
+                print('Subtracting neighbors')
+                # Find the neighbors in allcat
+                # Fit the neighbors and PSF stars
+                # Subtract neighbors from the image
+                import pdb; pdb.set_trace()
+                
         # Fitting the PSF to the stars
         #-----------------------------
-        newpsf,pars,perror,pcat = fitpsf(curpsf,image,psfcat,fitradius=fitrad,method=method,
+        newpsf,pars,perror,pcat = fitpsf(curpsf,useimage,psfcat,fitradius=fitrad,method=method,
                                          maxiter=maxiter,minpercdiff=minpercdiff,verbose=verbose)
 
         # Add information into the output catalog
@@ -636,100 +659,11 @@ def getpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
         
         # Stopping criteria
         if reject is False or sumpardiff<0.05 or nrejiter>=maxrejiter or nrejstar==0: flag=1
-
+        if subnei is True and nrejiter==0: flag=0   # iterate at least once with neighbor subtraction
+        
         nrejiter += 1
 
     if verbose:
         print('dt = %.2f sec' % (time.time()-t0))
     
     return newpsf, pars, perror, psfcat
-
-
-def curvefit_psf(func,*args,**kwargs):
-    """ Thin wrapper around curve_fit for PSFs."""
-    def wrap_psf(xdata,*args2,**kwargs2):
-        ## curve_fit separates each parameter while
-        ## psf expects a pars array
-        pars = args2
-        print(pars)
-        return func(xdata[0],xdata[1],pars,**kwargs2)
-    return curve_fit(wrap_psf,*args,**kwargs)
-
-
-def curvefit_psfallpars(func,*args,**kwargs):
-    """ Thin wrapper around curve_fit for PSFs and fitting ALL parameters."""
-    def wrap_psf(xdata,*args2,**kwargs2):
-        ## curve_fit separates each parameter while
-        ## psf expects a pars array
-        allpars = args2
-        print(allpars)
-        nmpars = len(func.params)
-        mpars = allpars[-nmpars:]
-        pars = allpars[0:-nmpars]
-        return func(xdata[0],xdata[1],pars,mpars=mpars,**kwargs2)
-    return curve_fit(wrap_psf,*args,**kwargs)
-
-
-def fitstar(im,cat,psf,radius=None,allpars=False):
-    """ Fit a PSF model to a star in an image."""
-
-    # IM should be an image with an uncertainty array as well
-    ny,nx = im.data.shape
-
-    # THIS NEEDS TO BE REWRITTEN WITH THE CHANGES TO CCDDATA, ETC.!!
-    
-    xc = cat['x']
-    yc = cat['y']
-    # use FWHM of PSF for the fitting radius
-    #box = 20
-    if radius is None:
-        radius = psf.fwhm()
-    x0 = int(np.maximum(0,np.floor(xc-radius)))
-    x1 = int(np.minimum(np.ceil(xc+radius),nx-1))
-    y0 = int(np.maximum(0,np.floor(yc-radius)))
-    y1 = int(np.minimum(np.ceil(yc+radius),ny-1))
-    
-    flux = im.data[x0:x1+1,y0:y1+1]
-    err = im.error[x0:x1+1,y0:y1+1]
-    sky = np.median(im.data[x0:x1+1,y0:y1+1])
-    height = im.data[int(np.round(xc)),int(np.round(yc))]-sky
-
-    nX = x1-x0+1
-    nY = y1-y0+1
-    X = np.arange(x0,x1+1).reshape(-1,1)+np.zeros(nY)   # broadcasting is faster
-    Y = np.arange(y0,y1+1).reshape(1,-11)+np.zeros(nX).reshape(-1,1)
-    #X = np.repeat(np.arange(x0,x1+1),nY).reshape(nX,nY)
-    #Y = np.repeat(np.arange(y0,y1+1),nX).reshape(nY,nX).T
-    xdata = np.vstack((X.ravel(), Y.ravel()))
-
-    #import pdb; pdb.set_trace()
-
-    # Just fit height, xc, yc, sky
-    if allpars==False:
-        initpar = [height,xc,yc,sky]
-        bounds = (-np.inf,np.inf)
-        pars,cov = curve_fit(psf.model,xdata,flux.ravel(),sigma=err.ravel(),p0=initpar,jac=psf.jac)
-        perror = np.sqrt(np.diag(cov))
-        #pars,cov = curve_fit(psf.model,xdata,flux.ravel(),sigma=err.ravel(),p0=initpar) #,bounds=bounds)    
-        #pars,cov = curvefit_psf(psf,xdata,flux.ravel(),sigma=err.ravel(),p0=initpar) #,bounds=bounds)    
-        return pars,perror
-    
-    # Fit all parameters
-    else:
-        initpar = np.hstack(([height,xc,yc,sky],psf.params.copy()))
-        bounds = (np.zeros(len(initpar),float)-np.inf,np.zeros(len(initpar),float)+np.inf)
-        allpars,cov = curve_fit(psf.modelall,xdata,flux.ravel(),sigma=err.ravel(),p0=initpar,jac=psf.jacall)
-        perror = np.sqrt(np.diag(cov))
-        
-        #bounds = (-np.inf,np.inf)
-        #allpars,cov = curvefit_psfallpars(psf,xdata,flux.ravel(),sigma=err.ravel(),p0=initpar) #,bounds=bounds)
-
-        bpsf = psf.copy()
-        bpsf.params = allpars[4:]
-        pars = allpars[0:4]
-        bmodel = bpsf(X,Y,pars)
-    
-        return pars,cov,bpsf
-
-    import pdb; pdb.set_trace()
-

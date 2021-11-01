@@ -71,6 +71,8 @@ def fit(psf,image,cat,method='qr',fitradius=None,maxiter=10,minpercdiff=0.5,resk
     method : str, optional
        Method to use for solving the non-linear least squares problem: "cholesky",
        "qr", "svd", and "curve_fit".  Default is "cholesky".
+    fitradius : float, optional
+       The fitting radius in pixels.  By default the PSF FWHM is used.
     maxiter : int, optional
        Maximum number of iterations to allow.  Only for methods "qr" or "svd".
        Default is 10.

@@ -24,18 +24,18 @@ except ImportError:
 if __name__ == "__main__":
     parser = ArgumentParser(description='Run Prometheus on an image')
     parser.add_argument('files', type=str, nargs='+', help='Images FITS files or list')
+    parser.add_argument('-p','--psf', type=str, nargs=1, default='gaussian', help='PSF model type')
     parser.add_argument('--outfile', type=str, nargs=1, default='', help='Output filename')
     parser.add_argument('--figfile', type=str, nargs=1, default='', help='Figure filename')    
     parser.add_argument('-d','--outdir', type=str, nargs=1, default='', help='Output directory')        
     parser.add_argument('-l','--list', action='store_true', help='Input is a list of FITS files')
-    parser.add_argument('-p','--plot', action='store_true', help='Save the plots')
-    #parser.add_argument('-r','--reader', type=str, nargs=1, default='', help='The spectral reader to use')
     parser.add_argument('-v','--verbose', action='store_true', help='Verbose output')
     parser.add_argument('-t','--timestamp', action='store_true', help='Add timestamp to Verbose output')    
     args = parser.parse_args()
 
     t0 = time.time()
     files = args.files
+    psftype = dln.first_el(args.psf)
     inpoutfile = dln.first_el(args.outfile)
     inpfigfile = dln.first_el(args.figfile)
     outdir = dln.first_el(args.outdir)
@@ -46,8 +46,6 @@ if __name__ == "__main__":
             os.mkdir(outdir)
     verbose = args.verbose
     timestamp = args.timestamp    
-    #reader = dln.first_el(args.reader)
-    #if reader == '': reader = None
     saveplot = args.plot
     inlist = dln.first_el(args.list)
 
@@ -75,21 +73,9 @@ if __name__ == "__main__":
                 for i in range(len(rel)):
                     files[rel[i]] = listdir+'/'+files[rel[i]]
     nfiles = len(files)
-
-    ## Register readers
-    #if reader is not None:
-    #    if os.path.exists(reader):
-    #        readerfile = reader
-    #        reader = os.path.basename(readerfile)[:-3]
-    #        spec = imp.util.spec_from_file_location(reader, readerfile)
-    #        readermodule = imp.util.module_from_spec(spec)
-    #        spec.loader.exec_module(readermodule)
-    #        readerfunc = getattr(readermodule,reader)
-    #        doppler.reader.register(reader,readerfunc)
-    
     
     if (verbose is True) & (nfiles>1):
-        print('--- Running Doppler Fit on %d spectra ---' % nfiles)
+        print('--- Running Prometheus on %d images ---' % nfiles)
         
     # Loop over the files
     for i,f in enumerate(files):
@@ -99,7 +85,6 @@ if __name__ == "__main__":
             continue
 
         try:
-            
             # Load the image
             image = prometheus.read(f)
     
@@ -110,18 +95,8 @@ if __name__ == "__main__":
                 else:
                     print('%s  ' % (f))
                     
-            # Save the figure
-            figfile = None
-            if (nfiles==1) & (inpfigfile!=''):
-                figfile = inpfigfile
-            if (inpfigfile=='') & (saveplot is True):
-                fdir,base,ext = doppler.utils.splitfilename(f)
-                figfile = base+'.png'
-                if outdir is not None: figfile = outdir+'/'+figfile
-                if (outdir is None) & (fdir != ''): figfile = fdir+'/'+figfile 
-                    
             # Run Prometheus
-            out, model = prometheus.run(image,figfile=figfile,verbose=verbose)
+            out, model, sky = prometheus.run(image,psfname=psftype,verbose=verbose)
                 
             # Save the output
             if inpoutfile!='':
@@ -134,11 +109,12 @@ if __name__ == "__main__":
             if verbose is True:
                 print('Writing output to '+outfile)
             if os.path.exists(outfile): os.remove(outfile)
-            Table(out).write(outfile)
-            # append best model
-            hdulist = fits.open(outfile)
-            hdu = fits.PrimaryHDU(model)
-            hdulist.append(hdu)
+            hdulist = fits.HDUList()
+            hdulist.append(fits.table_to_hdu(out))  # table
+            hdulist.append(model.tohdu())  # model
+            hdulist[1].header['COMMENT'] = 'Prometheus model image'
+            hdulist.append(sky.tohdu())    #sky
+            hdulist[2].header['COMMENT'] = 'Prometheus sky image'
             hdulist.writeto(outfile,overwrite=True)
             hdulist.close()
 

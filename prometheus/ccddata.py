@@ -477,12 +477,23 @@ class CCDData(CCD):
         """
         return self.__class__(self, copy=True, error=self._error, gain=self._gain, rdnoise=self._rdnoise)
 
-    
-    # read/write methods? already exists
-    # put data, error, mask, sky in separate extensions
-
     def write(self,outfile,overwrite=True):
-        """ Write the image data to a file."""
+        """
+        Write the image data to a file.
+
+        Parameters
+        ----------
+        outfile : str
+          The output filename.
+        overwrite : boolean, optional
+          Overwrite the file if it already exists.  Default is True.
+
+        Example
+        -------
+
+        image.write('image.fits',overwrite=True)
+
+        """
 
         hdulist = fits.HDUList()
         # HDU0: Data and header
@@ -505,6 +516,29 @@ class CCDData(CCD):
         hdulist[4].header['BUNIT'] = 'Sky'
         hdulist.writeto(outfile,overwrite=overwrite)
         hdulist.close()
+
+    def tohdu(self):
+        """
+        Convert the image to an HDU so it can be written to a file.
+        Note that only the image data is converted to the HDU
+        (no error, mask, flags or sky).
+
+        Returns
+        -------
+        hdu : fits HDU object
+          The FITS HDU object.
+
+        Example
+        -------
+
+        hdu = image.tohdu()
+
+        """
+
+        # Data and header
+        hdu = fits.PrimaryHDU(self.data,self.header))        
+        hdu.header['IMAGTYPE'] = 'Prometheus'        
+        return hdu
         
     @classmethod
     def read(cls,filename):

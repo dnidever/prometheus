@@ -22,7 +22,34 @@ from .ccddata import CCDData
 # run PSF fitting on an image
 
 def run(image,psfname='gaussian',verbose=False):
-    """ Run PSF photometry on an image."""
+    """
+    Run PSF photometry on an image.
+
+    Parameters
+    ----------
+    image : string or CCDData object
+      The input image to fit.  This can be the filename or CCDData object.
+    psfname : string, optional
+      The name of the PSF type to use.  The options are "gaussian", "moffat",
+      "penny" and "gausspow".  Default is "gaussian".
+    verbose : boolean, optional
+      Verbose output to the screen.  Default is False.
+
+    Returns
+    -------
+    cat : table
+       The output table of best-fit PSF values for all of the 
+    model : CCDData object
+       The best-fitting model for the stars (without sky).
+    sky : CCDData object
+       The background sky image used for the image.
+
+    Example
+    -------
+
+    cat,model,sky = prometheus.run(image,psfname='gaussian',verbose=True)
+
+    """
 
     # Load the file
     if isinstance(image,str):
@@ -30,11 +57,14 @@ def run(image,psfname='gaussian',verbose=False):
             print('Loading image from '+filename)
         filename = image
         image = CCDData.read(filename)
-
+    if isinstance(image,CCDData) is False:
+        raise ValueError('Input image must be a filename or CCDData object')
+        
     # Processing steps
     #-----------------
 
     # 1) Detection
+    #-------------
     if verbose:
         print('Step 1: Detection')
     objects = detection.detect(image)
@@ -42,6 +72,7 @@ def run(image,psfname='gaussian',verbose=False):
         print(str(len(objects))+' objects detected')
     
     # 2) Aperture photometry
+    #-----------------------
     if verbose:
         print('Step 2: Aperture photometry')    
     objects = aperture.aperphot(image,objects)
@@ -52,33 +83,36 @@ def run(image,psfname='gaussian',verbose=False):
         print('Min/Max mag: %5.2f, %5.2f' % (minmag,maxmag))
     
     # 2) Estimate FWHM
+    #-----------------
     if verbose:
         print('Step 3: Estimate FWHM')
     fwhm = utils.estimatefwhm(objects)
-    #if verbose:
-    #    print('FWHM = %10.3f' % fwhm)
+    if verbose:
+        print('FWHM = %10.3f' % fwhm)
     
     # 3) Pick PSF stars
+    #------------------
     if verbose:
         print('Step 3: Pick PSF stars')
     psfobj = utils.pickpsfstars(objects,fwhm)
-    #if verbose:
-    #    print(str(len(psfobj))+' PSF stars found')
+    if verbose:
+        print(str(len(psfobj))+' PSF stars found')
 
     import pdb; pdb.set_trace()
     
     # 4) Construct the PSF iteratively
+    #---------------------------------
     if verbose:
         print('Step 4: Construct PSF')
     initpsf = models.psfmodel(psfname,[fwhm/2.35,fwhm/2.35,0.0])
-    import pdb; pdb.set_trace()
     psf = getpsf.getpsf(initpsf,image,psfobj,verbose=verbose)
 
     import pdb; pdb.set_trace()
     
     # 5) Run on all sources
+    #----------------------
     if verbose:
         print('Step 5: Get PSF photometry for all objects')
-    out = allfit.fit(psf,image,objects)
+    out,model,sky = allfit.fit(psf,image,objects)
 
-    return out
+    return out,model,sky
