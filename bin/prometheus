@@ -8,6 +8,7 @@ import os
 import time
 import numpy as np
 import prometheus
+from prometheus import prometheus as pm,utils
 from astropy.io import fits
 from astropy.table import Table
 from argparse import ArgumentParser
@@ -46,7 +47,6 @@ if __name__ == "__main__":
             os.mkdir(outdir)
     verbose = args.verbose
     timestamp = args.timestamp    
-    saveplot = args.plot
     inlist = dln.first_el(args.list)
 
     # Timestamp requested, set up logger
@@ -74,8 +74,11 @@ if __name__ == "__main__":
                     files[rel[i]] = listdir+'/'+files[rel[i]]
     nfiles = len(files)
     
-    if (verbose is True) & (nfiles>1):
-        print('--- Running Prometheus on %d images ---' % nfiles)
+    if (verbose is True):
+        if nfiles>1:
+            print('--- Running Prometheus on %d images ---' % nfiles)
+        else:
+            print('--- Running Prometheus on %s ---' % files[0])
         
     # Loop over the files
     for i,f in enumerate(files):
@@ -92,17 +95,15 @@ if __name__ == "__main__":
                 if (nfiles>1):
                     if (i>0): print('')
                     print('Image %3d:  %s  ' % (i+1,f))
-                else:
-                    print('%s  ' % (f))
                     
             # Run Prometheus
-            out, model, sky = prometheus.run(image,psfname=psftype,verbose=verbose)
+            out, model, sky = pm.run(image,psfname=psftype,verbose=verbose)
                 
             # Save the output
             if inpoutfile!='':
                 outfile = inpoutfile
             else:
-                fdir,base,ext = doppler.utils.splitfilename(f)
+                fdir,base,ext = utils.splitfilename(f)
                 outfile = base+'_prometheus.fits'
                 if outdir is not None: outfile = outdir+'/'+outfile
                 if (outdir is None) & (fdir != ''): outfile = fdir+'/'+outfile

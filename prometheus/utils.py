@@ -20,6 +20,17 @@ from scipy.spatial import cKDTree
 from . import detection, models, getpsf, allfit
 from .ccddata import CCDData
 
+def splitfilename(filename):
+    """ Split filename into directory, base and extensions."""
+    fdir = os.path.dirname(filename)
+    base = os.path.basename(filename)
+    exten = ['.fit','.fits','.fit.gz','.fits.gz','.fit.fz','.fits.fz']
+    for e in exten:
+        if base[-len(e):]==e:
+            base = base[0:-len(e)]
+            ext = e
+            break
+    return (fdir,base,ext)
 
 def estimatefwhm(objects,verbose=False):
     """ Estimate FWHM using objects."""

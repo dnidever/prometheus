@@ -534,9 +534,12 @@ class CCDData(CCD):
         hdu = image.tohdu()
 
         """
-
+        
         # Data and header
-        hdu = fits.PrimaryHDU(self.data,self.header) 
+        if len(self.header)>0:
+            hdu = fits.PrimaryHDU(self.data,self.header)
+        else:
+            hdu = fits.PrimaryHDU(self.data)
         hdu.header['IMAGTYPE'] = 'Prometheus'        
         return hdu
         
