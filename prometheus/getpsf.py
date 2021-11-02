@@ -651,13 +651,8 @@ def getpsf(psf,image,cat,fitradius=None,method='qr',subnei=False,allcat=None,
         ind1,ind2 = dln.match(outcat['id'],pcat['id'])
         outcat['reject'] = 1
         for n in pcat.columns:
-            outcat[ind1][n] = pcat[ind2][n]
+            outcat[n][ind1] = pcat[n][ind2]
         outcat['reject'][ind1] = 0
-        
-        # Initialize the output PSF catalog
-        #  with entries for all of the stars
-        if nrejiter==0:
-            outcat = pcat.copy()
 
         # Compare PSF parameters
         pardiff = newpsf.params-curpsf.params
@@ -669,7 +664,7 @@ def getpsf(psf,image,cat,fitradius=None,method='qr',subnei=False,allcat=None,
         if subnei is True and nrejiter==0: flag=0   # iterate at least once with neighbor subtraction
         
         nrejiter += 1
-
+        
     if verbose:
         print('dt = %.2f sec' % (time.time()-t0))
     
