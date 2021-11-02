@@ -137,7 +137,8 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     # Initialize catalog
     dt = np.dtype([('id',int),('height',float),('height_error',float),('x',float),
                    ('x_error',float),('y',float),('y_error',float),('sky',float),
-                   ('niter',int),('group_id',int),('ngroup',int),('rms',float),('chisq',float)])
+                   ('flux',float),('mag',float),('niter',int),('group_id',int),
+                   ('ngroup',int),('rms',float),('chisq',float)])
     outcat = np.zeros(nstars,dtype=dt)
     outcat = Table(outcat)
     if 'id' in cat.keys():
@@ -195,7 +196,8 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
         resid[model.bbox.slices].data -= model.data
         
         # Put in catalog
-        cols = ['height','height_error','x','x_error','y','y_error','sky','niter','rms','chisq']
+        cols = ['height','height_error','x','x_error','y','y_error',
+                'sky','flux','mag','niter','rms','chisq']
         for c in cols:
             outcat[c][ind] = out[c]
         outcat['group_id'] = grp

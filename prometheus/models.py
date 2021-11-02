@@ -1167,7 +1167,7 @@ def psfmodel(name,pars=None,**kwargs):
     if str(name).lower() in _models.keys():
         return _models[str(name).lower()](pars,**kwargs)
     else:
-        raise ValueError('PSF type '+str(name)+' not supported.  Select '+'.'.join(_models.keys()))
+        raise ValueError('PSF type '+str(name)+' not supported.  Select '+', '.join(_models.keys()))
     
 
 #######################
@@ -1673,8 +1673,8 @@ class PSFBase:
         # Initialize the output catalog
         dt = np.dtype([('id',int),('height',float),('height_error',float),('x',float),
                        ('x_error',float),('y',float),('y_error',float),('sky',float),
-                       ('sky_error',float),('niter',int),('nfitpix',int),('rms',float),
-                       ('chisq',float)])
+                       ('sky_error',float),('flux',float),('mag',float),('niter',int),
+                       ('nfitpix',int),('rms',float),('chisq',float)])
         outcat = np.zeros(1,dtype=dt)
         outcat['id'] = 1
 
@@ -1762,7 +1762,9 @@ class PSFBase:
         outcat['y_error'] = perror[2]
         if not nosky:
             outcat['sky'] = bestpar[3]
-            outcat['sky_error'] = perror[3]        
+            outcat['sky_error'] = perror[3]
+        outcat['flux'] = bestpar[0]*self.fwhm()
+        outcat['mag'] = -2.5*np.log10(np.maximum(outcat['flux'],1e-10))+25.0        
         outcat['niter'] = count
         outcat['nfitpix'] = flux.size
         outcat['chisq'] = np.sum((flux-model.reshape(flux.shape))**2/err**2)/len(flux)
@@ -2087,8 +2089,7 @@ class PSFGaussian(PSFBase):
         # Set step sizes
         self._steps = np.array([0.5,0.5,0.2])
         
-    #@property
-    def fwhm(self,pars=None,footprint=False):
+    def fwhm(self,pars=None):
         """ Return the FWHM of the model."""
         if pars is None:
             pars = np.hstack(([1.0,0.0,0.0],self.params))
@@ -2161,7 +2162,7 @@ class PSFMoffat(PSFBase):
         super().__init__(mpars,npix=npix,binned=binned)
         # Set the bounds
         self._bounds = (np.array([0.0,0.0,-np.inf,0.01]),
-                        np.array([np.inf,np.inf,np.inf,np.inf]))
+                        np.array([np.inf,np.inf,np.inf,6.0]))
         # Set step sizes
         self._steps = np.array([0.5,0.5,0.2,0.2])
         

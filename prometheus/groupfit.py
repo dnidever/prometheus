@@ -943,7 +943,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     # Initialize catalog
     dt = np.dtype([('id',int),('height',float),('height_error',float),('x',float),
                    ('x_error',float),('y',float),('y_error',float),('sky',float),
-                   ('rms',float),('chisq',float),('niter',int)])
+                   ('flux',float),('mag',float),('rms',float),('chisq',float),('niter',int)])
     outcat = np.zeros(nstars,dtype=dt)
     if 'id' in cat.keys():
         outcat['id'] = cat['id']
@@ -956,6 +956,8 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     outcat['y'] = pars[2::3]
     outcat['y_error'] = perror[2::3]
     outcat['sky'] = gf.starsky
+    outcat['flux'] = outcat['height']*psf.fwhm()
+    outcat['mag'] = -2.5*np.log10(np.maximum(outcat['flux'],1e-10))+25.0
     outcat['niter'] = gf.starniter  # what iteration it converged on
     outcat = Table(outcat)
 
