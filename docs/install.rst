@@ -30,3 +30,4 @@ Dependencies
 - sep
 - photutils
 - dlnpyutils
+- skimage
