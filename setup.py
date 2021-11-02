@@ -7,7 +7,7 @@ from setuptools import setup, find_packages
 #  load to PYPI
 #setup(name='theprometheus',
 setup(name='prometheus',
-      version='1.0.1',
+      version='1.0.2',
       description='PSF Photometry Software',
       author='David Nidever',
       author_email='dnidever@montana.edu',
