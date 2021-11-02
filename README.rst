@@ -16,6 +16,12 @@ To install the latest version::
 
     pip install git+https://github.com/dnidever/prometheus
 
+Attribution
+-----------
+    
+.. image:: https://zenodo.org/badge/363221788.svg
+   :target: https://zenodo.org/badge/latestdoi/363221788
+    
 Documentation
 -------------
 
