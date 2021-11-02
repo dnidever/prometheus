@@ -170,8 +170,8 @@ class PSFFitter(object):
                 if self.niter>-1:
                     # force the positions to stay within +/-2 pixels of the original values
                     bounds = (np.array([0,np.maximum(x0orig-2,0),np.maximum(y0orig-2,0),-np.inf]),
-                              np.array([np.inf,np.minimum(x0orig+2,bbox.shape[1]),np.minimum(y0orig+2,bbox.shape[0]),np.inf]))
-                    # the image still has sky in it, use sky (nosky=False)                    
+                              np.array([np.inf,np.minimum(x0orig+2,bbox.shape[1]-1),np.minimum(y0orig+2,bbox.shape[0]-1),np.inf]))
+                    # the image still has sky in it, use sky (nosky=False)
                     pars,perror,model = psf.fit(image,[height,x0,y0],nosky=False,retpararray=True,niter=5,bounds=bounds)
                     xcen += (pars[1]-x0)
                     ycen += (pars[2]-y0)

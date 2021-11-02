@@ -8,7 +8,7 @@ import os
 import time
 import numpy as np
 import prometheus
-from prometheus import prometheus as pm,utils
+from prometheus import prometheus as pm,utils,models
 from astropy.io import fits
 from astropy.table import Table
 from argparse import ArgumentParser
@@ -49,6 +49,10 @@ if __name__ == "__main__":
     timestamp = args.timestamp    
     inlist = dln.first_el(args.list)
 
+    # Check PSF type
+    if psftype not in models._models.keys():
+        raise ValueError('PSF type '+str(psftype)+' not supported.  Select '+', '.join(models._models.keys()))
+    
     # Timestamp requested, set up logger
     if timestamp and verbose:
         logger = dln.basiclogger()
@@ -97,7 +101,7 @@ if __name__ == "__main__":
                     print('Image %3d:  %s  ' % (i+1,f))
                     
             # Run Prometheus
-            out, model, sky = pm.run(image,psfname=psftype,verbose=verbose)
+            out, model, sky, psf = pm.run(image,psfname=psftype,verbose=verbose)
                 
             # Save the output
             if inpoutfile!='':
@@ -114,8 +118,10 @@ if __name__ == "__main__":
             hdulist.append(fits.table_to_hdu(out))  # table
             hdulist.append(model.tohdu())  # model
             hdulist[1].header['COMMENT'] = 'Prometheus model image'
-            hdulist.append(sky.tohdu())    #sky
+            hdulist.append(sky.tohdu())    # sky
             hdulist[2].header['COMMENT'] = 'Prometheus sky image'
+            hdulist.append(psf.tohdu())    # psf
+            hdulist[3].header['COMMENT'] = 'Prometheus PSF model'
             hdulist.writeto(outfile,overwrite=True)
             hdulist.close()
 

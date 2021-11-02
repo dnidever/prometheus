@@ -797,6 +797,10 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     initpar[0::3] = gf.starheight
     initpar[1::3] = cat['x']
     initpar[2::3] = cat['y']
+
+    if np.sum(~np.isfinite(initpar))>0:
+        print('non finite values')
+        import pdb; pdb.set_trace()
     
     # Curve_fit
     #   dealt with separately
@@ -845,6 +849,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
                 wt = 1/gf.errflatten[gf.usepix]**2
                 # Solve Jacobian
                 dbeta = lsq.jac_solve(jac,dy,method=method,weight=wt)
+                dbeta[~np.isfinite(dbeta)] = 0.0  # deal with NaNs, shouldn't happen
                 
             #  htcen, crowdsource method of solving heights/fluxes first
             #      and then centroiding to get x/y
@@ -943,7 +948,8 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     # Initialize catalog
     dt = np.dtype([('id',int),('height',float),('height_error',float),('x',float),
                    ('x_error',float),('y',float),('y_error',float),('sky',float),
-                   ('flux',float),('mag',float),('rms',float),('chisq',float),('niter',int)])
+                   ('flux',float),('flux_error',float),('mag',float),('mag_error',float),
+                   ('rms',float),('chisq',float),('niter',int)])
     outcat = np.zeros(nstars,dtype=dt)
     if 'id' in cat.keys():
         outcat['id'] = cat['id']
@@ -957,7 +963,9 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     outcat['y_error'] = perror[2::3]
     outcat['sky'] = gf.starsky
     outcat['flux'] = outcat['height']*psf.fwhm()
+    outcat['flux_error'] = outcat['height_error']*psf.fwhm()    
     outcat['mag'] = -2.5*np.log10(np.maximum(outcat['flux'],1e-10))+25.0
+    outcat['mag_error'] = (2.5/np.log(10))*outcat['flux_error']/outcat['flux']
     outcat['niter'] = gf.starniter  # what iteration it converged on
     outcat = Table(outcat)
 

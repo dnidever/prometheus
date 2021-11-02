@@ -1247,10 +1247,10 @@ class PSFBase:
         ny,nx = imshape   # python images are (Y,X)
         if radius is None:
             radius = self.npix//2
-        xlo = np.maximum(int(np.round(xcen-radius)),0)
-        xhi = np.minimum(int(np.round(xcen+radius)),nx)
-        ylo = np.maximum(int(np.round(ycen-radius)),0)
-        yhi = np.minimum(int(np.round(ycen+radius)),ny)
+        xlo = np.maximum(int(np.floor(xcen-radius)),0)
+        xhi = np.minimum(int(np.ceil(xcen+radius+1)),nx)
+        ylo = np.maximum(int(np.floor(ycen-radius)),0)
+        yhi = np.minimum(int(np.ceil(ycen+radius+1)),ny)
         
         return BoundingBox(xlo,xhi,ylo,yhi)
         
@@ -1620,7 +1620,13 @@ class PSFBase:
             cat = {'height':pars[0],'x':pars[1],'y':pars[2]}
 
         method = str(method).lower()
-            
+
+        # Input bounds
+        if bounds is not None:
+            inbounds = copy.deepcopy(bounds)
+        else:
+            inbounds = None
+        
         # Image offset for absolute X/Y coordinates
         if absolute:
             imx0 = im.bbox.xrange[0]
@@ -1637,7 +1643,7 @@ class PSFBase:
                 bounds[1][1] -= imx0  # upper
                 bounds[1][2] -= imy0                
         if radius is None:
-            radius = self.fwhm()
+            radius = np.maximum(self.fwhm(),1)
         bbox = self.starbbox((xc,yc),im.shape,radius)
         X,Y = self.bbox2xy(bbox)
 
@@ -1661,7 +1667,7 @@ class PSFBase:
         if nosky: sky=0.0
         height = flux[int(np.round(yc)),int(np.round(xc))]-sky   # python images are (Y,X)
         initpar = [height,xc,yc,sky]            
-            
+        
         # Fit PSF parameters as well
         if allpars:
             initpar = np.hstack(([height,xc,yc,sky],self.params.copy()))
@@ -1673,7 +1679,8 @@ class PSFBase:
         # Initialize the output catalog
         dt = np.dtype([('id',int),('height',float),('height_error',float),('x',float),
                        ('x_error',float),('y',float),('y_error',float),('sky',float),
-                       ('sky_error',float),('flux',float),('mag',float),('niter',int),
+                       ('sky_error',float),('flux',float),('flux_error',float),
+                       ('mag',float),('mag_error',float),('niter',int),
                        ('nfitpix',int),('rms',float),('chisq',float)])
         outcat = np.zeros(1,dtype=dt)
         outcat['id'] = 1
@@ -1706,7 +1713,7 @@ class PSFBase:
             count = 0
             bestpar = initpar.copy()
             maxpercdiff = 1e10
-            maxsteps = self.steps(initpar,bounds)  # maximum steps
+            maxsteps = self.steps(initpar,bounds,star=True)  # maximum steps
             while (count<niter and maxpercdiff>minpercdiff):
                 # Use Cholesky, QR or SVD to solve linear system of equations
                 if allpars:
@@ -1716,7 +1723,8 @@ class PSFBase:
                 dy = flux.ravel()-m.ravel()
                 # Solve Jacobian
                 dbeta = lsq.jac_solve(jac,dy,method=method,weight=wt.ravel())
-
+                dbeta[~np.isfinite(dbeta)] = 0.0  # deal with NaNs
+                
                 # Update parameters
                 oldpar = bestpar.copy()
                 # limit the steps to the maximum step sizes and boundaries
@@ -1764,7 +1772,9 @@ class PSFBase:
             outcat['sky'] = bestpar[3]
             outcat['sky_error'] = perror[3]
         outcat['flux'] = bestpar[0]*self.fwhm()
-        outcat['mag'] = -2.5*np.log10(np.maximum(outcat['flux'],1e-10))+25.0        
+        outcat['flux_error'] = perror[0]*self.fwhm()        
+        outcat['mag'] = -2.5*np.log10(np.maximum(outcat['flux'],1e-10))+25.0
+        outcat['mag_error'] = (2.5/np.log(10))*outcat['flux_error']/outcat['flux']
         outcat['niter'] = count
         outcat['nfitpix'] = flux.size
         outcat['chisq'] = np.sum((flux-model.reshape(flux.shape))**2/err**2)/len(flux)
@@ -1782,6 +1792,9 @@ class PSFBase:
             model = model.reshape(flux.shape)
             model = CCDData(model,bbox=bbox,unit=im.unit)
 
+        # Set input bounds back
+        bounds = copy.deepcopy(inbounds)
+            
         # Return catalog
         if not retpararray:
             if allpars:
@@ -1887,8 +1900,9 @@ class PSFBase:
     # or fluxfoot for the footprint flux
     # or even have footprint=True to use the footprint flux
     
-    def steps(self,pars=None,bounds=None):
+    def steps(self,pars=None,bounds=None,star=False):
         """ Return step sizes to use when fitting the PSF model parameters (at least initial sizes)."""
+        # star=True indicates that we have stellar parameters
         # Check the initial steps against the parameters to make sure that don't
         #   go past the boundaries
         if pars is None:
@@ -1897,13 +1911,19 @@ class PSFBase:
             bounds = self.mkbounds(pars)
         npars = len(pars)
         nmpars = len(self.params)
+        # Either
+        # 1) model parameters only (npars==mpars and star==False)
+        # 2) star parameters only (star==True)
+        # 3) star + model parameters (npars>mpars)
         # Have stellar parameters
-        if npars>nmpars:
+        if npars>nmpars or star:
             initsteps = np.zeros(npars,float)
             initsteps[0:3] = [pars[0]*0.5,0.5,0.5]  # amp, x, y
-            if npars-nmpars==4:  # with sky
+            if npars-nmpars==4 or npars==4:  # with sky
                 initsteps[3] = pars[3]*0.5          # sky
-            initsteps[-nmpars:] = self._steps       # model parameters
+            # we also have model parameters
+            if npars==nmpars or star==False:
+                initsteps[-nmpars:] = self._steps       # model parameters
         # Only model parameters
         else:
             initsteps = self._steps
@@ -1912,7 +1932,7 @@ class PSFBase:
         #   newpars() can figure out that it needs to limit
         #   any new parameter value at the boundary
         lcheck = self.checkbounds(pars-initsteps,bounds)
-        ucheck = self.checkbounds(pars+initsteps,bounds)        
+        ucheck = self.checkbounds(pars+initsteps,bounds)
         # Final steps
         fsteps = initsteps.copy()
         # bad negative step, crosses lower boundary
@@ -2063,9 +2083,13 @@ class PSFBase:
         npix = head.get('NPIX')
         if npix is not None: kwargs['npix'] = npix        
         return psfmodel(psftype,data,**kwargs)
-        
+
+    def tohdu(self):
+        """ Convert the PSF object to an HDU. Defined by subclass."""
+        pass
+    
     def write(self,filename,overwrite=True):
-        """ Write a PSF to a file.  Defined by subclass"""
+        """ Write a PSF to a file.  Defined by subclass."""
         pass
 
     
@@ -2126,6 +2150,27 @@ class PSFGaussian(PSFBase):
             g, derivative = gaussian2d(x, y, pars, deriv=True, nderiv=nderiv)
         return derivative            
 
+    def tohdu(self):
+        """
+        Convert the PSF object to an HDU so it can be written to a file.
+
+        Returns
+        -------
+        hdu : fits HDU object
+          The FITS HDU object.
+
+        Example
+        -------
+
+        hdu = psf.tohdu()
+
+        """
+        hdu = fits.PrimaryHDU(self.params)
+        hdu.header['PSFTYPE'] = 'Gaussian'
+        hdu.header['BINNED'] = self.binned
+        hdu.header['NPIX'] = self.npix
+        return hdu
+    
     def write(self,filename,overwrite=True):
         """ Write a PSF to a file."""
         if os.path.exists(filename) and overwrite==False:
@@ -2203,6 +2248,27 @@ class PSFMoffat(PSFBase):
             g, derivative = moffat2d(x, y, pars, deriv=True, nderiv=nderiv)
         return derivative
 
+    def tohdu(self):
+        """
+        Convert the PSF object to an HDU so it can be written to a file.
+
+        Returns
+        -------
+        hdu : fits HDU object
+          The FITS HDU object.
+
+        Example
+        -------
+
+        hdu = psf.tohdu()
+
+        """
+        hdu = fits.PrimaryHDU(self.params)
+        hdu.header['PSFTYPE'] = 'Moffat'
+        hdu.header['BINNED'] = self.binned
+        hdu.header['NPIX'] = self.npix
+        return hdu
+    
     def write(self,filename,overwrite=True):
         """ Write a PSF to a file."""
         if os.path.exists(filename) and overwrite==False:
@@ -2225,10 +2291,10 @@ class PSFPenny(PSFBase):
     def __init__(self,mpars=None,npix=101,binned=False):
         # mpars = [xsig,ysig,theta, relamp,sigma]
         if mpars is None:
-            mpars = np.array([1.0,2.5,2.5,0.0,0.02,5.0])
+            mpars = np.array([1.0,1.0,0.0,0.02,5.0])
         if len(mpars)!=5:
             old = np.array(mpars).copy()
-            mpars = np.array([1.0,2.5,2.5,0.0,0.02,5.0])
+            mpars = np.array([1.0,1.0,0.0,0.02,5.0])
             mpars[0:len(old)] = old
         if mpars[0]<=0:
             raise ValueError('sigma must be >0')
@@ -2280,6 +2346,27 @@ class PSFPenny(PSFBase):
             g, derivative = penny2d(x, y, pars, deriv=True, nderiv=nderiv)
         return derivative
 
+    def tohdu(self):
+        """
+        Convert the PSF object to an HDU so it can be written to a file.
+
+        Returns
+        -------
+        hdu : fits HDU object
+          The FITS HDU object.
+
+        Example
+        -------
+
+        hdu = psf.tohdu()
+
+        """
+        hdu = fits.PrimaryHDU(self.params)
+        hdu.header['PSFTYPE'] = 'Penny'
+        hdu.header['BINNED'] = self.binned
+        hdu.header['NPIX'] = self.npix
+        return hdu
+    
     def write(self,filename,overwrite=True):
         """ Write a PSF to a file."""
         if os.path.exists(filename) and overwrite==False:
@@ -2356,13 +2443,34 @@ class PSFGausspow(PSFBase):
             g, derivative = gausspow2d(x, y, pars, deriv=True, nderiv=nderiv)
         return derivative
 
+    def tohdu(self):
+        """
+        Convert the PSF object to an HDU so it can be written to a file.
+
+        Returns
+        -------
+        hdu : fits HDU object
+          The FITS HDU object.
+
+        Example
+        -------
+
+        hdu = psf.tohdu()
+
+        """
+        hdu = fits.PrimaryHDU(self.params)
+        hdu.header['PSFTYPE'] = 'Gausspow'
+        hdu.header['BINNED'] = self.binned
+        hdu.header['NPIX'] = self.npix
+        return hdu
+    
     def write(self,filename,overwrite=True):
         """ Write a PSF to a file."""
         if os.path.exists(filename) and overwrite==False:
             raise ValueError(filename+' already exists and overwrite=False')
         hdulist = fits.HDUList()
         hdulist.append(fits.PrimaryHDU(self.params))
-        hdulist[0].header['PSFTYPE'] = 'Ellipower'
+        hdulist[0].header['PSFTYPE'] = 'Gausspow'
         hdulist[0].header['BINNED'] = self.binned
         hdulist[0].header['NPIX'] = self.npix        
         hdulist.writeto(filename,overwrite=overwrite)
@@ -2401,6 +2509,27 @@ class PSFEmpirical(PSFBase):
         if cube is None: cube = self.cube
         return empirical(x, y, pars, cube=cube, nderiv=nderiv)   
 
+    def tohdu(self):
+        """
+        Convert the PSF object to an HDU so it can be written to a file.
+
+        Returns
+        -------
+        hdu : fits HDU object
+          The FITS HDU object.
+
+        Example
+        -------
+
+        hdu = psf.tohdu()
+
+        """
+        hdu = fits.PrimaryHDU(self.params)
+        hdu.header['PSFTYPE'] = 'Empirical'
+        hdu.header['BINNED'] = self.binned
+        hdu.header['NPIX'] = self.npix
+        return hdu
+    
     def write(self,filename,overwrite=True):
         """ Write a PSF to a file."""
         if os.path.exists(filename) and overwrite==False:

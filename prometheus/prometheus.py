@@ -47,11 +47,13 @@ def run(image,psfname='gaussian',fitradius=None,recenter=True,verbose=False):
        The best-fitting model for the stars (without sky).
     sky : CCDData object
        The background sky image used for the image.
+    psf : PSF object
+       The best-fitting PSF model.
 
     Example
     -------
 
-    cat,model,sky = prometheus.run(image,psfname='gaussian',verbose=True)
+    cat,model,sky,psf = prometheus.run(image,psfname='gaussian',verbose=True)
 
     """
 
@@ -92,19 +94,20 @@ def run(image,psfname='gaussian',fitradius=None,recenter=True,verbose=False):
     #-----------------
     if verbose:
         print('Step 3: Estimate FWHM')
-    fwhm = utils.estimatefwhm(objects,verbose=(verbose>=2))
+    fwhm = utils.estimatefwhm(objects,verbose=verbose)
     
     # 3) Pick PSF stars
     #------------------
     if verbose:
         print('Step 3: Pick PSF stars')
-    psfobj = utils.pickpsfstars(objects,fwhm,verbose=(verbose>=2))
+    psfobj = utils.pickpsfstars(objects,fwhm,verbose=verbose)
     
     # 4) Construct the PSF iteratively
     #---------------------------------
     if verbose:
         print('Step 4: Construct PSF')
-    initpsf = models.psfmodel(psfname,[fwhm/2.35,fwhm/2.35,0.0])
+    # Make the initial PSF slightly elliptical so it's easier to fit the orientation
+    initpsf = models.psfmodel(psfname,[fwhm/2.35,0.9*fwhm/2.35,0.0])
     psf,psfpars,psfperror,psfcat = getpsf.getpsf(initpsf,image,psfobj,verbose=(verbose>=2))
     if verbose:
         print('Final PSF: '+str(psf))
@@ -123,4 +126,4 @@ def run(image,psfname='gaussian',fitradius=None,recenter=True,verbose=False):
     if verbose:
         print('dt = ',time.time()-start)              
     
-    return out,model,sky
+    return out,model,sky,psf

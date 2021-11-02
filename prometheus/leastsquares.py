@@ -8,6 +8,7 @@ __authors__ = 'David Nidever <dnidever@montana.edu?'
 __version__ = '20210908'  # yyyymmdd
 
 
+import sys
 import numpy as np
 import scipy
 
@@ -33,10 +34,14 @@ def inverse(a):
     # If one of the dimensions is zero in the R matrix [Npars,Npars]
     # then replace it with a "dummy" value.  A large value in R
     # will give a small value in inverse of R.
-    badpar, = np.where(np.diag(a)==0)
+    badpar, = np.where(np.abs(np.diag(a))<sys.float_info.min)
     if len(badpar)>0:
         a[badpar,badpar] = 1e10
-    ainv = np.linalg.inv(a)
+    try:
+        ainv = np.linalg.inv(a)
+    except:
+        print('inverse problem')
+        import pdb; pdb.set_trace()
     # Fix values
     a[badpar,badpar] = 0  # put values back
     ainv[badpar,badpar] = 0
@@ -57,6 +62,8 @@ def jac_solve(jac,resid,method=None,weight=None):
     ## check if the sample covariance matrix is singular (has determinant of zero)
     # Just check if one entire column is zeros
     badpars, = np.where(np.sum(jac==0,axis=0) == npix)
+    badpars = []
+    usejac = jac
     if len(badpars)>0:
         if len(badpars)==npars:
             raise ValueError('All columns in the Jacobian matrix are zero')
@@ -101,7 +108,7 @@ def qr_jac_solve(jac,resid,weight=None):
     # jac: Jacobian matrix, first derivatives, [Npix, Npars]
     # resid: residuals [Npix]
     # weight: weights, ~1/error**2 [Npix]
-        
+    
     # QR decomposition
     if weight is None:
         q,r = np.linalg.qr(jac)
@@ -112,7 +119,7 @@ def qr_jac_solve(jac,resid,weight=None):
         q,r = np.linalg.qr( jac * weight.reshape(-1,1) )
         rinv = inverse(r)
         dbeta = rinv @ (q.T @ (resid*weight))
-            
+        
     return dbeta
 
 def svd_jac_solve(jac,resid,weight=None):
