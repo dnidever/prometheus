@@ -3,6 +3,9 @@
 #from distutils.core import setup
 from setuptools import setup, find_packages
 
+# Change name to "theprometheus" when you want to
+#  load to PYPI
+#setup(name='theprometheus',
 setup(name='prometheus',
       version='1.0',
       description='PSF Photometry Software',

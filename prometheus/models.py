@@ -2093,6 +2093,28 @@ class PSFBase:
         """ Write a PSF to a file.  Defined by subclass."""
         pass
 
+    def thumbnail(self,filename=None,figsize=6):
+        """ Generate a thumbnail image of the PSF."""
+
+        if filename is None:
+            filename = 'psf.png'
+        if os.path.exists(filename): os.remove(filename)
+
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        font = {'size' : 11}
+        matplotlib.rc('font', **font)
+        fig, ax = plt.subplots(1,1,figsize=(figsize,0.9*figsize))
+        ax1 = ax.imshow(self(),origin='lower')
+        ax.set_xlabel('X (pixels')
+        ax.set_ylabel('Y (pixels')
+        plt.title(str(self))
+        cax = fig.add_axes([ax.get_position().x1+0.01,ax.get_position().y0,0.02,ax.get_position().y1-ax.get_position().y0])
+        fig.colorbar(ax1, cax=cax)
+        plt.savefig(filename,bbox_inches='tight')
+        plt.close(fig)
+    
     
 # PSF Gaussian class
 class PSFGaussian(PSFBase):

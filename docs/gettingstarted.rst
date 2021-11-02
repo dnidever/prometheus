@@ -81,5 +81,5 @@ You can also subtract many stars from an image using the ``sub()`` method.
 
 	# Subtract all stars in a catalog from an image
 	subim = psf.sub(image,starcat)
-
-
+	
+To get a quick thumbnail of the PSF shape with ``psf()``.

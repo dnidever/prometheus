@@ -24,7 +24,7 @@ Description
 ===========
 |Prometheus| has a number of modules to perform photometry.
 
-|Prometheus| can be called from python directly or the command-line script `prometheus` can be used.
+|Prometheus| can be called from python directly or the command-line script ``prometheus`` can be used.
 
 
 Examples
@@ -38,7 +38,7 @@ Examples
 
 prometheus
 ==========
-Here are the various input arguments for command-line script `prometheus`::
+Here are the various input arguments for command-line script ``prometheus``::
 
   usage: prometheus [-h] [-p PSF] [--outfile OUTFILE] [-d OUTDIR] [-l]
                     [--fitradius FITRADIUS] [--norecenter] [-r]
