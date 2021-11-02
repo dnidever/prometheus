@@ -21,7 +21,7 @@ from .ccddata import CCDData
 
 # run PSF fitting on an image
 
-def run(image,psfname='gaussian',fitradius=None,recenter=True,verbose=False):
+def run(image,psfname='gaussian',fitradius=None,recenter=True,reject=False,verbose=False):
     """
     Run PSF photometry on an image.
 
@@ -36,6 +36,8 @@ def run(image,psfname='gaussian',fitradius=None,recenter=True,verbose=False):
        The fitting radius in pixels.  By default the PSF FWHM is used.
     recenter : boolean, optional
        Allow the centroids to be fit.  Default is True.
+    reject : boolean, optional
+       When constructin the PSF, reject PSF stars with high RMS values.  Default is False.
     verbose : boolean, optional
       Verbose output to the screen.  Default is False.
 
@@ -108,10 +110,12 @@ def run(image,psfname='gaussian',fitradius=None,recenter=True,verbose=False):
         print('Step 4: Construct PSF')
     # Make the initial PSF slightly elliptical so it's easier to fit the orientation
     initpsf = models.psfmodel(psfname,[fwhm/2.35,0.9*fwhm/2.35,0.0])
-    psf,psfpars,psfperror,psfcat = getpsf.getpsf(initpsf,image,psfobj,verbose=(verbose>=2))
+    psf,psfpars,psfperror,psfcat = getpsf.getpsf(initpsf,image,psfobj,reject=reject,verbose=(verbose>=2))
     if verbose:
         print('Final PSF: '+str(psf))
-    
+        gd, = np.where(psfcat['reject']==0)
+        print('Median RMS:  %.4f' % np.median(psfcat['rms'][gd]))
+
     # 5) Run on all sources
     #----------------------
     if verbose:

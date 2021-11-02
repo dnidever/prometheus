@@ -24,7 +24,7 @@ import logging
 import time
 import matplotlib
 import sep
-from . import leastsquares as lsq
+from . import leastsquares as lsq,models
 
 # Fit a PSF model to multiple stars in an image
 
@@ -43,7 +43,10 @@ class PSFFitter(object):
         self.nx = nx
         self.ny = ny
         if fitradius is None:
-            fitradius = psf.fwhm()
+            if type(psf)==models.PSFPenny:
+                fitradius = psf.fwhm()*1.5
+            else:
+                fitradius = psf.fwhm()
         self.fitradius = fitradius
         self.nfitpix = int(np.ceil(fitradius))  # +/- nfitpix
         self.starheight = np.zeros(self.nstars,float)
@@ -183,6 +186,10 @@ class PSFFitter(object):
                     if verbose:
                         print('Star '+str(i)+' Refitting all parameters')
                         print([height,xcen,ycen])
+
+                    #pars2,model2,mpars2 = psf.fit(image,[height,x0,y0],nosky=False,niter=5,allpars=True)
+                    #import pdb; pdb.set_trace()
+                        
                 # Only fit height if niter>1
                 #   do it empirically
                 else:
@@ -325,8 +332,6 @@ class PSFFitter(object):
             if retmodel:
                 allim[pixcnt:pixcnt+npix] = m
             pixcnt += npix
-
-        #import pdb; pdb.set_trace()
             
         if retmodel:
             return allim,allderiv
@@ -444,9 +449,7 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,v
             
             # Update the parameters
             oldpar = bestpar.copy()
-            #import pdb; pdb.set_trace()
             bestpar = psf.newpars(bestpar,dbeta,bounds,maxsteps)
-            #bestpar += dbeta
             diff = np.abs(bestpar-oldpar)
             denom = np.abs(oldpar.copy())
             denom[denom==0] = 1.0  # deal with zeros
@@ -458,7 +461,7 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,v
             
             if verbose:
                 print('  ',count+1,bestpar,percdiff,chisq)
-
+                
     # Make the best model
     bestmodel = pf.model(xdata,*bestpar)
     
@@ -568,8 +571,11 @@ def getpsf(psf,image,cat,fitradius=None,method='qr',subnei=False,allcat=None,
 
     # Fitting radius
     if fitradius is None:
-        fitradius = psf.fwhm()
-
+        if type(psf)==models.PSFPenny:
+            fitradius = psf.fwhm()*1.5
+        else:
+            fitradius = psf.fwhm()
+        
     # subnei but no allcat input
     if subnei and allcat is None:
         raise ValueError('allcat is needed for PSF neighbor star subtraction')
@@ -667,4 +673,4 @@ def getpsf(psf,image,cat,fitradius=None,method='qr',subnei=False,allcat=None,
     if verbose:
         print('dt = %.2f sec' % (time.time()-t0))
     
-    return newpsf, pars, perror, psfcat
+    return newpsf, pars, perror, outcat

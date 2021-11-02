@@ -1732,7 +1732,8 @@ class PSFBase:
                 #bestpar += dbeta
                 # Check differences and changes
                 diff = np.abs(bestpar-oldpar)
-                percdiff = diff.copy()/oldpar*100  # percent differences
+                denom = np.maximum(np.abs(oldpar.copy()),0.0001)
+                percdiff = diff.copy()/denom*100  # percent differences
                 percdiff[1:3] = diff[1:3]*100               # x/y
                 maxpercdiff = np.max(percdiff)
                 
@@ -1922,7 +1923,7 @@ class PSFBase:
             if npars-nmpars==4 or npars==4:  # with sky
                 initsteps[3] = pars[3]*0.5          # sky
             # we also have model parameters
-            if npars==nmpars or star==False:
+            if npars>4 or star==False:
                 initsteps[-nmpars:] = self._steps       # model parameters
         # Only model parameters
         else:
@@ -2291,10 +2292,10 @@ class PSFPenny(PSFBase):
     def __init__(self,mpars=None,npix=101,binned=False):
         # mpars = [xsig,ysig,theta, relamp,sigma]
         if mpars is None:
-            mpars = np.array([1.0,1.0,0.0,0.02,5.0])
+            mpars = np.array([1.0,1.0,0.0,0.10,5.0])
         if len(mpars)!=5:
             old = np.array(mpars).copy()
-            mpars = np.array([1.0,1.0,0.0,0.02,5.0])
+            mpars = np.array([1.0,1.0,0.0,0.10,5.0])
             mpars[0:len(old)] = old
         if mpars[0]<=0:
             raise ValueError('sigma must be >0')
@@ -2305,7 +2306,7 @@ class PSFPenny(PSFBase):
         self._bounds = (np.array([0.0,0.0,-np.inf,0.00,0.0]),
                         np.array([np.inf,np.inf,np.inf,1.0,np.inf]))
         # Set step sizes
-        self._steps = np.array([0.5,0.5,0.2,0.1,0.1])
+        self._steps = np.array([0.5,0.5,0.2,0.1,0.5])
         
     def fwhm(self,pars=None):
         """ Return the FWHM of the model."""

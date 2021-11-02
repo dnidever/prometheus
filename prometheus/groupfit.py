@@ -879,7 +879,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
             # Check differences and changes
             diff = np.abs(bestpar-oldpar)
             percdiff = diff.copy()*0
-            percdiff[0::3] = diff[0::3]/oldpar[0::3]*100  # height
+            percdiff[0::3] = diff[0::3]/np.maximum(oldpar[0::3],0.0001)*100  # height
             percdiff[1::3] = diff[1::3]*100               # x
             percdiff[2::3] = diff[2::3]*100               # y
 

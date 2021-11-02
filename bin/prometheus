@@ -27,10 +27,12 @@ if __name__ == "__main__":
     parser.add_argument('files', type=str, nargs='+', help='Images FITS files or list')
     parser.add_argument('-p','--psf', type=str, nargs=1, default='gaussian', help='PSF model type')
     parser.add_argument('--outfile', type=str, nargs=1, default='', help='Output filename')
-    parser.add_argument('--figfile', type=str, nargs=1, default='', help='Figure filename')    
     parser.add_argument('-d','--outdir', type=str, nargs=1, default='', help='Output directory')        
     parser.add_argument('-l','--list', action='store_true', help='Input is a list of FITS files')
-    parser.add_argument('-v','--verbose', action='store_true', help='Verbose output')
+    parser.add_argument('--fitradius', type=str, nargs=1, default=None, help='Fitting radius.  Default is PSF FWHM.')
+    parser.add_argument('--norecenter', action='store_true', help='Do not fit the x/y centroid positions when PSF fitting')
+    parser.add_argument('-r','--reject', action='store_true', help='Reject high RMS PSF stars.')        
+    parser.add_argument('--verbose', type=int, default=0, help='Verbose output')
     parser.add_argument('-t','--timestamp', action='store_true', help='Add timestamp to Verbose output')    
     args = parser.parse_args()
 
@@ -38,7 +40,6 @@ if __name__ == "__main__":
     files = args.files
     psftype = dln.first_el(args.psf)
     inpoutfile = dln.first_el(args.outfile)
-    inpfigfile = dln.first_el(args.figfile)
     outdir = dln.first_el(args.outdir)
     if outdir == '':
         outdir = None
@@ -46,6 +47,9 @@ if __name__ == "__main__":
         if os.path.exists(outdir) is False:
             os.mkdir(outdir)
     verbose = args.verbose
+    fitradius = args.fitradius
+    norecenter = args.norecenter
+    reject = args.reject
     timestamp = args.timestamp    
     inlist = dln.first_el(args.list)
 
@@ -101,7 +105,8 @@ if __name__ == "__main__":
                     print('Image %3d:  %s  ' % (i+1,f))
                     
             # Run Prometheus
-            out, model, sky, psf = pm.run(image,psfname=psftype,verbose=verbose)
+            out, model, sky, psf = pm.run(image,psfname=psftype,fitradius=fitradius,recenter=~norecenter,
+                                          reject=reject,verbose=verbose)
                 
             # Save the output
             if inpoutfile!='':
