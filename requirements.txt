@@ -4,3 +4,4 @@ astropy
 scipy
 photutils
 sep
+dlnpyutils
