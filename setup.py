@@ -5,9 +5,9 @@ from setuptools import setup, find_packages
 
 # Change name to "theprometheus" when you want to
 #  load to PYPI
-#setup(name='theprometheus',
-setup(name='prometheus',
-      version='1.0.2',
+setup(name='theprometheus',
+#setup(name='prometheus',
+      version='1.0.3',
       description='PSF Photometry Software',
       author='David Nidever',
       author_email='dnidever@montana.edu',

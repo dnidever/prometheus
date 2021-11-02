@@ -613,3 +613,9 @@ class BoundingBox(BBox):
 
     def __array__(self):
         return np.array(self.data)
+
+    @property
+    def slices(self):
+        """ Return the slices."""
+        return (slice(self.iymin,self.iymax,None),
+                slice(self.ixmin,self.ixmax,None))
