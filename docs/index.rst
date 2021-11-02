@@ -24,7 +24,7 @@ Description
 ===========
 |Prometheus| has a number of modules to perform photometry.
 
-|Prometheus| can be called from python directly or the command-line script `hofer` can be used.
+|Prometheus| can be called from python directly or the command-line script `prometheus` can be used.
 
 
 Examples
@@ -40,8 +40,9 @@ prometheus
 ==========
 Here are the various input arguments for command-line script `prometheus`::
 
-  usage: prometheus [-h] [--outfile OUTFILE] [--figfile FIGFILE] [-d OUTDIR]
-                    [-l] [-p] [-v] [-t]
+  usage: prometheus [-h] [-p PSF] [--outfile OUTFILE] [-d OUTDIR] [-l]
+                    [--fitradius FITRADIUS] [--norecenter] [-r]
+                    [--verbose VERBOSE] [-t]
                     files [files ...]
 
   Run Prometheus on an image
@@ -51,13 +52,16 @@ Here are the various input arguments for command-line script `prometheus`::
 
   optional arguments:
     -h, --help            show this help message and exit
+    -p PSF, --psf PSF     PSF model type
     --outfile OUTFILE     Output filename
-    --figfile FIGFILE     Figure filename
     -d OUTDIR, --outdir OUTDIR
                           Output directory
     -l, --list            Input is a list of FITS files
-    -p, --plot            Save the plots
-    -v, --verbose         Verbose output
+    --fitradius FITRADIUS
+                          Fitting radius. Default is PSF FWHM.
+    --norecenter          Do not fit the x/y centroid positions when PSF fitting
+    -r, --reject          Reject high RMS PSF stars.
+    --verbose VERBOSE     Verbose output
     -t, --timestamp       Add timestamp to Verbose output
 
 *****

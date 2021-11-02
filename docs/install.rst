@@ -20,4 +20,6 @@ Dependencies
 - scipy
 - astropy
 - matplotlib
-- `dlnpyutils <https://github.com/dnidever/dlnpyutils>`_
+- sep
+- photutils
+- dlnpyutils
