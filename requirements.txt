@@ -5,3 +5,4 @@ scipy
 photutils
 sep
 dlnpyutils
+skimage
