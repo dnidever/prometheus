@@ -14,6 +14,6 @@ setup(name='prometheus',
       url='https://github.com/dnidever/prometheus',
       packages=find_packages(exclude=["tests"]),
       scripts=['bin/prometheus'],
-      requires=['numpy','astropy(>=4.0)','scipy','dlnpyutils','sep','photutils','skimage'],
+      requires=['numpy','astropy(>=4.0)','scipy','dlnpyutils','sep','photutils','scikit-image'],
 #      include_package_data=True,
 )
