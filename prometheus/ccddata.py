@@ -64,7 +64,7 @@ class CCDData(CCD):
 
 
     def __init__(self, data, *args, error=None, bbox=None, gain=None, rdnoise=None, sky=None,
-                 copy=False, skyfunc=None, **kwargs):
+                 copy=False, skyfunc=None, unit=None, **kwargs):
         # Make sure the original version copies all of the input data
         # otherwise bad things will happen when we convert to native byte-order
 
@@ -75,9 +75,13 @@ class CCDData(CCD):
                 args = ()
             else:
                 args = (None,*args[1:])
-        
+
+        # Make sure we have units
+        if unit is None:
+            unit = 'adu'
+                
         # Initialize with the parent...
-        super().__init__(data, *args, copy=copy, **kwargs)
+        super().__init__(data, *args, copy=copy, unit=unit, **kwargs)
 
         # Error
         self._error = error
@@ -119,7 +123,7 @@ class CCDData(CCD):
             self._x = np.arange(bbox.xrange[0],bbox.xrange[-1])
             self._y = None
         elif ndim==2:
-            nx,ny = self.data.shape
+            ny,nx = self.data.shape
             if bbox is None: bbox=BoundingBox(0,nx,0,ny)
             self._bbox = bbox
             self._x = np.arange(bbox.xrange[0],bbox.xrange[-1])
@@ -244,7 +248,12 @@ class CCDData(CCD):
                     new._y = None
             # 2-D output
             else:
-                new._bbox = BoundingBox(newx[0],newx[-1]+1,newy[0],newy[-1]+1)
+                try:
+                    new._bbox = BoundingBox(newx[0],newx[-1]+1,newy[0],newy[-1]+1)
+                except:
+                    print('slicing problem')
+                    import pdb; pdb.set_trace()
+                
                 new._x = newx
                 new._y = newy
 

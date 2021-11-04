@@ -109,6 +109,14 @@ def sepdetect(image,nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,
     objects['fwhm'] = np.sqrt(objects['a']*objects['b'])*2.35
     objects['flag'].name = 'flags'
 
+    # Make sure theta's are between -90 and +90 deg (in radians)
+    hi = objects['theta']>0.5*np.pi
+    if np.sum(hi)>0:
+        objects['theta'][hi] -= np.pi
+    lo = objects['theta']<-0.5*np.pi    
+    if np.sum(lo)>0:
+        objects['theta'][lo] += np.pi
+        
     if segmentation_map:
         return objects,segmap
     else:

@@ -361,6 +361,93 @@ class GroupFitter(object):
         self.freezepars = np.zeros(self.nstars*3,bool)
         self.resflatten = self.imflatten.copy()
 
+
+    def mkbounds(self,pars,imshape,xoff=10):
+        """ Make bounds for a set of input parameters."""
+        # is [height1,xcen1,ycen1,height2,xcen2,ycen2, ...]
+
+        npars = len(pars)
+        ny,nx = imshape
+        
+        # Make bounds
+        lbounds = np.zeros(npars,float)
+        ubounds = np.zeros(npars,float)
+        lbounds[0::3] = 0
+        lbounds[1::3] = np.maximum(pars[1::3]-xoff,0)
+        lbounds[2::3] = np.maximum(pars[2::3]-xoff,0)
+        ubounds[0::3] = np.inf
+        ubounds[1::3] = np.maximum(pars[1::3]+xoff,nx-1)
+        ubounds[2::3] = np.maximum(pars[2::3]+xoff,ny-1)
+            
+        bounds = (lbounds,ubounds)
+                 
+        return bounds
+
+    def checkbounds(self,pars,bounds):
+        """ Check the parameters against the bounds."""
+        # 0 means it's fine
+        # 1 means it's beyond the lower bound
+        # 2 means it's beyond the upper bound
+        npars = len(pars)
+        lbounds,ubounds = bounds
+        check = np.zeros(npars,int)
+        check[pars<=lbounds] = 1
+        check[pars>=ubounds] = 2
+        return check
+        
+    def limbounds(self,pars,bounds):
+        """ Limit the parameters to the boundaries."""
+        lbounds,ubounds = bounds
+        outpars = np.minimum(np.maximum(pars,lbounds),ubounds)
+        return outpars
+
+    def limsteps(self,steps,maxsteps):
+        """ Limit the parameter steps to maximum step sizes."""
+        signs = np.sign(steps)
+        outsteps = np.minimum(np.abs(steps),maxsteps)
+        outsteps *= signs
+        return outsteps
+
+    def steps(self,pars,bounds=None,dx=0.2):
+        """ Return step sizes to use when fitting the stellar parameters."""
+        npars = len(pars)
+        fsteps = np.zeros(npars,float)
+        fsteps[0::3] = np.maximum(np.abs(pars[0::3])*0.25,1)
+        fsteps[1::3] = dx        
+        fsteps[2::3] = dx        
+        return fsteps
+        
+    def newpars(self,pars,steps,bounds,maxsteps):
+        """ Get new parameters given initial parameters, steps and constraints."""
+
+        # Limit the steps to maxsteps
+        limited_steps = self.limsteps(steps,maxsteps)
+        # Make sure that these don't cross the boundaries
+        lbounds,ubounds = bounds
+        check = self.checkbounds(pars+limited_steps,bounds)
+        # Reduce step size for any parameters to go beyond the boundaries
+        badpars = (check!=0)
+        # reduce the step sizes until they are within bounds
+        newsteps = limited_steps.copy()
+        count = 0
+        maxiter = 2
+        while (np.sum(badpars)>0 and count<=maxiter):
+            newsteps[badpars] /= 2
+            newcheck = self.checkbounds(pars+newsteps,bounds)
+            badpars = (newcheck!=0)
+            count += 1
+            
+        # Final parameters
+        newpars = pars + newsteps
+            
+        # Make sure to limit them to the boundaries
+        check = self.checkbounds(newpars,bounds)
+        badpars = (check!=0)
+        if np.sum(badpars)>0:
+            # add a tiny offset so it doesn't fit right on the boundary
+            newpars = np.minimum(np.maximum(newpars,lbounds+1e-30),ubounds-1e-30)
+        return newpars
+    
     @property
     def modelim(self):
         """ This returns the full image of the current best model (no sky)
@@ -798,6 +885,9 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     initpar[1::3] = cat['x']
     initpar[2::3] = cat['y']
 
+    # Make bounds
+    bounds = gf.mkbounds(initpar,image.shape)    
+    
     if np.sum(~np.isfinite(initpar))>0:
         print('non finite values')
         import pdb; pdb.set_trace()
@@ -835,6 +925,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
         maxpercdiff = 1e10
         bestpar = initpar.copy()
         npars = len(bestpar)
+        maxsteps = gf.steps(gf.pars,bounds)  # maximum steps
         while (gf.niter<maxiter and maxpercdiff>minpercdiff):
             start0 = time.time()
 
@@ -848,8 +939,11 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
                 # Weights
                 wt = 1/gf.errflatten[gf.usepix]**2
                 # Solve Jacobian
-                dbeta = lsq.jac_solve(jac,dy,method=method,weight=wt)
-                dbeta[~np.isfinite(dbeta)] = 0.0  # deal with NaNs, shouldn't happen
+                dbeta_free = lsq.jac_solve(jac,dy,method=method,weight=wt)
+                dbeta_free[~np.isfinite(dbeta_free)] = 0.0  # deal with NaNs, shouldn't happen
+                dbeta = np.zeros(len(gf.pars),float)
+                dbeta[gf.freepars] = dbeta_free
+                
                 
             #  htcen, crowdsource method of solving heights/fluxes first
             #      and then centroiding to get x/y
@@ -871,18 +965,19 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
                 for count,i in enumerate(freestars):
                     freepars1 = gf.freepars[i*3:(i+1)*3]
                     freepars[count*3:(count+1)*3] = freepars1
-                dbeta = dbeta[freepars]
+                dbeta_free = dbeta[freepars]
 
             # Update parameters
             oldpar = bestpar.copy()
-            bestpar += dbeta
+            bestpar_all = gf.newpars(gf.pars,dbeta,bounds,maxsteps)
+            bestpar = bestpar_all[gf.freepars]
             # Check differences and changes
             diff = np.abs(bestpar-oldpar)
             percdiff = diff.copy()*0
             percdiff[0::3] = diff[0::3]/np.maximum(oldpar[0::3],0.0001)*100  # height
             percdiff[1::3] = diff[1::3]*100               # x
             percdiff[2::3] = diff[2::3]*100               # y
-
+            
             # Freeze parameters/stars that converged
             #  also subtract models of fixed stars
             #  also return new free parameters
@@ -923,6 +1018,11 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
 
             gf.niter += 1     # increment counter
 
+
+    bad, = np.where((gf.pars[0::3]>1e10) | (gf.pars[1::3]<-1) | (gf.pars[1::3]>3390) | (gf.pars[2::3]<-1) | (gf.pars[2::3]>2710))
+    if len(bad)>0:
+        import pdb; pdb.set_trace()
+            
     # Check that all starniter are set properly
     #  if we stopped "prematurely" then not all stars were frozen
     #  and didn't have starniter set

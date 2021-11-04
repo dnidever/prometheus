@@ -37,7 +37,7 @@ from photutils.psf.groupstars import DAOGroup
 
 def cutoutbbox(image,psf,cat):
     """ Get image cutout that covers that catalog of stars."""
-    nx,ny = image.shape
+    ny,nx = image.shape
     hpsfpix = psf.npix//2
     xmin = np.min(cat['x'])
     xmax = np.max(cat['x'])
@@ -115,7 +115,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
         raise ValueError('Only cholesky, svd, qr, sparse, htcen or curve_fit methods currently supported')
         
     nstars = np.array(cat).size
-    nx,ny = image.data.shape
+    ny,nx = image.data.shape
     
     # Groups
     if 'group_id' not in cat.keys():
@@ -203,6 +203,10 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
         outcat['group_id'] = grp
         outcat['ngroup'] = nind
         outcat = Table(outcat)
+
+        bad, = np.where((out['height']>1e10) | (out['x']<-1) | (out['x']>3390) | (out['y']<-1) | (out['y']>2710))
+        if len(bad)>0:
+            import pdb; pdb.set_trace()
         
     if verbose:
         print('dt = ',time.time()-start)

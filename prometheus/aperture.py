@@ -53,10 +53,19 @@ def aperphot(image,objects,aper=[3],gain=None,mag_zeropoint=25.0):
         outcat['mag_aper'+str(i+1)] = -2.5*np.log10(apflux)+mag_zeropoint
         outcat['magerr_aper'+str(i+1)] = (2.5/np.log(10))*(apfluxerr/apflux)  
         outcat['flag_aper'+str(i+1)] = apflag
-    
+
+    # Make sure theta's are between -pi/2 and +pi/2 radians
+    theta = objects['theta'].copy()
+    hi = theta>0.5*np.pi
+    if np.sum(hi)>0:
+        theta[hi] -= np.pi
+    lo = theta<-0.5*np.pi    
+    if np.sum(lo)>0:
+        theta[lo] += np.pi
+        
     # FLUX_AUTO
     kronrad, krflag = sep.kron_radius(data_sub, outcat['x'], outcat['y'], outcat['a'],
-                                      outcat['b'], outcat['theta'], 6.0, mask=mask)
+                                      outcat['b'], theta, 6.0, mask=mask)
 
     # Add more columns
     outcat['flux_auto'] = 0.0
@@ -76,9 +85,9 @@ def aperphot(image,objects,aper=[3],gain=None,mag_zeropoint=25.0):
     nuse_circle = np.sum(use_circle)
     # Elliptical aperture
     if nuse_ellipse>0:
-        flux, fluxerr, flag = sep.sum_ellipse(data_sub, outcat['x'][~use_circle], outcat['y'][~use_circle],
-                                              outcat['a'][~use_circle],outcat['b'][~use_circle],
-                                              outcat['theta'][~use_circle], 2.5*kronrad[~use_circle],
+        flux, fluxerr, flag = sep.sum_ellipse(data=data_sub, x=outcat['x'][~use_circle], y=outcat['y'][~use_circle],
+                                              a=outcat['a'][~use_circle],b=outcat['b'][~use_circle],
+                                              theta=outcat['theta'][~use_circle], r=2.5*kronrad[~use_circle],
                                               subpix=1, err=error, mask=mask)
         flag |= krflag[~use_circle]  # combine flags into 'flag'
         outcat['flux_auto'][~use_circle] = flux

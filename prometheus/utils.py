@@ -58,7 +58,7 @@ def estimatefwhm(objects,verbose=False):
 
     return medfwhm
 
-def neighbors(objects,nnei=1,max_dist=50):
+def neighbors(objects,nnei=1):
     """ Find the closest neighbors to a star."""
 
     # Returns distance and index of closest neighbor
@@ -67,7 +67,7 @@ def neighbors(objects,nnei=1,max_dist=50):
     X = np.vstack((objects['x'].data,objects['y'].data)).T
     kdt = cKDTree(X)
     # Get distance for 2 closest neighbors
-    dist, ind = kdt.query(X, k=nnei+1, distance_upper_bound=max_dist)
+    dist, ind = kdt.query(X, k=nnei+1)
     # closest neighbor is always itself, remove it
     dist = dist[:,1:]
     ind = ind[:,1:]
