@@ -1,6 +1,6 @@
 __all__ = ["models","getpsf","synth","groupfit","leastsquares","allfit",
            "ccddata","detection","aperture","sky","prometheus","utils"]
-__version__ = '1.0.5'
+__version__ = '1.0.6'
 
 from .ccddata import CCDData
 from prometheus import prometheus as pm
