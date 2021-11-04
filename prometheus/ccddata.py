@@ -581,6 +581,8 @@ class CCDData(CCD):
         w = WCS(head)
         # Units
         unit = head.get('bunit')
+        if unit=='ADU':
+            unit = 'adu'
         if unit is None:
             unit = 'adu'
         # make the ccddata object
