@@ -21,7 +21,8 @@ from .ccddata import CCDData
 
 # run PSF fitting on an image
 
-def run(image,psfname='gaussian',fitradius=None,recenter=True,reject=False,verbose=False):
+def run(image,psfname='gaussian',psffitradius=None,fitradius=None,
+        recenter=True,reject=False,verbose=False):
     """
     Run PSF photometry on an image.
 
@@ -32,8 +33,12 @@ def run(image,psfname='gaussian',fitradius=None,recenter=True,reject=False,verbo
     psfname : string, optional
       The name of the PSF type to use.  The options are "gaussian", "moffat",
       "penny" and "gausspow".  Default is "gaussian".
+    psffitradius : float, optional
+       The fitting readius when constructing the PSF (in pixels).  By default
+          the FWHM is used.
     fitradius: float, optional
-       The fitting radius in pixels.  By default the PSF FWHM is used.
+       The fitting radius when fitting the PSF to the stars in the image (in pixels).
+         By default the PSF FWHM is used.
     recenter : boolean, optional
        Allow the centroids to be fit.  Default is True.
     reject : boolean, optional
@@ -110,7 +115,8 @@ def run(image,psfname='gaussian',fitradius=None,recenter=True,reject=False,verbo
         print('Step 4: Construct PSF')
     # Make the initial PSF slightly elliptical so it's easier to fit the orientation
     initpsf = models.psfmodel(psfname,[fwhm/2.35,0.9*fwhm/2.35,0.0])
-    psf,psfpars,psfperror,psfcat = getpsf.getpsf(initpsf,image,psfobj,reject=reject,verbose=(verbose>=2))
+    psf,psfpars,psfperror,psfcat = getpsf.getpsf(initpsf,image,psfobj,fitradius=psffitradius,
+                                                 reject=reject,verbose=(verbose>=2))
     if verbose:
         print('Final PSF: '+str(psf))
         gd, = np.where(psfcat['reject']==0)

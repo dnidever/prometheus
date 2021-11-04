@@ -29,7 +29,8 @@ if __name__ == "__main__":
     parser.add_argument('--outfile', type=str, nargs=1, default='', help='Output filename')
     parser.add_argument('-d','--outdir', type=str, nargs=1, default='', help='Output directory')        
     parser.add_argument('-l','--list', action='store_true', help='Input is a list of FITS files')
-    parser.add_argument('--fitradius', type=str, nargs=1, default=None, help='Fitting radius.  Default is PSF FWHM.')
+    parser.add_argument('--psffitradius', type=str, nargs=1, default=None, help='Fitting radius when constructing PSF.  Default is PSF FWHM.')
+    parser.add_argument('--fitradius', type=str, nargs=1, default=None, help='Fitting radius of stars in image.  Default is PSF FWHM.')    
     parser.add_argument('--norecenter', action='store_true', help='Do not fit the x/y centroid positions when PSF fitting')
     parser.add_argument('-r','--reject', action='store_true', help='Reject high RMS PSF stars.')        
     parser.add_argument('--verbose', type=int, default=0, help='Verbose output')
@@ -47,7 +48,8 @@ if __name__ == "__main__":
         if os.path.exists(outdir) is False:
             os.mkdir(outdir)
     verbose = args.verbose
-    fitradius = args.fitradius
+    psffitradius = args.psffitradius
+    fitradius = args.fitradius    
     norecenter = args.norecenter
     reject = args.reject
     timestamp = args.timestamp    
@@ -105,8 +107,8 @@ if __name__ == "__main__":
                     print('Image %3d:  %s  ' % (i+1,f))
                     
             # Run Prometheus
-            out, model, sky, psf = pm.run(image,psfname=psftype,fitradius=fitradius,recenter=~norecenter,
-                                          reject=reject,verbose=verbose)
+            out, model, sky, psf = pm.run(image,psfname=psftype,psffitradius=psffitradius,fitradius=fitradius,
+                                          recenter=~norecenter,reject=reject,verbose=verbose)
                 
             # Save the output
             if inpoutfile!='':
