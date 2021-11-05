@@ -885,8 +885,9 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     initpar[0::3] = gf.starheight
     initpar[1::3] = cat['x']
     initpar[2::3] = cat['y']
-
+        
     # Make bounds
+    #  this requires all 3*Nstars parameters to be input
     bounds = gf.mkbounds(initpar,image.shape)    
         
     # Curve_fit
@@ -917,12 +918,17 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
         
     # All other fitting methods
     else:
+
         # Iterate
+        bestpar_all = initpar.copy()        
+        # centroids fixed, only keep heights
+        if recenter==False:
+            initpar = initpar[0::3]
         gf.niter = 0
         maxpercdiff = 1e10
         bestpar = initpar.copy()
         npars = len(bestpar)
-        maxsteps = gf.steps(gf.pars,bounds)  # maximum steps
+        maxsteps = gf.steps(gf.pars,bounds)  # maximum steps, requires all 3*Nstars parameters
         while (gf.niter<maxiter and maxpercdiff>minpercdiff):
             start0 = time.time()
 
@@ -940,8 +946,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
                 dbeta_free[~np.isfinite(dbeta_free)] = 0.0  # deal with NaNs, shouldn't happen
                 dbeta = np.zeros(len(gf.pars),float)
                 dbeta[gf.freepars] = dbeta_free
-                
-                
+                                
             #  htcen, crowdsource method of solving heights/fluxes first
             #      and then centroiding to get x/y
             else:
@@ -966,14 +971,16 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
 
             # Update parameters
             oldpar = bestpar.copy()
+            oldpar_all = bestpar_all.copy()
             bestpar_all = gf.newpars(gf.pars,dbeta,bounds,maxsteps)
             bestpar = bestpar_all[gf.freepars]
             # Check differences and changes
-            diff = np.abs(bestpar-oldpar)
-            percdiff = diff.copy()*0
-            percdiff[0::3] = diff[0::3]/np.maximum(oldpar[0::3],0.0001)*100  # height
-            percdiff[1::3] = diff[1::3]*100               # x
-            percdiff[2::3] = diff[2::3]*100               # y
+            diff_all = np.abs(bestpar_all-oldpar_all)
+            percdiff_all = diff_all.copy()*0
+            percdiff_all[0::3] = diff_all[0::3]/np.maximum(oldpar_all[0::3],0.0001)*100  # height
+            percdiff_all[1::3] = diff_all[1::3]*100               # x
+            percdiff_all[2::3] = diff_all[2::3]*100               # y
+            percdiff = percdiff_all[gf.freepars]
             
             # Freeze parameters/stars that converged
             #  also subtract models of fixed stars

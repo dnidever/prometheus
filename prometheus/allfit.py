@@ -172,13 +172,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
         # Single Star
         if nind==1:
             inpcat = [inpcat['height'][0],inpcat['x'][0],inpcat['y'][0]]            
-            if recenter==False:
-                # set the bounds so only height is fit
-                bounds = ([0.0,inpcat[1]-1e-7,inpcat[2]-1e-7],
-                          [np.inf,inpcat[1]+1e-7,inpcat[2]+1e-7])
-            else:
-                bounds = None
-            out,model = psf.fit(resid,inpcat,niter=3,verbose=verbose,retfullmodel=True,bounds=bounds)
+            out,model = psf.fit(resid,inpcat,niter=3,verbose=verbose,retfullmodel=True,recenter=recenter)
             model.data -= out['sky']   # remove sky
             outmodel.data[model.bbox.slices] += model.data
             outsky.data[model.bbox.slices] = out['sky']

@@ -1527,7 +1527,7 @@ class PSFBase:
     
     def fit(self,im,pars,niter=2,radius=None,allpars=False,method='qr',nosky=False,
             minpercdiff=0.5,absolute=False,retpararray=False,retfullmodel=False,
-            bounds=None,verbose=False):
+            recenter=True,bounds=None,verbose=False):
         """
         Method to fit a single star using the PSF model.
 
@@ -1563,6 +1563,8 @@ class PSFBase:
               as a catalog.
         retfullmodel : boolean, optional
             Return model over the full PSF region.  Default is False.
+        recenter : boolean, optional
+            Allow the centroids to be fit.  Default is True.
         bounds : list, optional
             Input lower and upper bounds/constraints on the fitting parameters (tuple of two
               lists (e.g., ([height_lo,x_low,y_low],[height_hi,x_hi,y_hi])).
@@ -1628,7 +1630,7 @@ class PSFBase:
             inbounds = copy.deepcopy(bounds)
         else:
             inbounds = None
-        
+            
         # Image offset for absolute X/Y coordinates
         if absolute:
             imx0 = im.bbox.xrange[0]
@@ -1690,7 +1692,13 @@ class PSFBase:
         # Make bounds
         if bounds is None:
             bounds = self.mkbounds(initpar,flux.shape)
-        
+        # Not fitting centroids
+        if recenter==False:
+            bounds[0][1] = initpar[1]-1e-7
+            bounds[0][2] = initpar[2]-1e-7
+            bounds[1][1] = initpar[1]+1e-7
+            bounds[1][2] = initpar[2]+1e-7
+            
         # Curve_fit
         if method=='curve_fit':
             self.niter = 0
@@ -1740,7 +1748,7 @@ class PSFBase:
                 maxpercdiff = np.max(percdiff)
                 
                 if verbose:
-                    print('N = '+str(count))
+                    print('N = '+str(ount))
                     print('bestpars = '+str(bestpar))
                     print('dbeta = '+str(dbeta))
                 
