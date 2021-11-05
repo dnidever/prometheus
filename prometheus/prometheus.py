@@ -25,8 +25,8 @@ except ImportError:
     import builtins # Python 3
     
 # run PSF fitting on an image
-def run(image,psfname='gaussian',psffitradius=None,fitradius=None,binned=False,
-        iterdet=0,recenter=True,reject=False,timestamp=False,verbose=False):
+def run(image,psfname='gaussian',psffitradius=None,fitradius=None,npsfpix=51,binned=False,
+        lookup=False,lorder=0,iterdet=0,recenter=True,reject=False,timestamp=False,verbose=False):
     """
     Run PSF photometry on an image.
 
@@ -46,9 +46,15 @@ def run(image,psfname='gaussian',psffitradius=None,fitradius=None,binned=False,
     fitradius: float, optional
        The fitting radius when fitting the PSF to the stars in the image (in pixels).
          By default the PSF FWHM is used.
+    npsfpix : int, optional
+       The size of the PSF footprint.  Default is 51.
     binned : boolean, optional
        Use a binned model that integrates the analytical function across a pixel.
          Default is false.
+    lookup : boolean, optional
+        Use an empirical lookup table.  Default is False.
+    lorder : int, optional
+       The order of the spatial variations (0=constant, 1=linear).  Default is 0.
     recenter : boolean, optional
        Allow the centroids to be fit.  Default is True.
     reject : boolean, optional
@@ -127,7 +133,8 @@ def run(image,psfname='gaussian',psffitradius=None,fitradius=None,binned=False,
 
 
         # 3) Construct the PSF
-        #-----------------
+        #---------------------        
+        #  only on first iteration
         if niter==0:
             if verbose:
                 print('Step 3: Construct the PSF')
@@ -142,9 +149,10 @@ def run(image,psfname='gaussian',psffitradius=None,fitradius=None,binned=False,
             # 3c) Construct the PSF iteratively
             #---------------------------------
             # Make the initial PSF slightly elliptical so it's easier to fit the orientation
-            initpsf = models.psfmodel(psfname,[fwhm/2.35,0.9*fwhm/2.35,0.0],binned=binned)
+            initpsf = models.psfmodel(psfname,[fwhm/2.35,0.9*fwhm/2.35,0.0],binned=binned,npix=npsfpix)
             psf,psfpars,psfperror,psfcat = getpsf.getpsf(initpsf,image,psfobj,fitradius=psffitradius,
-                                                         reject=reject,verbose=(verbose>=2))
+                                                         lookup=lookup,lorder=lorder,reject=reject,
+                                                         verbose=(verbose>=2))
             if verbose:
                 print('Final PSF: '+str(psf))
                 gd, = np.where(psfcat['reject']==0)

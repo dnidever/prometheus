@@ -1204,6 +1204,7 @@ class PSFBase:
         self.niter = 0
         self._bounds = None
         self._unitfootflux = None  # unit flux in footprint
+        self.lookup = False
         
         # add a precomputed circular mask here to mask out the corners??
 
@@ -1275,7 +1276,8 @@ class PSFBase:
         y = dy.reshape(-1,1)+np.zeros(nxpix,int)     
         return x,y
         
-    def __call__(self,x=None,y=None,pars=None,mpars=None,bbox=None,deriv=False,**kwargs):
+    def __call__(self,x=None,y=None,pars=None,mpars=None,bbox=None,nolookup=False,
+                 deriv=False,**kwargs):
         """
         Generate a model PSF for the input X/Y value and parameters.  If no inputs
         are given, then a postage stamp PSF image is returned.
@@ -1301,6 +1303,8 @@ class PSFBase:
         binned : boolean, optional
             Sum the flux across a pixel.  This is normally set when the PSF
             object is initialized, but can be modified directly in the call.
+        nolookup : boolean, optional
+            Do not use the lookup table if there is one.  Default is False.
 
         Returns
         -------
@@ -1352,6 +1356,11 @@ class PSFBase:
         # Evaluate
         out = self.evaluate(x,y,inpars,deriv=deriv,**kwargs)
 
+        # Add the lookup component
+        if self.lookup and nolookup==False:
+            lumodel = self.call_lookup(x,y,inpars[0])
+            out += lumodel
+            
         # Mask any corner pixels
         rr = np.sqrt((x-inpars[1])**2+(y-inpars[2])**2)
         out[rr>self.radius] = 0
@@ -1884,10 +1893,10 @@ class PSFBase:
                     
     
     def __str__(self):
-        return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+')'
+        return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+',lookup='+str(self.lookup)+')'
 
     def __repr__(self):
-        return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+')'        
+        return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+',lookup='+str(self.lookup)+')'        
 
     @property
     def unitfootflux(self):
@@ -2079,6 +2088,27 @@ class PSFBase:
         """ Create a new copy of this LSF object."""
         return copy.deepcopy(self)        
 
+    def lookup_relcoord(self,x,y):
+        """ Convert absolute X/Y coordinates to relative ones to use
+             with the lookup table."""
+        relx = (x-self._lookup_midpt[1])/self._lookup_shape[1]*2
+        rely = (y-self_lookup_midpt[0])/self._lookup_shape[0]*2
+        return relx,rely
+
+    def call_lookup(self,x,y,amplitude):
+        """ Calculate the lookup component of the PSF."""
+        if self.lookup==False:
+            raise ValueError('There is not lookup table for this PSF')
+        relx,rely = self.lookup_relcoord(x,y)
+        # interpolate using spline functions
+        model1 = np.zeros(x.shape,float)
+        for i in range(len(self._lookup_interp)):
+            f = self._lookup_interp[i]
+            model += f(rely,relx)
+        # Now Scale by height
+        model *= amplitude
+        return model
+    
     @classmethod
     def read(cls,filename):
         """ Load a PSF file."""
