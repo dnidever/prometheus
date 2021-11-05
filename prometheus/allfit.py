@@ -29,7 +29,7 @@ import sep
 from photutils.aperture import CircularAnnulus
 from astropy.stats import sigma_clipped_stats
 from . import leastsquares as lsq
-from . import groupfit
+from . import groupfit,utils
 from .ccddata import CCDData,BoundingBox
 from photutils.psf.groupstars import DAOGroup
 
@@ -102,6 +102,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
 
     """
 
+    print = utils.getprintfunc() # Get print function to be used locally, allows for easy logging       
     start = time.time()
     
     # Check input catalog
@@ -209,6 +210,6 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
             import pdb; pdb.set_trace()
         
     if verbose:
-        print('dt = ',time.time()-start)
+        print('dt = %.2f sec' % (time.time()-start))
     
     return outcat,outmodel,outsky

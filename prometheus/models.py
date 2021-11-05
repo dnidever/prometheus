@@ -22,7 +22,7 @@ import copy
 import logging
 import time
 import matplotlib
-from . import getpsf
+from . import getpsf, utils
 from .ccddata import BoundingBox,CCDData
 from . import leastsquares as lsq
 
@@ -1598,6 +1598,8 @@ class PSFBase:
 
 
         """
+
+        print = utils.getprintfunc() # Get print function to be used locally, allows for easy logging   
         
         # PARS: initial guesses for Xo and Yo parameters.
         if isinstance(pars,Table):
@@ -1738,9 +1740,9 @@ class PSFBase:
                 maxpercdiff = np.max(percdiff)
                 
                 if verbose:
-                    print('N = ',count)
-                    print('bestpars = ',bestpar)
-                    print('dbeta = ',dbeta)
+                    print('N = '+str(count))
+                    print('bestpars = '+str(bestpar))
+                    print('dbeta = '+str(dbeta))
                 
                 count += 1
 
@@ -2412,10 +2414,10 @@ class PSFGausspow(PSFBase):
     def __init__(self,mpars=None,npix=101,binned=False):
         # mpars = [sigx,sigy,sigxy,beta4,beta6]
         if mpars is None:
-            mpars = np.array([1.0,2.5,2.5,0.0,1.0,1.0])
+            mpars = np.array([2.5,2.5,0.0,1.0,1.0])
         if len(mpars)!=5:
             old = np.array(mpars).copy()
-            mpars = np.array([1.0,2.5,2.5,0.0,1.0,1.0])
+            mpars = np.array([2.5,2.5,0.0,1.0,1.0])
             mpars[0:len(old)] = old
         if mpars[0]<=0 or mpars[1]<=0:
             raise ValueError('sigma parameters must be >0')        

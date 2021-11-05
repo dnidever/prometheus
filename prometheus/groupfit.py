@@ -28,7 +28,7 @@ import matplotlib
 import sep
 from photutils.aperture import CircularAnnulus
 from astropy.stats import sigma_clipped_stats
-from . import leastsquares as lsq
+from . import leastsquares as lsq,utils
 from .ccddata import CCDData,BoundingBox
 
 # Fit a PSF model to multiple stars in an image
@@ -843,6 +843,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     """
 
     start = time.time()
+    print = utils.getprintfunc() # Get print function to be used locally, allows for easy logging   
     
     # Check input catalog
     for n in ['x','y']:
@@ -887,11 +888,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
 
     # Make bounds
     bounds = gf.mkbounds(initpar,image.shape)    
-    
-    if np.sum(~np.isfinite(initpar))>0:
-        print('non finite values')
-        import pdb; pdb.set_trace()
-    
+        
     # Curve_fit
     #   dealt with separately
     if method=='curve_fit':
@@ -987,9 +984,9 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
                 bestpar = gf.freeze(bestpar,frzpars)
                 npar = len(bestpar)
                 if verbose:
-                    print('Nfrozen pars = ',gf.nfreezepars)
-                    print('Nfrozen stars = ',gf.nfreezestars)
-                    print('Nfree pars = ',npar)
+                    print('Nfrozen pars = '+str(gf.nfreezepars))
+                    print('Nfrozen stars = '+str(gf.nfreezestars))
+                    print('Nfree pars = '+str(npar))
             else:
                 gf.pars = bestpar            
             maxpercdiff = np.max(percdiff)
@@ -1002,11 +999,11 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
                 gf.chisq = chisq
               
             if verbose:
-                print('Iter = ',gf.niter)
-                print('Pars = ',gf.pars)
-                print('Percent diff = ',percdiff)
-                print('Diff = ',diff)
-                print('chisq = ',chisq)
+                print('Iter = '+str(gf.niter))
+                print('Pars = '+str(gf.pars))
+                print('Percent diff = '+str(percdiff))
+                print('Diff = '+str(diff))
+                print('chisq = '+str(chisq))
                 
             # Re-estimate the sky
             if gf.niter % reskyiter == 0:
@@ -1014,7 +1011,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
                 gf.sky()
 
             if verbose:
-                print('iter dt = ',time.time()-start0)
+                print('iter dt =  %.2f sec' % (time.time()-start0))
 
             gf.niter += 1     # increment counter
 
@@ -1040,8 +1037,8 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
         
     pars = gf.pars
     if verbose:
-        print('Best-fitting parameters: ',pars)
-        print('Errors: ',perror)
+        print('Best-fitting parameters: '+str(pars))
+        print('Errors: '+str(perror))
 
         
     # Put in catalog
@@ -1091,6 +1088,6 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
         cat['y'] += imy0        
 
     if verbose:
-        print('dt = ',time.time()-start)
+        print('dt = %.2f sec' % (time.time()-start))        
     
     return outcat,model,gf.skyim

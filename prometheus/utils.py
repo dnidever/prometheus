@@ -20,6 +20,28 @@ from scipy.spatial import cKDTree
 from . import detection, models, getpsf, allfit
 from .ccddata import CCDData
 
+try:
+    import __builtin__ as builtins # Python 2
+except ImportError:
+    import builtins # Python 3
+        
+# Ignore these warnings, it's a bug
+warnings.filterwarnings("ignore", message="numpy.dtype size changed")
+warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
+
+def getprintfunc(inplogger=None):
+    """ Allows you to modify print() locally with a logger."""
+    
+    # Input logger
+    if inplogger is not None:
+        return inplogger.info  
+    # Check if a global logger is defined
+    elif hasattr(builtins,"logger"):
+        return builtins.logger.info
+    # Return the buildin print function
+    else:
+        return builtins.print
+
 def splitfilename(filename):
     """ Split filename into directory, base and extensions."""
     fdir = os.path.dirname(filename)
@@ -35,6 +57,8 @@ def splitfilename(filename):
 def estimatefwhm(objects,verbose=False):
     """ Estimate FWHM using objects."""
 
+    print = getprintfunc() # Get print function to be used locally, allows for easy logging   
+    
     # Check that we have all of the columns that we need
     for f in ['mag_auto','magerr_auto','flags','fwhm']:
         if f not in objects.colnames:
@@ -80,6 +104,8 @@ def neighbors(objects,nnei=1):
 def pickpsfstars(objects,fwhm,nstars=100,logger=None,verbose=False):
     """ Pick PSF stars."""
 
+    print = getprintfunc() # Get print function to be used locally, allows for easy logging   
+    
     # -morph cuts
     # -magnitude limit (good S/N but not too bright due to saturation)
     # -no bad pixels in footprint

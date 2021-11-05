@@ -24,7 +24,7 @@ import logging
 import time
 import matplotlib
 import sep
-from . import leastsquares as lsq,models
+from . import leastsquares as lsq,models,utils
 
 # Fit a PSF model to multiple stars in an image
 
@@ -134,7 +134,7 @@ class PSFFitter(object):
         # input the model parameters
         
         if self.verbose:
-            print('model: ',self.niter,args)
+            print('model: '+str(self.niter)+' '+str(args))
         
         psf = self.psf.copy()
         psf._params = list(args)
@@ -185,7 +185,7 @@ class PSFFitter(object):
                     model = psf(x,y,pars=[height,xcen,ycen])
                     if verbose:
                         print('Star '+str(i)+' Refitting all parameters')
-                        print([height,xcen,ycen])
+                        print(str([height,xcen,ycen]))
 
                     #pars2,model2,mpars2 = psf.fit(image,[height,x0,y0],nosky=False,niter=5,allpars=True)
                     #import pdb; pdb.set_trace()
@@ -228,7 +228,7 @@ class PSFFitter(object):
 
                     if verbose:
                         print('Star '+str(i)+' Refitting height empirically')
-                        print(height)
+                        print(str(height))
                         
                     #if i==1: print(height)
                     #if self.niter==2:
@@ -268,7 +268,7 @@ class PSFFitter(object):
         # input the model parameters
 
         if self.verbose:
-            print('jac: ',self.niter,args)
+            print('jac: '+str(self.niter)+' '+str(args))
         
         psf = self.psf.copy()
         psf._params = list(args)
@@ -408,7 +408,8 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,v
     """
 
     t0 = time.time()
-
+    print = utils.getprintfunc() # Get print function to be used locally, allows for easy logging   
+    
     # Fitting the PSF to the stars
     #-----------------------------
     pf = PSFFitter(psf,image,cat,fitradius=fitradius,verbose=False) #verbose)
@@ -429,7 +430,7 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,v
         count = 0
         percdiff = 1e10
         bestpar = initpar.copy()
-
+        
         dchisq = -1
         oldchisq = 1e30
         bounds = psf.bounds
@@ -444,8 +445,8 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,v
             # Solve Jacobian
             dbeta = lsq.jac_solve(jac,dy,method=method,weight=wt)
             if verbose:
-                print('  pars = ',bestpar)
-                print('  dbeta = ',dbeta)
+                print('  pars = '+str(bestpar))
+                print('  dbeta = '+str(dbeta))
             
             # Update the parameters
             oldpar = bestpar.copy()
@@ -460,7 +461,7 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,v
             count += 1
             
             if verbose:
-                print('  ',count+1,bestpar,percdiff,chisq)
+                print('  '+str(count+1)+' '+str(bestpar)+' '+str(percdiff)+' '+str(chisq))
                 
     # Make the best model
     bestmodel = pf.model(xdata,*bestpar)
@@ -473,9 +474,9 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,v
                 
     pars = bestpar
     if verbose:
-        print('Best-fitting parameters: ',pars)
-        print('Errors: ',perror)
-        print('Median RMS: ',np.median(pf.starrms))
+        print('Best-fitting parameters: '+str(pars))
+        print('Errors: '+str(perror))
+        print('Median RMS: '+str(np.median(pf.starrms)))
 
     # create the best-fitting PSF
     newpsf = psf.copy()
@@ -568,6 +569,7 @@ def getpsf(psf,image,cat,fitradius=None,method='qr',subnei=False,allcat=None,
     """
 
     t0 = time.time()
+    print = utils.getprintfunc() # Get print function to be used locally, allows for easy logging   
 
     # Fitting radius
     if fitradius is None:

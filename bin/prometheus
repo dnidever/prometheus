@@ -15,7 +15,6 @@ from argparse import ArgumentParser
 from dlnpyutils import utils as dln
 import subprocess
 import traceback
-import importlib as imp
 try:
     import __builtin__ as builtins # Python 2
 except ImportError:

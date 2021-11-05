@@ -16,13 +16,17 @@ from astropy.io import fits
 from astropy.table import Table,vstack
 import logging
 import time
+from dlnpyutils import utils as dln
 from . import detection, aperture, models, getpsf, allfit, utils
 from .ccddata import CCDData
-
+try:
+    import __builtin__ as builtins # Python 2
+except ImportError:
+    import builtins # Python 3
+    
 # run PSF fitting on an image
-
-def run(image,psfname='gaussian',psffitradius=None,fitradius=None,
-        iterdet=0,recenter=True,reject=False,verbose=False):
+def run(image,psfname='gaussian',psffitradius=None,fitradius=None,binned=False,
+        iterdet=0,recenter=True,reject=False,timestamp=False,verbose=False):
     """
     Run PSF photometry on an image.
 
@@ -42,10 +46,15 @@ def run(image,psfname='gaussian',psffitradius=None,fitradius=None,
     fitradius: float, optional
        The fitting radius when fitting the PSF to the stars in the image (in pixels).
          By default the PSF FWHM is used.
+    binned : boolean, optional
+       Use a binned model that integrates the analytical function across a pixel.
+         Default is false.
     recenter : boolean, optional
        Allow the centroids to be fit.  Default is True.
     reject : boolean, optional
        When constructin the PSF, reject PSF stars with high RMS values.  Default is False.
+    timestamp : boolean, optional
+         Add timestamp in verbose output (if verbose=True). Default is False.       
     verbose : boolean, optional
       Verbose output to the screen.  Default is False.
 
@@ -66,14 +75,22 @@ def run(image,psfname='gaussian',psffitradius=None,fitradius=None,
     cat,model,sky,psf = prometheus.run(image,psfname='gaussian',verbose=True)
 
     """
+    
+    # Set up the logger
+    if timestamp and verbose:
+        logger = dln.basiclogger()
+        logger.handlers[0].setFormatter(logging.Formatter("%(asctime)s [%(levelname)-5.5s]  %(message)s"))
+        logger.handlers[0].setStream(sys.stdout)
+        builtins.logger = logger   # make it available globally across all modules
 
-    start = time.time()
+    start = time.time()        
+    print = utils.getprintfunc() # Get print function to be used locally, allows for easy logging   
     
     # Load the file
     if isinstance(image,str):
         filename = image
         if verbose:
-            print('Loading image from '+filename)
+            print('Loading image from "'+filename+'"')
         image = CCDData.read(filename)
     if isinstance(image,CCDData) is False:
         raise ValueError('Input image must be a filename or CCDData object')
@@ -125,7 +142,7 @@ def run(image,psfname='gaussian',psffitradius=None,fitradius=None,
             # 3c) Construct the PSF iteratively
             #---------------------------------
             # Make the initial PSF slightly elliptical so it's easier to fit the orientation
-            initpsf = models.psfmodel(psfname,[fwhm/2.35,0.9*fwhm/2.35,0.0])
+            initpsf = models.psfmodel(psfname,[fwhm/2.35,0.9*fwhm/2.35,0.0],binned=binned)
             psf,psfpars,psfperror,psfcat = getpsf.getpsf(initpsf,image,psfobj,fitradius=psffitradius,
                                                          reject=reject,verbose=(verbose>=2))
             if verbose:
@@ -146,6 +163,8 @@ def run(image,psfname='gaussian',psffitradius=None,fitradius=None,
                 allobjects = vstack((allobjects,objects))
             if 'group_id' in allobjects.keys():
                 allobjects.remove_column('group_id')
+        else:
+            allobjects = objects
                 
         if verbose:
             print('Step 4: Get PSF photometry for all '+str(len(allobjects))+' objects')
@@ -161,8 +180,12 @@ def run(image,psfname='gaussian',psffitradius=None,fitradius=None,
         outobj = allobjects.copy()
         for n in psfout.columns:
             outobj[n] = psfout[n]
-    
+            
     if verbose:
-        print('dt = ',time.time()-start)              
-    
+        print('dt = %.2f sec' % (time.time()-start))
+
+    # Breakdown logger
+    if timestamp and verbose:
+        del builtins.logger
+        
     return outobj,model,sky,psf
