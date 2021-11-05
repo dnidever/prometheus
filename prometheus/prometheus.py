@@ -13,7 +13,7 @@ import sys
 import numpy as np
 import warnings
 from astropy.io import fits
-from astropy.table import Table
+from astropy.table import Table,vstack
 import logging
 import time
 from . import detection, aperture, models, getpsf, allfit, utils
@@ -22,7 +22,7 @@ from .ccddata import CCDData
 # run PSF fitting on an image
 
 def run(image,psfname='gaussian',psffitradius=None,fitradius=None,
-        recenter=True,reject=False,verbose=False):
+        iterdet=0,recenter=True,reject=False,verbose=False):
     """
     Run PSF photometry on an image.
 
@@ -33,6 +33,9 @@ def run(image,psfname='gaussian',psffitradius=None,fitradius=None,
     psfname : string, optional
       The name of the PSF type to use.  The options are "gaussian", "moffat",
       "penny" and "gausspow".  Default is "gaussian".
+    iterdet : boolean, optional
+      Number of iterations to use for detection.  Default is iterdet=0, meaning
+       detection is only performed once.
     psffitradius : float, optional
        The fitting readius when constructing the PSF (in pixels).  By default
           the FWHM is used.
@@ -74,66 +77,92 @@ def run(image,psfname='gaussian',psffitradius=None,fitradius=None,
         image = CCDData.read(filename)
     if isinstance(image,CCDData) is False:
         raise ValueError('Input image must be a filename or CCDData object')
-        
+
+    residim = image.copy()
+    
     # Processing steps
     #-----------------
+    for niter in range(iterdet+1):
 
-    # 1) Detection
-    #-------------
-    if verbose:
-        print('Step 1: Detection')
-    objects = detection.detect(image)
-    if verbose:
-        print(str(len(objects))+' objects detected')
+        if verbose and iterdet>0:
+            print('--- Iteration = '+str(niter+1)+' ---')
     
-    # 2) Aperture photometry
-    #-----------------------
-    if verbose:
-        print('Step 2: Aperture photometry')    
-    objects = aperture.aperphot(image,objects)
-    nobjects = len(objects)
-    # Bright and faint limit, use 5th and 95th percentile
-    minmag, maxmag = np.sort(objects['mag_auto'])[[int(np.round(0.05*nobjects)),int(np.round(0.95*nobjects))]]
-    if verbose:
-        print('Min/Max mag: %5.2f, %5.2f' % (minmag,maxmag))
+        # 1) Detection
+        #-------------
+        if verbose:
+            print('Step 1: Detection')
+        objects = detection.detect(residim)
+        objects['ndetiter'] = niter+1
+        if verbose:
+            print(str(len(objects))+' objects detected')
     
-    # 2) Estimate FWHM
-    #-----------------
-    if verbose:
-        print('Step 3: Estimate FWHM')
-    fwhm = utils.estimatefwhm(objects,verbose=verbose)
-    
-    # 3) Pick PSF stars
-    #------------------
-    if verbose:
-        print('Step 3: Pick PSF stars')
-    psfobj = utils.pickpsfstars(objects,fwhm,verbose=verbose)
-    
-    # 4) Construct the PSF iteratively
-    #---------------------------------
-    if verbose:
-        print('Step 4: Construct PSF')
-    # Make the initial PSF slightly elliptical so it's easier to fit the orientation
-    initpsf = models.psfmodel(psfname,[fwhm/2.35,0.9*fwhm/2.35,0.0])
-    psf,psfpars,psfperror,psfcat = getpsf.getpsf(initpsf,image,psfobj,fitradius=psffitradius,
-                                                 reject=reject,verbose=(verbose>=2))
-    if verbose:
-        print('Final PSF: '+str(psf))
-        gd, = np.where(psfcat['reject']==0)
-        print('Median RMS:  %.4f' % np.median(psfcat['rms'][gd]))
+        # 2) Aperture photometry
+        #-----------------------
+        if verbose:
+            print('Step 2: Aperture photometry')    
+        objects = aperture.aperphot(residim,objects)
+        nobjects = len(objects)
+        # Bright and faint limit, use 5th and 95th percentile
+        if niter==0:
+            minmag, maxmag = np.sort(objects['mag_auto'])[[int(np.round(0.05*nobjects)),int(np.round(0.95*nobjects))]]
+            if verbose:
+                print('Min/Max mag: %5.2f, %5.2f' % (minmag,maxmag))
 
-    # 5) Run on all sources
-    #----------------------
-    if verbose:
-        print('Step 5: Get PSF photometry for all objects')
-    psfout,model,sky = allfit.fit(psf,image,objects,fitradius=fitradius,recenter=recenter,verbose=(verbose>=2))
 
-    # Combine aperture and PSF columns
-    out = objects.copy()
-    for n in psfout.columns:
-        out[n] = psfout[n]
+        # 3) Construct the PSF
+        #-----------------
+        if niter==0:
+            if verbose:
+                print('Step 3: Construct the PSF')
+            # 3a) Estimate FWHM
+            #------------------
+            fwhm = utils.estimatefwhm(objects,verbose=verbose)
+    
+            # 3b) Pick PSF stars
+            #------------------
+            psfobj = utils.pickpsfstars(objects,fwhm,verbose=verbose)
+    
+            # 3c) Construct the PSF iteratively
+            #---------------------------------
+            # Make the initial PSF slightly elliptical so it's easier to fit the orientation
+            initpsf = models.psfmodel(psfname,[fwhm/2.35,0.9*fwhm/2.35,0.0])
+            psf,psfpars,psfperror,psfcat = getpsf.getpsf(initpsf,image,psfobj,fitradius=psffitradius,
+                                                         reject=reject,verbose=(verbose>=2))
+            if verbose:
+                print('Final PSF: '+str(psf))
+                gd, = np.where(psfcat['reject']==0)
+                print('Median RMS:  %.4f' % np.median(psfcat['rms'][gd]))
+                
+        # 4) Run on all sources
+        #----------------------
+        # If niter>0, then use combined object catalog
+        if iterdet>0:
+            # Add detection
+            # Combine objects catalogs
+            if niter==0:
+                allobjects = objects.copy()
+            else:
+                objects['id'] = np.arange(len(objects))+1+np.max(allobjects['id'])
+                allobjects = vstack((allobjects,objects))
+            if 'group_id' in allobjects.keys():
+                allobjects.remove_column('group_id')
+                
+        if verbose:
+            print('Step 4: Get PSF photometry for all '+str(len(allobjects))+' objects')
+        psfout,model,sky = allfit.fit(psf,image,allobjects,fitradius=fitradius,
+                                      recenter=recenter,verbose=(verbose>=2))
+
+        # Construct residual image
+        if iterdet>0:
+            residim = image.copy()
+            residim.data -= model.data
+            
+        # Combine aperture and PSF columns
+        outobj = allobjects.copy()
+        for n in psfout.columns:
+            outobj[n] = psfout[n]
     
     if verbose:
         print('dt = ',time.time()-start)              
     
-    return out,model,sky,psf
+    return outobj,model,sky,psf
