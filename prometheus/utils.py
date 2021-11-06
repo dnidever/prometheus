@@ -17,7 +17,8 @@ from astropy.table import Table
 import logging
 import time
 from scipy.spatial import cKDTree
-from . import detection, models, getpsf, allfit
+from dlnpyutils import utils as dln,ladfit
+from . import detection, models, getpsf, allfit, leastsquares as lsq
 from .ccddata import CCDData
 
 try:
@@ -53,6 +54,55 @@ def splitfilename(filename):
             ext = e
             break
     return (fdir,base,ext)
+
+
+def poly2d(xdata,*pars):
+    """ model of 2D linear polynomial."""
+    x = xdata[0]
+    y = xdata[1]
+    return pars[0]+pars[1]*x+pars[2]*y+pars[3]*x*y
+
+def jacpoly2d(xdata,*pars):
+    """ jacobian of 2D linear polynomial."""
+    x = xdata[0]
+    y = xdata[1]
+    nx = len(x)
+    # Model
+    m = pars[0]+pars[1]*x+pars[2]*y+pars[3]*x*y
+    # Jacobian, partical derivatives wrt the parameters
+    jac = np.zeros((nx,4),float)
+    jac[:,0] = 1    # constant coefficient
+    jac[:,1] = x    # x-coefficient
+    jac[:,2] = y    # y-coefficient
+    jac[:,3] = x*y  # xy-coefficient
+    return m,jac
+    
+def poly2dfit(x,y,data):
+    """ Fit a 2D linear function to data robustly."""
+    
+    gd, = np.where(np.isfinite(data))
+    xdata = [x[gd],y[gd]]
+    initpars = np.zeros(4,float)
+    xcoef,xadev = ladfit.ladfit(x[gd],data[gd])
+    xpar = xcoef[1]
+    ycoef,yadev = ladfit.ladfit(y[gd],data[gd]-xpar*x[gd])
+    ypar = ycoef[1]
+    xycoef,xyadev = ladfit.ladfit(x[gd]*y[gd],data[gd]-xpar*x[gd]-ypar*y[gd])
+    xypar = xycoef[1]
+    med = np.median(data[gd]-xpar*x[gd]-ypar*y[gd]-xypar*x[gd]*y[gd])
+    initpars = np.array([med,xpar,ypar,xypar])
+    diff = data-poly2d([x,y],*initpars)
+    meddiff = np.nanmedian(diff)
+    sigdiff = dln.mad(diff)
+    gd, = np.where( (np.abs(diff-meddiff)<3*sigdiff) & np.isfinite(diff))
+    xdata = [x[gd],y[gd]]
+
+    # Do the fit
+    pars,perror,cov = lsq.lsq_solve(xdata,data[gd],jacpoly2d,initpars,maxiter=10)
+    #pars1,cov1 = curve_fit(poly2d,xdata,data[gd],initpars,sigma=np.zeros(len(gd),float)+1)
+    
+    return pars,perror
+    
 
 def estimatefwhm(objects,verbose=False):
     """ Estimate FWHM using objects."""

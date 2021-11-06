@@ -47,6 +47,181 @@ def inverse(a):
     ainv[badpar,badpar] = 0
     
     return ainv
+
+def checkbounds(pars,bounds):
+    """ Check the parameters against the bounds."""
+    # 0 means it's fine
+    # 1 means it's beyond the lower bound
+    # 2 means it's beyond the upper bound
+    npars = len(pars)
+    lbounds,ubounds = bounds
+    check = np.zeros(npars,int)
+    check[pars<=lbounds] = 1
+    check[pars>=ubounds] = 2
+    return check
+        
+def limbounds(pars,bounds):
+    """ Limit the parameters to the boundaries."""
+    lbounds,ubounds = bounds
+    outpars = np.minimum(np.maximum(pars,lbounds),ubounds)
+    return outpars
+
+def limsteps(steps,maxsteps):
+    """ Limit the parameter steps to maximum step sizes."""
+    signs = np.sign(steps)
+    outsteps = np.minimum(np.abs(steps),maxsteps)
+    outsteps *= signs
+    return outsteps
+
+def newpars(pars,steps,bounds=None,maxsteps=None):
+    """ Return new parameters that fit the constraints."""
+    # Limit the steps to maxsteps
+    if maxsteps is not None:
+        limited_steps = limsteps(steps,maxsteps)
+    else:
+        limited_steps = steps
+
+    # No bounds input
+    if bounds is None:
+        return pars+limited_steps
+        
+    # Make sure that these don't cross the boundaries
+    lbounds,ubounds = bounds
+    check = checkbounds(pars+limited_steps,bounds)
+    # Reduce step size for any parameters to go beyond the boundaries
+    badpars = (check!=0)
+    # reduce the step sizes until they are within bounds
+    newsteps = limited_steps.copy()
+    count = 0
+    maxiter = 2
+    while (np.sum(badpars)>0 and count<=maxiter):
+        newsteps[badpars] /= 2
+        newcheck = checkbounds(pars+newsteps,bounds)
+        badpars = (newcheck!=0)
+        count += 1
+            
+    # Final parameters
+    newpars = pars + newsteps
+            
+    # Make sure to limit them to the boundaries
+    check = checkbounds(newpars,bounds)
+    badpars = (check!=0)
+    if np.sum(badpars)>0:
+        # add a tiny offset so it doesn't fit right on the boundary
+        newpars = np.minimum(np.maximum(newpars,lbounds+1e-30),ubounds-1e-30)
+    return newpars
+
+def lsq_solve(xdata,data,jac,initpar,error=None,method='qr',model=None,
+              bounds=None,steps=None,maxiter=20,minpercdiff=0.5,verbose=False):
+    """
+    Solve a non-linear problem with least squares.
+    
+    xdata : list or numpy array
+        x and y values of the data.
+    data : numpy array
+       Data values.
+    jac : function
+       Jacobian function.  If model is not input then this is assumed to return
+         *both* the model and jacobian.
+    initpar : numpy array
+       Initial guess parameters.
+    error : numpy array, optional
+       Uncertainties in data.
+    method : str, optional
+       Method to use for solving the non-linear least squares problem: "cholesky",
+         "qr", "svd", and "curve_fit".  Default is "qr".
+    model : function, optional
+       Model function.
+    bounds : list, optional
+       Input lower and upper bounds/constraints on the fitting parameters (tuple of two
+         lists.
+    steps : function, optional
+       Function to limit the steps to some maximum values.  Should take parameters
+         and bounds.
+    maxiter : int, optional
+       Maximum number of iterations.  Default is 20.
+    minpercdiff : float, optional
+       Minimum percent change in the parameters to allow until the solution is
+         considered converged and the iteration loop is stopped.  Default is 0.5.
+    verbose : boolean, optional
+       Verbose output to the screen.  Default is False.
+    
+    Returns
+    -------
+    pars : numpy array
+       Best-fit parameters.
+    perror : numpy array
+       Uncertainties in best-fit parameters.
+    cov : numpy array
+       Covariance matrix.
+
+    Example
+    -------
+
+    pars,perror,cov = lsq_solve(xdata,data,jac,initpar)
+
+
+    """
+    
+    # Iterate
+    count = 0
+    bestpar = initpar.copy()
+    maxpercdiff = 1e10
+    if steps is not None:
+        maxsteps = steps(initpar,bounds)  # maximum steps
+    else:
+        maxsteps = None
+    if error is not None:
+        wt = 1.0/error.ravel()**2
+    while (count<maxiter and maxpercdiff>minpercdiff):
+        # Use Cholesky, QR or SVD to solve linear system of equations
+        if model is None:
+            m,j = jac(xdata,*bestpar)
+        else:
+            m = model(xdata,*bestpar)
+            j = jac(xdata,*bestpar)            
+        dy = data.ravel()-m.ravel()
+        # Solve Jacobian
+        if error is not None:
+            dbeta = jac_solve(j,dy,method=method,weight=wt)
+        else:
+            dbeta = jac_solve(j,dy,method=method)
+        dbeta[~np.isfinite(dbeta)] = 0.0  # deal with NaNs
+                
+        # Update parameters
+        oldpar = bestpar.copy()
+        # limit the steps to the maximum step sizes and boundaries
+        if bounds is not None or maxsteps is not None:
+            bestpar = newpars(bestpar,dbeta,bounds,maxsteps)
+        else:
+            bestpar += dbeta
+        # Check differences and changes
+        diff = np.abs(bestpar-oldpar)
+        denom = np.maximum(np.abs(oldpar.copy()),0.0001)
+        percdiff = diff.copy()/denom*100  # percent differences
+        maxpercdiff = np.max(percdiff)
+                
+        if verbose:
+            print('N = '+str(ount))
+            print('bestpars = '+str(bestpar))
+            print('dbeta = '+str(dbeta))
+                
+        count += 1
+
+    # Get covariance and errors
+    if model is None:
+        m,j = jac(xdata,*bestpar)
+    else:
+        m = model(xdata,*bestpar)
+        j = jac(xdata,*bestpar)            
+    dy = data.ravel()-m.ravel()
+    if error is not None:
+        cov = jac_covariance(j,dy,wt)
+    else:
+        cov = jac_covariance(j,dy) 
+    perror = np.sqrt(np.diag(cov))
+
+    return bestpar,perror,cov
     
 
 def jac_solve(jac,resid,method=None,weight=None):

@@ -29,11 +29,6 @@ from . import leastsquares as lsq,models,utils
 
 # Fit a PSF model to multiple stars in an image
 
-def poly2d(xdata,*pars):
-    """ 2D polynomial."""
-    x = xdata[0]
-    y = xdata[1]
-    return pars[0]+pars[1]*x+pars[2]*y+pars[3]*x*y
 
 class PSFFitter(object):
 
@@ -367,7 +362,7 @@ class PSFFitter(object):
             xim = xim.astype(float)-xcen
             yim = yim.astype(float)-ycen
             # We need to interpolate this onto the grid
-            f = RectBivariateSpline(y,x,flux/height)
+            f = RectBivariateSpline(yim[:,0],xim[0,:],flux/height)
             im2 = np.zeros((npix,npix),float)+np.nan
             xcover = (x>=bbox.ixmin-xcen) & (x<=bbox.ixmax-1-xcen)
             xmin,xmax = dln.minmax(np.where(xcover)[0])
@@ -401,7 +396,7 @@ class PSFFitter(object):
             pars -= outer
             # Set up the spline function that we can use to do
             # the interpolation
-            fpars = RectBivariateSpline(y,x,pars)
+            fpars = [RectBivariateSpline(y,x,pars)]
             
         # Linear
         elif order==1:
@@ -414,19 +409,23 @@ class PSFFitter(object):
             for i in range(npix):
                 for j in range(npix):
                     data1 = resid[i,j,:]
-                    gd, = np.where(np.isfinite(data1))
-                    xdata = [relx[gd],rely[gd]]
-                    initpars = np.zeros(4,float)
-                    med = np.median(data1[gd])
-                    xcoef,xadev = ladfit.ladfit(relx[gd],data1[gd])
-                    ycoef,yadev = ladfit.ladfit(rely[gd],data1[gd])
-                    initpars = np.array([xcoef[0],xcoef[1],ycoef[1],0.0])
-                    diff = data1-poly2d([relx,rely],*initpars)
-                    meddiff = np.nanmedian(diff)
-                    sigdiff = dln.mad(diff)
-                    gd, = np.where( (np.abs(diff-meddiff)<3*sigdiff) & np.isfinite(diff))
-                    xdata = [relx[gd],rely[gd]]
-                    pars1,cov1 = curve_fit(poly2d,xdata,data1[gd],initpars,sigma=np.zeros(len(gd),float)+1)
+                    # not sure this is any faster than curve_fit
+                    # maybe use a small maxiter
+                    pars1,perror1 = utils.poly2dfit(relx,rely,data1)
+                    
+                    #gd, = np.where(np.isfinite(data1))
+                    #xdata = [relx[gd],rely[gd]]
+                    #initpars = np.zeros(4,float)
+                    #med = np.median(data1[gd])
+                    #xcoef,xadev = ladfit.ladfit(relx[gd],data1[gd])
+                    #ycoef,yadev = ladfit.ladfit(rely[gd],data1[gd])
+                    #initpars = np.array([xcoef[0],xcoef[1],ycoef[1],0.0])
+                    #diff = data1-poly2d([relx,rely],*initpars)
+                    #meddiff = np.nanmedian(diff)
+                    #sigdiff = dln.mad(diff)
+                    #gd, = np.where( (np.abs(diff-meddiff)<3*sigdiff) & np.isfinite(diff))
+                    #xdata = [relx[gd],rely[gd]]
+                    #pars1,cov1 = curve_fit(poly2d,xdata,data1[gd],initpars,sigma=np.zeros(len(gd),float)+1)
                     # REPLACE CURVE_FIT WITH SOMETHING FASTER!!
                     pars[i,j,:] = pars1
             # Make sure it goes to zero at large radius
@@ -436,14 +435,19 @@ class PSFFitter(object):
                 pars[:,:,i] -= outer
                 # Set up the spline function that we can use to do
                 # the interpolation
-                fpars.append(RectBivariateSpline(y,x,pars[:,:,i])
+                fpars.append(RectBivariateSpline(y,x,pars[:,:,i]))
                     
         else:
             raise ValueError('Only lookup order=0 or 1 allowed')
 
         # DAOPHOT does some extra analysis to make sure the flux
         # in the residual component is okay
-        
+
+        # -make sure
+        #  -to take the total flux into account (not varying across image)
+        #  -make sure the height=1 at center
+        #  -make sure all PSF values are >=0
+                             
         # Add the lookup table to the PSF model
         self.psf.lookup = True
         self.psf._lookup_order = order
