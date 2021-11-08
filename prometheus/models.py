@@ -17,7 +17,9 @@ from astropy.table import Table
 import astropy.units as u
 from scipy.optimize import curve_fit, least_squares
 from scipy.interpolate import interp1d
+from skimage import measure
 from dlnpyutils import utils as dln, bindata
+from scipy.interpolate import RectBivariateSpline
 import copy
 import logging
 import time
@@ -26,12 +28,181 @@ from . import getpsf, utils
 from .ccddata import BoundingBox,CCDData
 from . import leastsquares as lsq
 
+#import pdb
+#stop = pdb.set_trace()
+
 # A bunch of the Gaussian2D and Moffat2D code comes from astropy's modeling module
 # https://docs.astropy.org/en/stable/_modules/astropy/modeling/functional_models.html
 
 # Maybe x0/y0 should NOT be part of the parameters, and
 # x/y should actually just be dx/dy (relative to x0/y0)
 
+warnings.filterwarnings('ignore')
+
+def starbbox(coords,imshape,radius):
+    """
+    Return the boundary box for a star given radius and image size.
+        
+    Parameters
+    ----------
+    coords: list or tuple
+       Central coordinates (xcen,ycen) of star (*absolute* values).
+    imshape: list or tuple
+       Image shape (ny,nx) values.  Python images are (Y,X).
+    radius: float
+       Radius in pixels.
+        
+    Returns
+    -------
+    bbox : BoundingBox object
+       Bounding box of the x/y ranges.
+       Upper values are EXCLUSIVE following the python convention.
+
+    """
+
+    # Star coordinates
+    xcen,ycen = coords
+    ny,nx = imshape   # python images are (Y,X)
+    xlo = np.maximum(int(np.floor(xcen-radius)),0)
+    xhi = np.minimum(int(np.ceil(xcen+radius+1)),nx)
+    ylo = np.maximum(int(np.floor(ycen-radius)),0)
+    yhi = np.minimum(int(np.ceil(ycen+radius+1)),ny)
+        
+    return BoundingBox(xlo,xhi,ylo,yhi)
+
+def bbox2xy(bbox):
+    """
+    Convenience method to convert boundary box of X/Y limits to 2-D X and Y arrays.  The upper limits
+    are EXCLUSIVE following the python convention.
+    """
+    if isinstance(bbox,BoundingBox):
+        x0,x1 = bbox.xrange
+        y0,y1 = bbox.yrange
+    else:
+        x0,x1 = bbox[0]
+        y0,y1 = bbox[1]            
+    dx = np.arange(x0,x1)
+    nxpix = len(dx)
+    dy = np.arange(y0,y1)
+    nypix = len(dy)
+    # Python images are (Y,X)
+    x = dx.reshape(1,-1)+np.zeros(nypix,int).reshape(-1,1)   # broadcasting is faster
+    y = dy.reshape(-1,1)+np.zeros(nxpix,int)     
+    return x,y
+
+def starcube(cat,image,npix=51,fillvalue=np.nan):
+    """ Produce a cube of cutouts of stars."""
+
+    # Get the residuals data
+    nstars = len(cat)
+    nhpix = npix//2
+    cube = np.zeros((npix,npix,nstars),float)
+    xx,yy = np.meshgrid(np.arange(npix)-nhpix,np.arange(npix)-nhpix)
+    rr = np.sqrt(xx**2+yy**2)        
+    x = xx[0,:]
+    y = yy[:,0]
+    for i in range(nstars):
+        xcen = cat['x'][i]            
+        ycen = cat['y'][i]
+        bbox = starbbox((xcen,ycen),image.shape,nhpix)
+        im = image[bbox.slices]
+        flux = image.data[bbox.slices]-image.sky[bbox.slices]
+        err = image.error[bbox.slices]
+        if 'height' in cat.columns:
+            height = cat['height'][i]
+        elif 'peak' in cat.columns:
+            height = cat['peak'][i]
+        else:
+            height = flux[int(np.round(ycen)),int(np.round(xcen))]
+        xim,yim = np.meshgrid(im.x,im.y)
+        xim = xim.astype(float)-xcen
+        yim = yim.astype(float)-ycen
+        # We need to interpolate this onto the grid
+        f = RectBivariateSpline(yim[:,0],xim[0,:],flux/height)
+        im2 = np.zeros((npix,npix),float)+np.nan
+        xcover = (x>=bbox.ixmin-xcen) & (x<=bbox.ixmax-1-xcen)
+        xmin,xmax = dln.minmax(np.where(xcover)[0])
+        ycover = (y>=bbox.iymin-ycen) & (y<=bbox.iymax-1-ycen)
+        ymin,ymax = dln.minmax(np.where(ycover)[0])            
+        im2[ymin:ymax+1,xmin:xmax+1] = f(y[ycover],x[xcover],grid=True)
+        # Stuff it into 3D array
+        cube[:,:,i] = im2
+    return cube
+
+def mkempirical(cube,order=0,coords=None,shape=None,rect=False):
+    """ Take a star cube and collapse it to make an empirical PSF using median
+        and outlier rejection."""
+
+    ny,nx,nstar = cube.shape
+    nhpix = ny//2
+    
+    # Do outlier rejection in each pixel
+    med = np.nanmedian(cube,axis=2)
+    bad = ~np.isfinite(med)
+    if np.sum(bad)>0:
+        med[bad] = np.nanmedian(med)
+    sig = dln.mad(cube,axis=2)
+    bad = ~np.isfinite(sig)
+    if np.sum(bad)>0:
+        sig[bad] = np.nanmedian(sig)        
+    # Mask outlier points
+    outliers = ((np.abs(cube-med.reshape((med.shape)+(-1,)))>3*sig.reshape((med.shape)+(-1,)))
+                & np.isfinite(cube))
+    nbadstar = np.sum(outliers,axis=(0,1))
+    goodmask = ((np.abs(cube-med.reshape((med.shape)+(-1,)))<3*sig.reshape((med.shape)+(-1,)))
+                & np.isfinite(cube))    
+    # Now take the mean of the unmasked pixels
+    macube = np.ma.array(cube,mask=~goodmask)
+    medim = macube.mean(axis=2)
+    medim = medim.data
+    
+    # Check how well each star fits the median
+    goodpix = macube.count(axis=(0,1))
+    rms = np.sqrt(np.nansum((cube-medim.reshape((medim.shape)+(-1,)))**2,axis=(0,1))/goodpix)
+
+    xx,yy = np.meshgrid(np.arange(npix)-nhpix,np.arange(npix)-nhpix)
+    rr = np.sqrt(xx**2+yy**2)        
+    x = xx[0,:]
+    y = yy[:,0]
+    
+    # Constant
+    if order==0:
+        # Make sure it goes to zero at large radius
+        outer = np.median(medim[rr>nhpix*0.8])
+        medim -= outer
+        if rect:
+            fpars = [RectBivariateSpline(y,x,medim)]
+        else:
+            fpars = medim
+            
+    # Linear
+    elif order==1:
+        if coords is None or shape is None:
+            raise ValueError('Need coords and shape with order=1')
+        pars = np.zeros((ny,nx,4),float)
+        # scale coordinates to -1 to +1
+        xcen,ycen = coords
+        relx,rely = relcoord(xcen,ycen,shape)
+        # Loop over pixels and fit line to x/y
+        for i in range(ny):
+            for j in range(nx):
+                data1 = cube[i,j,:]
+                # maybe use a small maxiter
+                pars1,perror1 = utils.poly2dfit(relx,rely,data1)
+                pars[i,j,:] = pars1
+        # Make sure it goes to zero at large radius
+        if rect:
+            fpars = []
+            for i in range(4):
+                #outer = np.median(pars[rr>nhpix*0.8,i])
+                #pars[:,:,i] -= outer
+                # Set up the spline function that we can use to do
+                # the interpolation
+                fpars.append(RectBivariateSpline(y,x,pars[:,:,i]))
+        else:
+            fpars = pars
+                
+    return fpars,nbadstar,rms
 
 def gaussian2d(x,y,pars,deriv=False,nderiv=None):
     """Two dimensional Gaussian model function"""
@@ -1110,50 +1281,75 @@ def gausspow2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
         return g
 
 
-def empirical(x, y, pars, mpars, mcube, deriv=False, nderiv=None):
-    """Empirical look-up table"""
+def relcoord(x,y,shape):
+    """ Convert absolute X/Y coordinates to relative ones to use
+    with the lookup table."""
+    midpt = [shape[0]//2,shape[1]//2]
+    relx = (x-midpt[1])/shape[1]*2
+    rely = (y-midpt[0])/shape[0]*2
+    return relx,rely
+    
+def empirical(x, y, pars, data, shape=None, deriv=False, korder=3):
+    """Empirical PSF"""
     npars = len(pars)
-    if mcube.ndim==2:
-        nypsf,nxpsf = mcube.shape   # python images are (Y,X)
-        nel = 1
-    else:
-        nypsf,nxpsf,nel = mcube.shape
 
     # Parameters for the profile
     amp = pars[0]
     x0 = pars[1]
     y0 = pars[2]
-
-    # Center of image
-    xcenter = mpars[0]
-    ycenter = mpars[1]
         
     # Relative positions
     dx = x - x0
     dy = y - y0
-    
-    # Constant component
-    # Interpolate to the X/Y values
-    f_psf = RectBivariateSpline(np.arange(nxpsf)-nxpsf//2, np.arange(nypsf)-nypsf//2, mcube[:,:,0],kx=3,ky=3,s=0)
-    cterm = f_psf(dx,dy,grid=False)
-    g = cterm.copy()
-    
-    # Spatially-varying component
-    if nel>1:
-        reldeltax = (x0-xcenter)/(2*xcenter)
-        reldeltay = (y0-ycenter)/(2*ycenter) 
-        # X-term
-        
-        
-        # X*Y-term
 
-        # Y-term
+    # Turn into a list of RectBivariateSpline objects
+    ldata = []
+    if isinstance(data,np.ndarray):
+        if data.ndim==2:
+            ldata = [data.copy()]
+        elif data.ndim==3:
+            ldata = []
+            for i in range(data.shape[2]):
+                ldata.append(data[:,:,i])
+        else:
+            raise ValueError('Data must be 2D or 3D numpy array')
+    elif isinstance(data,RectBivariateSpline):
+        ldata = [data]
+    elif isinstance(data,list):
+        ldata = data
+    else:
+        raise ValueError('Data type not understood')
+    ndata = len(ldata)
     
+    # Make list of RectBivariateSpline objects
+    farr = []
+    for i in range(ndata):
+        if isinstance(ldata[i],RectBivariateSpline):
+            farr.append(ldata[i])
+        else:
+            ny,nx = ldata[i].shape
+            farr.append(RectBivariateSpline(np.arange(nx)-nx//2, np.arange(ny)-ny//2, ldata[i],kx=korder,ky=korder,s=0))
+
+    # Higher-order X/Y terms
+    if ndata>1:
+        relx,rely = relcoord(x0,y0,imshape)
+        coeff = [1, relx, rely, relx*rely]
+    else:
+        coeff = [1]
+        
+    # Perform the interpolation
+    g = np.zeros(dx.shape,float)
+    for i in range(ndata):
+        # spline is initialized with x,y, z(Nx,Ny)
+        # and evaluated with f(x,y)
+        # since we are using im(Ny,Nx), we have to evalute with f(y,x)
+        g += farr[i](dy,dx,grid=False) * coeff[i]  
+    g *= amp
     
     if deriv is True:
         derivative = []
         derivative.append( g/amp )
-        derivative.append( np.gradient(g, axis=(0,1)) )
+        derivative.append( np.gradient(g, axis=(0,1)) )  # list of both gradients
 
         return g,derivative
             
@@ -1178,7 +1374,7 @@ def psfmodel(name,pars=None,**kwargs):
 # PSF base class
 class PSFBase:
 
-    def __init__(self,mpars,npix=101,binned=False,verbose=False):
+    def __init__(self,mpars,npix=51,binned=False,verbose=False):
         """
         Initialize the PSF model object.
 
@@ -1187,7 +1383,7 @@ class PSFBase:
         mpars : numpy array
           PSF model parameters array.
         npix : int, optional
-          Number of pixels to model [Npix,Npix].  Must be odd. Default is 101 pixels.
+          Number of pixels to model [Npix,Npix].  Must be odd. Default is 51 pixels.
         binned : boolean, optional
         
         verbose : boolean, optional
@@ -1242,39 +1438,16 @@ class PSFBase:
           Upper values are EXCLUSIVE following the python convention.
 
         """
-
-        # Star coordinates
-        xcen,ycen = coords
-        ny,nx = imshape   # python images are (Y,X)
         if radius is None:
             radius = self.npix//2
-        xlo = np.maximum(int(np.floor(xcen-radius)),0)
-        xhi = np.minimum(int(np.ceil(xcen+radius+1)),nx)
-        ylo = np.maximum(int(np.floor(ycen-radius)),0)
-        yhi = np.minimum(int(np.ceil(ycen+radius+1)),ny)
-        
-        return BoundingBox(xlo,xhi,ylo,yhi)
-        
+        return starbbox(coords,imshape,radius)        
     
     def bbox2xy(self,bbox):
         """
         Convenience method to convert boundary box of X/Y limits to 2-D X and Y arrays.  The upper limits
         are EXCLUSIVE following the python convention.
         """
-        if isinstance(bbox,BoundingBox):
-            x0,x1 = bbox.xrange
-            y0,y1 = bbox.yrange
-        else:
-            x0,x1 = bbox[0]
-            y0,y1 = bbox[1]            
-        dx = np.arange(x0,x1)
-        nxpix = len(dx)
-        dy = np.arange(y0,y1)
-        nypix = len(dy)
-        # Python images are (Y,X)
-        x = dx.reshape(1,-1)+np.zeros(nypix,int).reshape(-1,1)   # broadcasting is faster
-        y = dy.reshape(-1,1)+np.zeros(nxpix,int)     
-        return x,y
+        return bbox2xy(bbox)
         
     def __call__(self,x=None,y=None,pars=None,mpars=None,bbox=None,nolookup=False,
                  deriv=False,**kwargs):
@@ -1357,10 +1530,10 @@ class PSFBase:
         out = self.evaluate(x,y,inpars,deriv=deriv,**kwargs)
 
         # Add the lookup component
-        if self.lookup and nolookup==False:
-            lumodel = self.call_lookup(x,y,inpars[0])
-            out += lumodel
-            
+        #if self.lookup and nolookup==False:
+        #    lumodel = self.call_lookup(x,y,inpars[0])
+        #    out += lumodel
+        
         # Mask any corner pixels
         rr = np.sqrt((x-inpars[1])**2+(y-inpars[2])**2)
         out[rr>self.radius] = 0
@@ -1891,12 +2064,55 @@ class PSFBase:
             subim[bbox.slices] -= im1            
         return subim
                     
-    
+
+    def resid(self,cat,image,fillvalue=np.nan):
+        """ Produce a residual map of the cutout of the star (within the PSF footprint) and
+            the best-fitting PSF."""
+
+        # Get the residuals data
+        nstars = len(cat)
+        npix = self.npix
+        nhpix = npix//2
+        resid = np.zeros((npix,npix,nstars),float)
+        xx,yy = np.meshgrid(np.arange(npix)-nhpix,np.arange(npix)-nhpix)
+        rr = np.sqrt(xx**2+yy**2)        
+        x = xx[0,:]
+        y = yy[:,0]
+        for i in range(nstars):
+            xcen = cat['x'][i]            
+            ycen = cat['y'][i]
+            bbox = self.starbbox((xcen,ycen),image.shape,radius=nhpix)
+            im = image[bbox.slices]
+            flux = image.data[bbox.slices]-image.sky[bbox.slices]
+            err = image.error[bbox.slices]
+            if 'height' in cat.columns:
+                height = cat['height'][i]
+            elif 'peak' in cat.columns:
+                height = cat['peak'][i]
+            else:
+                height = flux[int(np.round(ycen)),int(np.round(xcen))]
+            xim,yim = np.meshgrid(im.x,im.y)
+            xim = xim.astype(float)-xcen
+            yim = yim.astype(float)-ycen
+            # We need to interpolate this onto the grid
+            f = RectBivariateSpline(yim[:,0],xim[0,:],flux/height)
+            im2 = np.zeros((npix,npix),float)+np.nan
+            xcover = (x>=bbox.ixmin-xcen) & (x<=bbox.ixmax-1-xcen)
+            xmin,xmax = dln.minmax(np.where(xcover)[0])
+            ycover = (y>=bbox.iymin-ycen) & (y<=bbox.iymax-1-ycen)
+            ymin,ymax = dln.minmax(np.where(ycover)[0])            
+            im2[ymin:ymax+1,xmin:xmax+1] = f(y[ycover],x[xcover],grid=True)
+            # Get model
+            model = self(pars=[1.0,0.0,0.0],bbox=[[-nhpix,nhpix+1],[-nhpix,nhpix+1]])
+            # Stuff it into 3D array
+            resid[:,:,i] = im2-model
+        return resid
+            
     def __str__(self):
-        return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+',lookup='+str(self.lookup)+')'
+        return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+',npix='+str(self.npix)+',lookup='+str(self.lookup)+') FWHM=%.2f' % (self.fwhm())
 
     def __repr__(self):
-        return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+',lookup='+str(self.lookup)+')'        
+        return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+',npix='+str(self.npix)+',lookup='+str(self.lookup)+') FWHM=%.2f' % (self.fwhm())
 
     @property
     def unitfootflux(self):
@@ -2091,9 +2307,7 @@ class PSFBase:
     def lookup_relcoord(self,x,y):
         """ Convert absolute X/Y coordinates to relative ones to use
              with the lookup table."""
-        relx = (x-self._lookup_midpt[1])/self._lookup_shape[1]*2
-        rely = (y-self_lookup_midpt[0])/self._lookup_shape[0]*2
-        return relx,rely
+        return relcoord(x,y,self._lookup_midpt,self._lookup_shape)
 
     def call_lookup(self,x,y,amplitude):
         """ Calculate the lookup component of the PSF."""
@@ -2160,7 +2374,7 @@ class PSFBase:
 class PSFGaussian(PSFBase):
 
     # Initalize the object
-    def __init__(self,mpars=None,npix=101,binned=False):
+    def __init__(self,mpars=None,npix=511,binned=False):
         # MPARS are the model parameters
         if mpars is None:
             mpars = np.array([1.0,1.0,0.0])
@@ -2254,7 +2468,7 @@ class PSFMoffat(PSFBase):
     
     
     # Initalize the object
-    def __init__(self,mpars=None,npix=101,binned=False):
+    def __init__(self,mpars=None,npix=51,binned=False):
         # MPARS are model parameters
         # mpars = [xsig, ysig, theta, beta]
         if mpars is None:
@@ -2351,7 +2565,7 @@ class PSFPenny(PSFBase):
     # PARS are model parameters
     
     # Initalize the object
-    def __init__(self,mpars=None,npix=101,binned=False):
+    def __init__(self,mpars=None,npix=51,binned=False):
         # mpars = [xsig,ysig,theta, relamp,sigma]
         if mpars is None:
             mpars = np.array([1.0,1.0,0.0,0.10,5.0])
@@ -2449,7 +2663,7 @@ class PSFGausspow(PSFBase):
     # PARS are model parameters
     
     # Initalize the object
-    def __init__(self,mpars=None,npix=101,binned=False):
+    def __init__(self,mpars=None,npix=51,binned=False):
         # mpars = [sigx,sigy,sigxy,beta4,beta6]
         if mpars is None:
             mpars = np.array([2.5,2.5,0.0,1.0,1.0])
@@ -2545,32 +2759,90 @@ class PSFEmpirical(PSFBase):
     """ Empirical look-up table PSF, can vary spatially."""
 
     # Initalize the object
-    def __init__(self,mpars=None,npix=101):
+    def __init__(self,mpars,imshape=None,korder=3,npix=None):
         if mpars is None:
-            raise ValueError('Must input images')
-        # MPARS should be a two-element tuple with (parameters, psf cube)
-        self.cube = mpars[1]
-        ny,nx,npars = cube.shape    # Python images are (Y,X)
-        super().__init__(mpars[0],npix=npix)
+            raise ValueError('Must input 2D or 3D numpy array')
+        if mpars.ndim==2:
+            npix,nx = mpars.shape
+            npars = 1
+            order = 0
+        else:
+            npix,nx,npars = mpars.shape    # Python images are (Y,X)                    
+            order = 1
+        # Need image shape if there are higher-order terms
+        if order==1 and imshape is None:
+            raise ValueError('Image shape must be input for spatially varying PSF')
+        super().__init__([],npix=npix)
+        self.npix = npix
+        self._order = order
+        self._data = mpars
+        self._npars = npars
+        self._korder = korder
+        fpars = []
+        x = np.arange(npix)-npix//2
+        for i in range(npars):
+            # spline is initialized with x,y, z(Nx,Ny)
+            # and evaluated with f(x,y)
+            # since we are using im(Ny,Nx), we have to evalute with f(y,x)
+            if mpars.ndim==2:
+                fpars.append(RectBivariateSpline(x,x,mpars,kx=korder,ky=korder,s=0))
+            else:
+                fpars.append(RectBivariateSpline(x,x,mpars[:,:,i],kx=korder,ky=korder,s=0))
+        self._fpars = fpars
+        # image shape
+        if imshape is not None:
+            self._shape = imshape
+        else:
+            self._shape = None
         self._bounds = None
         self._steps = None
 
+    def __str__(self):
+        return self.__class__.__name__+'(npix='+str(self.npix)+') FWHM=%.2f' % (self.fwhm())
+
+    def __repr__(self):
+        return self.__class__.__name__+'(npix='+str(self.npix)+') FWHM=%.2f' % (self.fwhm())        
+        
     def fwhm(self):
         """ Return the FWHM of the model."""
-        pass
-        
-    def evaluate(self,x, y, pars=None, cube=None, deriv=False, nderiv=None):
-        """Empirical look-up table"""
-        # pars = [amplitude, x0, y0, sigma, beta]
-        if pars is None: pars = self.params
-        if cube is None: cube = self.cube
-        return empirical(x, y, pars, cube=cube, deriv=deriv, nderiv=nderiv)
+        # get contour at half max and then get average radius
+        im = self()
+        # Find contours at a constant value of 0.5
+        contours = measure.find_contours(im, 0.5*np.max(im))
+        contours = contours[0]   # first level
+        xc = contours[:,0]
+        yc = contours[:,1]
+        r = np.sqrt((xc-self.npix//2)**2+(yc-self.npix//2)**2)
+        fwhm = np.mean(r)*2
+        return fwhm        
 
-    def deriv(self,x, y, pars=None, cube=None, nderiv=None):
+    def flux(self,pars=None,footprint=True):
+        """ Return the flux/volume of the model given the height or parameters."""
+        if pars is None:
+            pars = [1.0, 0.0, 0.0]
+        else:
+            pars = np.atleast_1d(pars)
+            if pars.size==1:
+                pars = [pars[0], 0.0, 0.0]
+        if self._unitfootflux is None:
+            dum = self.unitfootflux
+        return self.unitfootflux*pars[0]
+    
+    def evaluate(self,x, y, pars=None, data=None, deriv=False):
+        """Empirical look-up table"""
+        # pars = [amplitude, x0, y0]
+        if pars is None:
+            raise ValueError('PARS must be input')
+        if data is None: data = self._fpars
+        return empirical(x, y, pars, data=data, shape=self._shape, deriv=deriv)
+
+    def deriv(self,x, y, pars=None, data=None):
         """Empirical look-up table derivative with respect to parameters"""
-        if pars is None: pars = self.params
-        if cube is None: cube = self.cube
-        return empirical(x, y, pars, cube=cube, nderiv=nderiv)   
+        if pars is None:
+            raise ValueError('PARS must be input')        
+        if data is None: data = self._fpars
+        g,derivative = empirical(x, y, pars, data=data, shape=self._shape, deriv=True)
+        return derivative
 
     def tohdu(self):
         """
@@ -2598,10 +2870,12 @@ class PSFEmpirical(PSFBase):
         if os.path.exists(filename) and overwrite==False:
             raise ValueError(filename+' already exists and overwrite=False')
         hdulist = fits.HDUList()
-        hdulist.append(fits.PrimaryHDU(self.params))
+        hdulist.append(fits.PrimaryHDU(self._data))
         hdulist[0].header['PSFTYPE'] = 'Empirical'
-        hdulist[0].header['BINNED'] = self.binned
-        hdulist[0].header['NPIX'] = self.npix        
+        hdulist[0].header['NPIX'] = self.npix
+        hdulist[0].header['ORDER'] = self._order
+        hdulist[0].header['SHAPE'] = self._shape
+        hdulist[0].header['KORDER'] = self._korder        
         hdulist.writeto(filename,overwrite=overwrite)
         hdulist.close()
 

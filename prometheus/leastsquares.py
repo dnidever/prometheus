@@ -112,7 +112,8 @@ def newpars(pars,steps,bounds=None,maxsteps=None):
     return newpars
 
 def lsq_solve(xdata,data,jac,initpar,error=None,method='qr',model=None,
-              bounds=None,steps=None,maxiter=20,minpercdiff=0.5,verbose=False):
+              bounds=None,fixed=None,steps=None,maxiter=20,minpercdiff=0.5,
+              verbose=False):
     """
     Solve a non-linear problem with least squares.
     
@@ -135,6 +136,8 @@ def lsq_solve(xdata,data,jac,initpar,error=None,method='qr',model=None,
     bounds : list, optional
        Input lower and upper bounds/constraints on the fitting parameters (tuple of two
          lists.
+    fixed : boolean list, optinal
+       List of boolean values if what to hold fixed and what should be free to vary.
     steps : function, optional
        Function to limit the steps to some maximum values.  Should take parameters
          and bounds.
@@ -162,6 +165,9 @@ def lsq_solve(xdata,data,jac,initpar,error=None,method='qr',model=None,
 
 
     """
+
+
+    # ADD A FIXED PARAMETER TO HOLD CERTAIN PARAMETERS FIXED!!
     
     # Iterate
     count = 0
@@ -187,7 +193,13 @@ def lsq_solve(xdata,data,jac,initpar,error=None,method='qr',model=None,
         else:
             dbeta = jac_solve(j,dy,method=method)
         dbeta[~np.isfinite(dbeta)] = 0.0  # deal with NaNs
-                
+
+
+        # -add "shift cutting" and "line search" in the least squares method
+        # basically scale the beta vector to find the best match.
+        # check this out
+        # https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.line_search.html
+        
         # Update parameters
         oldpar = bestpar.copy()
         # limit the steps to the maximum step sizes and boundaries
