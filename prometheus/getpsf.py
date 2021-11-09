@@ -20,15 +20,69 @@ from scipy.interpolate import interp1d,interp2d
 from scipy.interpolate import RectBivariateSpline
 #from astropy.nddata import CCDData,StdDevUncertainty
 from dlnpyutils import utils as dln, bindata, ladfit
+from scipy.spatial import cKDTree
 import copy
 import logging
 import time
 import matplotlib
 import sep
 from . import leastsquares as lsq,models,utils
+from .ccddata import CCDData
 
 # Fit a PSF model to multiple stars in an image
 
+def findpsfnei(allcat,psfcat,npix):
+    """ Find stars near PSF stars."""
+    # Returns distance and index of closest neighbor
+    
+    nallcat = len(allcat)
+    npsfcat = len(psfcat)
+    
+    # Use KD-tree
+    X1 = np.vstack((allcat['x'].data,allcat['y'].data)).T
+    X2 = np.vstack((psfcat['x'].data,psfcat['y'].data)).T
+    kdt = cKDTree(X1)
+    # Get distance for 2 closest neighbors
+    dist, ind = kdt.query(X2, k=50, distance_upper_bound=np.sqrt(2)*npix//2)
+    # closest neighbor is always itself, remove it 
+    dist = dist[:,1:]
+    ind = ind[:,1:]
+    # Add up all the stars
+    gdall, = np.where(np.isfinite(dist.ravel()))
+    indall = ind.ravel()[gdall]
+    # Get unique ones
+    indall = np.unique(indall)
+
+    return indall
+
+def subnei(image,allcat,psfcat,psf):
+    """ Subtract neighboring stars to PSF stars from the image."""
+    indnei = findpsfnei(allcat,psfcat,psf.npix)
+    nnei = len(indnei)
+
+    flux = image.data-image.sky
+    resid = image.copy()
+    fitradius = psf.fwhm()*0.5
+    
+    # Loop over neighboring stars and fit just the core
+    for i in range(nnei):
+        x1 = allcat['x'][indnei[i]]
+        xp1 = int(np.minimum(np.maximum(np.round(x1),0),image.shape[1]-1))
+        y1 = allcat['y'][indnei[i]]
+        yp1 = int(np.minimum(np.maximum(np.round(y1),0),image.shape[0]-1))
+        if 'height' in allcat.columns:
+            h1 = allcat['height'][indnei[i]]
+        elif 'peak' in allcat.columns:
+            h1 = allcat['peak'][indnei[i]]
+        else:
+            h1 = flux[yp1,xp1]
+        initpars = [h1,x1,y1,image.sky[yp1,xp1]]
+        starcat,perror = psf.fit(resid,pars=initpars,radius=fitradius)
+        bbox = psf.starbbox((starcat['x'],starcat['y']),image.shape,psf.radius)
+        pars = [starcat['height'][0],starcat['x'][0],starcat['y'][0]]
+        im1 = psf(pars=pars,bbox=bbox)
+        resid[bbox.slices].data -= im1
+    return resid
 
 class PSFFitter(object):
 
@@ -731,8 +785,19 @@ def getpsf(psf,image,cat,fitradius=None,lookup=False,lorder=0,method='qr',subnei
             print('Removing '+str(nbd)+' stars near the edge')
         psfcat = psfcat[~bd]
 
-    # Outlier rejection iterations
+    # Generate an empirical image of the stars
+    # and fit a model to it to get initial estimates
+    cube = models.starcube(psfcat,image,npix=psf.npix,fillvalue=np.nan)
+    epsf,nbadstar,rms = models.mkempirical(cube,order=0)
+    epsfim = CCDData(epsf,error=epsf.copy()*0+1,mask=~np.isfinite(epsf))
+    pars,perror,mparams = psf.fit(epsfim,pars=[1.0,psf.npix/2,psf.npix//2],allpars=True)
+    initpar = mparams.copy()
     curpsf = psf.copy()
+    curpsf.params = initpar
+    if verbose:
+        print('Initial estimate from empirical PSF fit = '+str(mparams))
+        
+    # Outlier rejection iterations
     nrejiter = 0
     flag = 0
     nrejstar = 100
@@ -747,8 +812,7 @@ def getpsf(psf,image,cat,fitradius=None,lookup=False,lorder=0,method='qr',subnei
             fitrad = curpsf.fwhm()
         if verbose:
             print('  Fitting radius = %5.3f' % (fitrad))
-        
-            
+                    
         # Reject outliers
         if reject and nrejiter>0:
             medrms = np.median(pcat['rms'])
@@ -769,7 +833,8 @@ def getpsf(psf,image,cat,fitradius=None,lookup=False,lorder=0,method='qr',subnei
                 # Find the neighbors in allcat
                 # Fit the neighbors and PSF stars
                 # Subtract neighbors from the image
-                import pdb; pdb.set_trace()
+                useimage = image.copy()  # start with original image
+                useimage = subnei(useimage,allcat,cat,curpsf)
                 
         # Fitting the PSF to the stars
         #-----------------------------

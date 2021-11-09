@@ -25,8 +25,8 @@ except ImportError:
     import builtins # Python 3
     
 # run PSF fitting on an image
-def run(image,psfname='gaussian',psffitradius=None,fitradius=None,npsfpix=51,binned=False,
-        lookup=False,lorder=0,iterdet=0,recenter=True,reject=False,timestamp=False,verbose=False):
+def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fitradius=None,npsfpix=51,
+        binned=False,lookup=False,lorder=0,recenter=True,reject=False,timestamp=False,verbose=False):
     """
     Run PSF photometry on an image.
 
@@ -40,6 +40,8 @@ def run(image,psfname='gaussian',psffitradius=None,fitradius=None,npsfpix=51,bin
     iterdet : boolean, optional
       Number of iterations to use for detection.  Default is iterdet=0, meaning
        detection is only performed once.
+    psfsubnei : boolean, optional
+      Subtract neighboring stars to PSF stars when generating the PSF.  Default is False.
     psffitradius : float, optional
        The fitting readius when constructing the PSF (in pixels).  By default
           the FWHM is used.
@@ -151,8 +153,8 @@ def run(image,psfname='gaussian',psffitradius=None,fitradius=None,npsfpix=51,bin
             # Make the initial PSF slightly elliptical so it's easier to fit the orientation
             initpsf = models.psfmodel(psfname,[fwhm/2.35,0.9*fwhm/2.35,0.0],binned=binned,npix=npsfpix)
             psf,psfpars,psfperror,psfcat = getpsf.getpsf(initpsf,image,psfobj,fitradius=psffitradius,
-                                                         lookup=lookup,lorder=lorder,reject=reject,
-                                                         verbose=(verbose>=2))
+                                                         lookup=lookup,lorder=lorder,subnei=psfsubnei,
+                                                         allcat=objects,reject=reject,verbose=(verbose>=2))
             if verbose:
                 print('Final PSF: '+str(psf))
                 gd, = np.where(psfcat['reject']==0)

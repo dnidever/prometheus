@@ -18,7 +18,7 @@ import astropy.units as u
 from scipy.optimize import curve_fit, least_squares
 from scipy.interpolate import interp1d
 from skimage import measure
-from dlnpyutils import utils as dln, bindata
+from dlnpyutils import utils as dln, bindata, ladfit, coords
 from scipy.interpolate import RectBivariateSpline
 import copy
 import logging
@@ -38,6 +38,73 @@ from . import leastsquares as lsq
 # x/y should actually just be dx/dy (relative to x0/y0)
 
 warnings.filterwarnings('ignore')
+
+def hfluxrad(im):
+    """ Calculate the half-flux radius of a star in an image."""
+    ny,nx = im.shape
+    xx,yy = np.meshgrid(np.arange(nx)-nx//2,np.arange(ny)-ny//2)
+    rr = np.sqrt(xx**2+yy**2)
+    si = np.argsort(rr.ravel())
+    rsi = rr.ravel()[si]
+    fsi = im.ravel()[si]
+    totf = np.sum(fsi)
+    cumf = np.cumsum(fsi)/totf
+    hfluxrad = rsi[np.argmin(np.abs(cumf-0.5))]
+    return hfluxrad
+    
+def contourfwhm(im):
+    """ Return the FWHM of the PSF image."""
+    # get contour at half max and then get average radius
+    ny,nx = im.shape
+    xcen = nx//2
+    ycen = ny//2
+    xx,yy = np.meshgrid(np.arange(nx)-nx//2,np.arange(ny)-ny//2)
+    rr = np.sqrt(xx**2+yy**2)
+    
+    # Get half-flux radius
+    hfrad = hfluxrad(im)
+    # mask the image to only 2*half-flux radius
+    mask = (rr<2*hfrad)
+    
+    # Find contours at a constant value of 0.5
+    contours = measure.find_contours(im*mask, 0.5*np.max(im))
+    # If there are multiple contours, find the one that
+    #   encloses the center
+    if len(contours)>1:
+        for i in range(len(contours)):
+            x1 = contours[i][:,0]
+            y1 = contours[i][:,1]
+            inside = coords.isPointInPolygon(x1,y1,xcen,ycen)
+            if inside:
+                contours = contours[i]
+                break
+    else:
+        contours = contours[0]   # first level
+    xc = contours[:,0]
+    yc = contours[:,1]
+    r = np.sqrt((xc-nx//2)**2+(yc-ny//2)**2)
+    fwhm = np.mean(r)*2
+    return fwhm
+
+def imfwhm(im):
+    """ Return the FWHM of the PSF image."""
+    ny,nx = im.shape
+    xx,yy = np.meshgrid(np.arange(nx)-nx//2,np.arange(ny)-ny//2)
+    rr = np.sqrt(xx**2+yy**2)
+    centerf = im[ny//2,nx//2]
+    si = np.argsort(rr.ravel())
+    rsi = rr.ravel()[si]
+    fsi = im.ravel()[si]
+    ind, = np.where(fsi<0.5*centerf)
+    bestr = np.min(rsi[ind])
+    bestind = ind[np.argmin(rsi[ind])]
+    # fit a robust line to the neighboring points
+    gd, = np.where(np.abs(rsi-bestr) < 1.0)
+    coef,absdev = ladfit.ladfit(rsi[gd],fsi[gd])
+    # where does the line cross y=0.5
+    bestr2 = (0.5-coef[0])/coef[1]
+    fwhm = 2*bestr2
+    return fwhm
 
 def starbbox(coords,imshape,radius):
     """
@@ -134,6 +201,7 @@ def mkempirical(cube,order=0,coords=None,shape=None,rect=False):
         and outlier rejection."""
 
     ny,nx,nstar = cube.shape
+    npix = ny
     nhpix = ny//2
     
     # Do outlier rejection in each pixel
@@ -1462,8 +1530,9 @@ class PSFBase:
             generate the model. These can be 1D or 2D arrays.
             The "bbox" parameter can be used instead of "x" and "y" if a rectangular
             region is desired.
-        pars : numpy array
-            Model parameter values [height, xcen, ycen, sky].
+        pars : numpy array, list or catalog
+            Stellar arameters.  If numpy array or list the values should be [height, xcen, ycen, sky].
+            If a catalog is input then it must have height, x, y and sky columns.
         bbox: list or BoundingBox
             Boundary box giving range in X and Y for a rectangular region to generate the model.
             This can be BoundingBox object or a 2x2 list/tuple [[x0,x1],[y0,y1]].
@@ -1507,6 +1576,12 @@ class PSFBase:
             raise ValueError("X and Y or BBOX must be input")
         if pars is None:
             raise ValueError("PARS must be input")
+        if type(pars) is Table:
+            for n in ['height','x','y','sky']:
+                if n not in pars.columns:
+                    raise ValueError('Input catalog must have height, x, y, and sky columns')
+            inpcat = pars
+            pars = [inpcat['height'][0],inpcat['x'][0],inpcat['y'][0],inpcat['sky'][0]]
         if len(pars)<3 or len(pars)>4:
             raise ValueError("PARS must have 3 or 4 elements")
         
@@ -1971,6 +2046,7 @@ class PSFBase:
         outcat['niter'] = count
         outcat['nfitpix'] = flux.size
         outcat['chisq'] = np.sum((flux-model.reshape(flux.shape))**2/err**2)/len(flux)
+        outcat = Table(outcat)
         # chi value, RMS of the residuals as a fraction of the height
         rms = np.sqrt(np.mean(((flux-model.reshape(flux.shape))/bestpar[0])**2))
         outcat['rms'] = rms
@@ -2000,7 +2076,7 @@ class PSFBase:
             return bestpar,perror,model
 
     
-    def sub(self,im,cat,sky=False,radius=None):
+    def sub(self,im,cat,sky=False,radius=None,nocopy=False):
         """
         Method to subtract a single star using the PSF model.
 
@@ -2014,6 +2090,9 @@ class PSFBase:
             Include sky in the model that is subtracted.  Default is False.
         radius : float, optional
             PSF radius to use.  The default is to use the full size of the PSF.
+        nocopy: boolean, optional
+            Return the original image with the star subtracted.  Default is False
+              and a copy of the image will be returned.
 
         Returns
         -------
@@ -2048,19 +2127,16 @@ class PSFBase:
             radius = self.radius
         else:
             radius = np.minimum(self.radius,radius)
-        subim = im.data.copy()
+        if nocopy:
+            subim = im
+        else:
+            subim = im.data.copy()            
         for i in range(nstars):
             pars = [cat['height'][i],cat['x'][i],cat['y'][i]]
             if sky:
                 pars.append(cat['sky'][i])
             bbox = self.starbbox((pars[1],pars[2]),im.shape,radius)
-            #x0 = int(np.maximum(0,np.floor(pars[1]-radius)))
-            #x1 = int(np.minimum(np.ceil(pars[1]+radius),nx))
-            #y0 = int(np.maximum(0,np.floor(pars[2]-radius)))
-            #y1 = int(np.minimum(np.ceil(pars[2]+radius),ny))
-            #bbox = [[x0,x1],[y0,y1]]
             im1 = self(pars=pars,bbox=bbox)
-            #subim[x0:x1+1,y0:y1+1] -= im1
             subim[bbox.slices] -= im1            
         return subim
                     
@@ -2806,15 +2882,7 @@ class PSFEmpirical(PSFBase):
     def fwhm(self):
         """ Return the FWHM of the model."""
         # get contour at half max and then get average radius
-        im = self()
-        # Find contours at a constant value of 0.5
-        contours = measure.find_contours(im, 0.5*np.max(im))
-        contours = contours[0]   # first level
-        xc = contours[:,0]
-        yc = contours[:,1]
-        r = np.sqrt((xc-self.npix//2)**2+(yc-self.npix//2)**2)
-        fwhm = np.mean(r)*2
-        return fwhm        
+        return contourfwhm(self())
 
     def flux(self,pars=None,footprint=True):
         """ Return the flux/volume of the model given the height or parameters."""
