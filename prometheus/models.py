@@ -1407,18 +1407,29 @@ def empirical(x, y, pars, data, shape=None, deriv=False, korder=3):
         
     # Perform the interpolation
     g = np.zeros(dx.shape,float)
+    # We must find the derivative with x0/y0 empirically
+    if deriv:
+        gxplus = np.zeros(dx.shape,float)
+        gyplus = np.zeros(dx.shape,float)        
+        xoff = 0.01
+        yoff = 0.01
     for i in range(ndata):
         # spline is initialized with x,y, z(Nx,Ny)
         # and evaluated with f(x,y)
         # since we are using im(Ny,Nx), we have to evalute with f(y,x)
-        g += farr[i](dy,dx,grid=False) * coeff[i]  
+        g += farr[i](dy,dx,grid=False) * coeff[i]
+        if deriv:
+            gxplus += farr[i](dy,dx-xoff,grid=False) * coeff[i]
+            gyplus += farr[i](dy-yoff,dx,grid=False) * coeff[i]            
     g *= amp
+    if deriv:
+        gxplus *= amp
+        gyplus *= amp        
     
     if deriv is True:
-        derivative = []
-        derivative.append( g/amp )
-        derivative.append( np.gradient(g, axis=(0,1)) )  # list of both gradients
-
+        # We cannot use np.gradient() because the input x/y values
+        # might not be a regular grid
+        derivative = [g/amp,  (gxplus-g)/xoff, (gyplus-g)/yoff ]      
         return g,derivative
             
     # No derivative
@@ -2896,7 +2907,7 @@ class PSFEmpirical(PSFBase):
             dum = self.unitfootflux
         return self.unitfootflux*pars[0]
     
-    def evaluate(self,x, y, pars=None, data=None, deriv=False):
+    def evaluate(self,x, y, pars=None, data=None, deriv=False, nderiv=None):
         """Empirical look-up table"""
         # pars = [amplitude, x0, y0]
         if pars is None:
@@ -2904,7 +2915,7 @@ class PSFEmpirical(PSFBase):
         if data is None: data = self._fpars
         return empirical(x, y, pars, data=data, shape=self._shape, deriv=deriv)
 
-    def deriv(self,x, y, pars=None, data=None):
+    def deriv(self,x, y, pars=None, data=None, nderiv=None):
         """Empirical look-up table derivative with respect to parameters"""
         if pars is None:
             raise ValueError('PARS must be input')        
