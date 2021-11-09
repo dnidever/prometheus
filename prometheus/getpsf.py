@@ -19,7 +19,7 @@ from scipy.optimize import curve_fit, least_squares
 from scipy.interpolate import interp1d,interp2d
 from scipy.interpolate import RectBivariateSpline
 #from astropy.nddata import CCDData,StdDevUncertainty
-from dlnpyutils import utils as dln, bindata, ladfit
+from dlnpyutils import utils as dln, bindata, ladfit, coords
 from scipy.spatial import cKDTree
 import copy
 import logging
@@ -53,9 +53,15 @@ def findpsfnei(allcat,psfcat,npix):
     # Get unique ones
     indall = np.unique(indall)
 
+    # Make sure none of them are our psf stars
+    ind1,ind2,dist = coords.xmatch(allcat['x'][indall],allcat['y'][indall],psfcat['x'],psfcat['y'],5)
+    # Remove any matches
+    if len(ind1)>0:
+        indall = np.delete(indall,ind1)
+    
     return indall
 
-def subnei(image,allcat,psfcat,psf):
+def subtractnei(image,allcat,psfcat,psf):
     """ Subtract neighboring stars to PSF stars from the image."""
     indnei = findpsfnei(allcat,psfcat,psf.npix)
     nnei = len(indnei)
@@ -76,10 +82,17 @@ def subnei(image,allcat,psfcat,psf):
             h1 = allcat['peak'][indnei[i]]
         else:
             h1 = flux[yp1,xp1]
-        initpars = [h1,x1,y1,image.sky[yp1,xp1]]
-        starcat,perror = psf.fit(resid,pars=initpars,radius=fitradius)
-        bbox = psf.starbbox((starcat['x'],starcat['y']),image.shape,psf.radius)
-        pars = [starcat['height'][0],starcat['x'][0],starcat['y'][0]]
+        initpars = [h1,x1,y1] #image.sky[yp1,xp1]]
+        bbox = psf.starbbox((initpars[1],initpars[2]),image.shape,psf.radius)
+        # Fit height empirically with central pixels
+        flux1 = flux[bbox.slices]
+        err1 = image[bbox.slices].error
+        model1 = psf(pars=initpars,bbox=bbox)
+        good = ((flux1/err1>2) & (flux1>0) & (model1/np.max(model1)>0.25))
+        height = np.median(flux1[good]/model1[good]) * initpars[0]
+        pars = [height, x1, y1]
+        #starcat,perror = psf.fit(flux,pars=initpars,radius=fitradius,recenter=False)
+        #pars = [starcat['height'][0],starcat['x'][0],starcat['y'][0]]
         im1 = psf(pars=pars,bbox=bbox)
         resid[bbox.slices].data -= im1
     return resid
@@ -834,7 +847,7 @@ def getpsf(psf,image,cat,fitradius=None,lookup=False,lorder=0,method='qr',subnei
                 # Fit the neighbors and PSF stars
                 # Subtract neighbors from the image
                 useimage = image.copy()  # start with original image
-                useimage = subnei(useimage,allcat,cat,curpsf)
+                useimage = subtractnei(useimage,allcat,cat,curpsf)
                 
         # Fitting the PSF to the stars
         #-----------------------------
