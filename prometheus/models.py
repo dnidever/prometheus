@@ -2720,13 +2720,14 @@ class PSFBase:
            The image to use to generate the residuals images.
         fillvalue : float, optional
           The fill value to use for pixels that are bad are off the image.
-            Default is np.nan
+            Default is np.nan.
 
         Returns
         -------
         resid : numpy array
-           2D cube (Npix,Npix,Nstars) of the star images with the best-fitting PSF
-             model subtracted.
+           Three-dimension cube (Npix,Npix,Nstars) of the star images with the
+             best-fitting PSF model subtracted.
+
         Example
         -------
 

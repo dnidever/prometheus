@@ -32,7 +32,31 @@ from .ccddata import CCDData
 # Fit a PSF model to multiple stars in an image
 
 def starcube(cat,image,npix=51,fillvalue=np.nan):
-    """ Produce a cube of cutouts of stars."""
+    """
+    Produce a cube of cutouts of stars.
+
+    Parameters
+    ----------
+    cat : table
+       The catalog of stars to use.  This should have "x" and "y" columns and
+         preferably also "height".
+    image : CCDData object
+       The image to use to generate the stellar images.
+    fillvalue : float, optional
+       The fill value to use for pixels that are bad are off the image.
+            Default is np.nan.
+
+    Returns
+    -------
+    cube : numpy array
+       Two-dimensional cube (Npix,Npix,Nstars) of the star images.
+
+    Example
+    -------
+
+    cube = starcube(cat,image)
+
+    """
 
     # Get the residuals data
     nstars = len(cat)
@@ -71,8 +95,48 @@ def starcube(cat,image,npix=51,fillvalue=np.nan):
     return cube
 
 def mkempirical(cube,order=0,coords=None,shape=None,rect=False,lookup=False):
-    """ Take a star cube and collapse it to make an empirical PSF using median
-        and outlier rejection."""
+    """
+    Take a star cube and collapse it to make an empirical PSF using median
+    and outlier rejection.
+
+    Parameters
+    ----------
+    cube : numpy array
+      Three-dimensional cube of star images (or residual images) of shape
+        (Npix,Npix,Nstars).
+    order : int, optional
+      The order of the variations. 0-constant, 1-linear terms.  If order=1,
+        Then coords and shape must be input.
+    coords : tuple, optional
+      Two-element tuple of the X/Y coordinates of the stars.  This is needed
+        to generate the linear empirical model (order=1).
+    shape : tuple, optional
+      Two-element tuple giving the shape (Ny,Nx) of the image.  This is
+        needed to generate the linear empirical model (order=1).
+    rect : boolean, optional
+      Return a list of RectBivariateSpline functions rather than a numpy array.
+    lookup : boolean, optional
+      Parameter to indicate if this is a lookup table.  If lookup=False, then
+      the constant term is constrained to be non-negative. Default is False.
+
+    Returns
+    -------
+    epsf : numpy array
+      The empirical PSF model  If order=0, then this is just a 2D image.  If
+        order=1, then it will be a 3D cube (Npix,Npix,4) where the four terms
+        are [constant, X-term, Y-term, X*Y-term].  If rect=True, then a list
+        of RectBivariateSpline functions are returned.
+
+    Example
+    -------
+
+    epsf = mkempirical(cube,order=0)
+
+    or
+
+    epsf = mkempirical(cube,order=1,coords=coords,shape=im.shape)
+
+    """
 
     ny,nx,nstar = cube.shape
     npix = ny
@@ -154,7 +218,31 @@ def mkempirical(cube,order=0,coords=None,shape=None,rect=False,lookup=False):
     return fpars,nbadstar,rms
 
 def findpsfnei(allcat,psfcat,npix):
-    """ Find stars near PSF stars."""
+    """
+    Find stars near PSF stars.
+
+    Parameters
+    ----------
+    allcat : table
+      Catalog of all sources in the image.
+    psfcat : table
+      Catalog of PSF stars.
+    npix : int
+      Search radius in pixels.
+
+    Returns
+    -------
+    indall : numpy array
+       List of indices into allcat that are neighbors to
+        the PSF stars (within radius of npix), and are not
+        PSF stars themselves.
+
+    Example
+    -------
+
+    indall = findpsfnei(allcat,psfcat,npix)
+
+    """
     # Returns distance and index of closest neighbor
     
     nallcat = len(allcat)
@@ -184,7 +272,32 @@ def findpsfnei(allcat,psfcat,npix):
     return indall
 
 def subtractnei(image,allcat,psfcat,psf):
-    """ Subtract neighboring stars to PSF stars from the image."""
+    """
+    Subtract neighboring stars to PSF stars from the image.
+
+    Parameters
+    ----------
+    image : CCDDdata object
+       The input image from which to subtract PSF neighbor stars.
+    allcat : table
+      Catalog of all sources in the image.
+    psfcat : table
+      Catalog of PSF stars.
+    psf : PSF object
+      The PSF model.
+
+    Returns
+    -------
+    resid : CCDData object
+      The input images with the PSF neighbor stars subtracted.
+
+    Example
+    -------
+
+    subim = subtractnei(image,allcat,psfcat,psf)
+
+    """
+
     indnei = findpsfnei(allcat,psfcat,psf.npix)
     nnei = len(indnei)
 
