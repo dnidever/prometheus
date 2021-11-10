@@ -31,6 +31,121 @@ from .ccddata import CCDData
 
 # Fit a PSF model to multiple stars in an image
 
+def starcube(cat,image,npix=51,fillvalue=np.nan):
+    """ Produce a cube of cutouts of stars."""
+
+    # Get the residuals data
+    nstars = len(cat)
+    nhpix = npix//2
+    cube = np.zeros((npix,npix,nstars),float)
+    xx,yy = np.meshgrid(np.arange(npix)-nhpix,np.arange(npix)-nhpix)
+    rr = np.sqrt(xx**2+yy**2)        
+    x = xx[0,:]
+    y = yy[:,0]
+    for i in range(nstars):
+        xcen = cat['x'][i]            
+        ycen = cat['y'][i]
+        bbox = starbbox((xcen,ycen),image.shape,nhpix)
+        im = image[bbox.slices]
+        flux = image.data[bbox.slices]-image.sky[bbox.slices]
+        err = image.error[bbox.slices]
+        if 'height' in cat.columns:
+            height = cat['height'][i]
+        elif 'peak' in cat.columns:
+            height = cat['peak'][i]
+        else:
+            height = flux[int(np.round(ycen)),int(np.round(xcen))]
+        xim,yim = np.meshgrid(im.x,im.y)
+        xim = xim.astype(float)-xcen
+        yim = yim.astype(float)-ycen
+        # We need to interpolate this onto the grid
+        f = RectBivariateSpline(yim[:,0],xim[0,:],flux/height)
+        im2 = np.zeros((npix,npix),float)+np.nan
+        xcover = (x>=bbox.ixmin-xcen) & (x<=bbox.ixmax-1-xcen)
+        xmin,xmax = dln.minmax(np.where(xcover)[0])
+        ycover = (y>=bbox.iymin-ycen) & (y<=bbox.iymax-1-ycen)
+        ymin,ymax = dln.minmax(np.where(ycover)[0])            
+        im2[ymin:ymax+1,xmin:xmax+1] = f(y[ycover],x[xcover],grid=True)
+        # Stuff it into 3D array
+        cube[:,:,i] = im2
+    return cube
+
+def mkempirical(cube,order=0,coords=None,shape=None,rect=False):
+    """ Take a star cube and collapse it to make an empirical PSF using median
+        and outlier rejection."""
+
+    ny,nx,nstar = cube.shape
+    npix = ny
+    nhpix = ny//2
+    
+    # Do outlier rejection in each pixel
+    med = np.nanmedian(cube,axis=2)
+    bad = ~np.isfinite(med)
+    if np.sum(bad)>0:
+        med[bad] = np.nanmedian(med)
+    sig = dln.mad(cube,axis=2)
+    bad = ~np.isfinite(sig)
+    if np.sum(bad)>0:
+        sig[bad] = np.nanmedian(sig)        
+    # Mask outlier points
+    outliers = ((np.abs(cube-med.reshape((med.shape)+(-1,)))>3*sig.reshape((med.shape)+(-1,)))
+                & np.isfinite(cube))
+    nbadstar = np.sum(outliers,axis=(0,1))
+    goodmask = ((np.abs(cube-med.reshape((med.shape)+(-1,)))<3*sig.reshape((med.shape)+(-1,)))
+                & np.isfinite(cube))    
+    # Now take the mean of the unmasked pixels
+    macube = np.ma.array(cube,mask=~goodmask)
+    medim = macube.mean(axis=2)
+    medim = medim.data
+    
+    # Check how well each star fits the median
+    goodpix = macube.count(axis=(0,1))
+    rms = np.sqrt(np.nansum((cube-medim.reshape((medim.shape)+(-1,)))**2,axis=(0,1))/goodpix)
+
+    xx,yy = np.meshgrid(np.arange(npix)-nhpix,np.arange(npix)-nhpix)
+    rr = np.sqrt(xx**2+yy**2)        
+    x = xx[0,:]
+    y = yy[:,0]
+    
+    # Constant
+    if order==0:
+        # Make sure it goes to zero at large radius
+        outer = np.median(medim[rr>nhpix*0.8])
+        medim -= outer
+        if rect:
+            fpars = [RectBivariateSpline(y,x,medim)]
+        else:
+            fpars = medim
+            
+    # Linear
+    elif order==1:
+        if coords is None or shape is None:
+            raise ValueError('Need coords and shape with order=1')
+        pars = np.zeros((ny,nx,4),float)
+        # scale coordinates to -1 to +1
+        xcen,ycen = coords
+        relx,rely = relcoord(xcen,ycen,shape)
+        # Loop over pixels and fit line to x/y
+        for i in range(ny):
+            for j in range(nx):
+                data1 = cube[i,j,:]
+                # maybe use a small maxiter
+                pars1,perror1 = utils.poly2dfit(relx,rely,data1)
+                pars[i,j,:] = pars1
+        # Make sure it goes to zero at large radius
+        if rect:
+            fpars = []
+            for i in range(4):
+                #outer = np.median(pars[rr>nhpix*0.8,i])
+                #pars[:,:,i] -= outer
+                # Set up the spline function that we can use to do
+                # the interpolation
+                fpars.append(RectBivariateSpline(y,x,pars[:,:,i]))
+        else:
+            fpars = pars
+                
+    return fpars,nbadstar,rms
+
 def findpsfnei(allcat,psfcat,npix):
     """ Find stars near PSF stars."""
     # Returns distance and index of closest neighbor
@@ -616,8 +731,8 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
 
     # Empirical PSF - done differently
     if type(psf)==models.PSFEmpirical:
-        cube1 = models.starcube(cat,image,npix=psf.npix,fillvalue=np.nan)
-        epsf1,nbadstar1,rms1 = models.mkempirical(cube1,order=psf.order)
+        cube1 = starcube(cat,image,npix=psf.npix,fillvalue=np.nan)
+        epsf1,nbadstar1,rms1 = mkempirical(cube1,order=psf.order)
         initpsf = models.PSFEmpirical(epsf1,imshape=image.shape,order=psf.order)
         pf = PSFFitter(initpsf,image,cat,fitradius=fitradius,verbose=False)
         # Fit the height, xcen, ycen properly
@@ -638,8 +753,8 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
             psfcat['iymax'][i] = bbox.iymax        
         psfcat = Table(psfcat)
         # Remake the empirical EPSF    
-        cube = models.starcube(psfcat,image,npix=psf.npix,fillvalue=np.nan)
-        epsf,nbadstar,rms = models.mkempirical(cube,order=psf.order)
+        cube = starcube(psfcat,image,npix=psf.npix,fillvalue=np.nan)
+        epsf,nbadstar,rms = mkempirical(cube,order=psf.order)
         newpsf = models.PSFEmpirical(epsf,imshape=image.shape,order=psf.order)
         if verbose:
             print('Median RMS: '+str(np.median(pf.starrms)))        
@@ -844,8 +959,8 @@ def getpsf(psf,image,cat,fitradius=None,lookup=False,lorder=0,method='qr',subnei
     # Generate an empirical image of the stars
     # and fit a model to it to get initial estimates
     if type(psf)!=models.PSFEmpirical:
-        cube = models.starcube(psfcat,image,npix=psf.npix,fillvalue=np.nan)
-        epsf,nbadstar,rms = models.mkempirical(cube,order=0)
+        cube = starcube(psfcat,image,npix=psf.npix,fillvalue=np.nan)
+        epsf,nbadstar,rms = mkempirical(cube,order=0)
         epsfim = CCDData(epsf,error=epsf.copy()*0+1,mask=~np.isfinite(epsf))
         pars,perror,mparams = psf.fit(epsfim,pars=[1.0,psf.npix/2,psf.npix//2],allpars=True)
         initpar = mparams.copy()
