@@ -909,7 +909,10 @@ def getpsf(psf,image,cat,fitradius=None,lookup=False,lorder=0,method='qr',subnei
         outcat['reject'][ind1] = 0
 
         # Compare PSF parameters
-        pardiff = newpsf.params-curpsf.params
+        if type(newpsf)!=models.PSFEmpirical:
+            pardiff = newpsf.params-curpsf.params
+        else:
+            pardiff = newpsf._data-curpsf._data
         sumpardiff = np.sum(np.abs(pardiff))
         curpsf = newpsf.copy()
         
@@ -918,7 +921,7 @@ def getpsf(psf,image,cat,fitradius=None,lookup=False,lorder=0,method='qr',subnei
         if subnei is True and nrejiter==0: flag=0   # iterate at least once with neighbor subtraction
         
         nrejiter += 1
-
+        
     # Generate an empirical look-up table of corrections
     if lookup:
         if verbose:
