@@ -2282,31 +2282,13 @@ class PSFBase:
         """ Check if there is a lookup table."""
         return (self.lookup is not None)
     
-    def lookup_relcoord(self,x,y):
-        """ Convert absolute X/Y coordinates to relative ones to use
-             with the lookup table."""
-        return relcoord(x,y,self._lookup_midpt,self._lookup_shape)
-
-    def call_lookup(self,x,y,amplitude):
-        """ Calculate the lookup component of the PSF."""
-        if self.haslookup==False:
-            raise ValueError('There is no lookup table for this PSF')
-        relx,rely = self.lookup_relcoord(x,y)
-        # interpolate using spline functions
-        model1 = np.zeros(x.shape,float)
-        for i in range(len(self._lookup_interp)):
-            f = self._lookup_interp[i]
-            model += f(rely,relx)
-        # Now Scale by height
-        model *= amplitude
-        return model
-    
     @classmethod
     def read(cls,filename):
         """ Load a PSF file."""
         if os.path.exists(filename)==False:
             raise ValueError(filename+' NOT FOUND')
-        data,head = fits.getdata(filename,header=True)
+        hdulist = fits.open(filename)
+        data,head = hdulist[0].data,hdulist[0].header
         psftype = head.get('PSFTYPE')
         if psftype is None:
             raise ValueError('No PSFTYPE found in header')
@@ -2323,8 +2305,23 @@ class PSFBase:
             else:
                 imshape = None
             kwargs['imshape'] = imshape
-            kwargs['korder'] = head.get('KORDER')            
-        return psfmodel(psftype,data,**kwargs)
+            kwargs['korder'] = head.get('KORDER')
+        newpsf = psfmodel(psftype,data,**kwargs)
+        # Lookup table
+        if head.get('HSLOOKUP'):
+            ludata,luhead = hdulist[1].data,hdulist[1].header
+            lukwargs = {}
+            yshape = luhead.get('YSHAPE')
+            xshape = luhead.get('XSHAPE')
+            if yshape is not None and xshape is not None:
+                imshape = (yshape,xshape)
+            else:
+                imshape = None
+            lukwargs['imshape'] = imshape
+            lukwargs['korder'] = luhead.get('KORDER')
+            lookup = psfmodel('empirical',ludata,**lukwargs,lookup=True)
+            newpsf.lookup = lookup
+        return newpsf
 
     def tohdu(self):
         """ Convert the PSF object to an HDU. Defined by subclass."""
@@ -2417,6 +2414,7 @@ class PSFGaussian(PSFBase):
     def tohdu(self):
         """
         Convert the PSF object to an HDU so it can be written to a file.
+        This does not include the lookup table.
 
         Returns
         -------
@@ -2433,6 +2431,7 @@ class PSFGaussian(PSFBase):
         hdu.header['PSFTYPE'] = 'Gaussian'
         hdu.header['BINNED'] = self.binned
         hdu.header['NPIX'] = self.npix
+        # This does not include the lookup table                
         return hdu
     
     def write(self,filename,overwrite=True):
@@ -2444,6 +2443,11 @@ class PSFGaussian(PSFBase):
         hdulist[0].header['PSFTYPE'] = 'Gaussian'
         hdulist[0].header['BINNED'] = self.binned
         hdulist[0].header['NPIX'] = self.npix
+        hdulist[0].header['HSLOOKUP'] = True
+        if self.haslookup:
+            luhdu = self.lookup.tohdu()
+            hdulist.append(luhdu)
+            hdulist[1].header['LOOKUP'] = 1
         hdulist.writeto(filename,overwrite=overwrite)
         hdulist.close()
 
@@ -2515,6 +2519,7 @@ class PSFMoffat(PSFBase):
     def tohdu(self):
         """
         Convert the PSF object to an HDU so it can be written to a file.
+        This does not include the lookup table.
 
         Returns
         -------
@@ -2531,6 +2536,7 @@ class PSFMoffat(PSFBase):
         hdu.header['PSFTYPE'] = 'Moffat'
         hdu.header['BINNED'] = self.binned
         hdu.header['NPIX'] = self.npix
+        # This does not include the lookup table        
         return hdu
     
     def write(self,filename,overwrite=True):
@@ -2541,7 +2547,12 @@ class PSFMoffat(PSFBase):
         hdulist.append(fits.PrimaryHDU(self.params))
         hdulist[0].header['PSFTYPE'] = 'Moffat'
         hdulist[0].header['BINNED'] = self.binned
-        hdulist[0].header['NPIX'] = self.npix        
+        hdulist[0].header['NPIX'] = self.npix
+        hdulist[0].header['HSLOOKUP'] = True
+        if self.haslookup:
+            luhdu = self.lookup.tohdu()
+            hdulist.append(luhdu)
+            hdulist[1].header['LOOKUP'] = 1                
         hdulist.writeto(filename,overwrite=overwrite)
         hdulist.close()
     
@@ -2613,6 +2624,7 @@ class PSFPenny(PSFBase):
     def tohdu(self):
         """
         Convert the PSF object to an HDU so it can be written to a file.
+        This does not include the lookup table.
 
         Returns
         -------
@@ -2629,6 +2641,7 @@ class PSFPenny(PSFBase):
         hdu.header['PSFTYPE'] = 'Penny'
         hdu.header['BINNED'] = self.binned
         hdu.header['NPIX'] = self.npix
+        # This does not include the lookup table        
         return hdu
     
     def write(self,filename,overwrite=True):
@@ -2639,7 +2652,12 @@ class PSFPenny(PSFBase):
         hdulist.append(fits.PrimaryHDU(self.params))
         hdulist[0].header['PSFTYPE'] = 'Penny'
         hdulist[0].header['BINNED'] = self.binned
-        hdulist[0].header['NPIX'] = self.npix        
+        hdulist[0].header['NPIX'] = self.npix
+        hdulist[0].header['HSLOOKUP'] = True
+        if self.haslookup:
+            luhdu = self.lookup.tohdu()
+            hdulist.append(luhdu)
+            hdulist[1].header['LOOKUP'] = 1        
         hdulist.writeto(filename,overwrite=overwrite)
         hdulist.close()
 
@@ -2726,6 +2744,7 @@ class PSFGausspow(PSFBase):
         hdu.header['PSFTYPE'] = 'Gausspow'
         hdu.header['BINNED'] = self.binned
         hdu.header['NPIX'] = self.npix
+        # This does not include the lookup table
         return hdu
     
     def write(self,filename,overwrite=True):
@@ -2736,7 +2755,12 @@ class PSFGausspow(PSFBase):
         hdulist.append(fits.PrimaryHDU(self.params))
         hdulist[0].header['PSFTYPE'] = 'Gausspow'
         hdulist[0].header['BINNED'] = self.binned
-        hdulist[0].header['NPIX'] = self.npix        
+        hdulist[0].header['NPIX'] = self.npix
+        hdulist[0].header['HSLOOKUP'] = True
+        if self.haslookup:
+            luhdu = self.lookup.tohdu()
+            hdulist.append(luhdu)
+            hdulist[1].header['LOOKUP'] = 1        
         hdulist.writeto(filename,overwrite=overwrite)
         hdulist.close()
     
@@ -2820,7 +2844,7 @@ class PSFEmpirical(PSFBase):
     def fwhm(self):
         """ Return the FWHM of the model."""
         # get contour at half max and then get average radius
-        if self._lookup:
+        if self.islookup==False:
             return contourfwhm(self())
         else:
             return 0.0
@@ -2868,10 +2892,15 @@ class PSFEmpirical(PSFBase):
         hdu = psf.tohdu()
 
         """
-        hdu = fits.PrimaryHDU(self.params)
+        hdu = fits.PrimaryHDU(self._data)
         hdu.header['PSFTYPE'] = 'Empirical'
-        hdu.header['BINNED'] = self.binned
         hdu.header['NPIX'] = self.npix
+        hdu.header['BINNED'] = self.binned
+        hdu.header['ORDER'] = self.order
+        if self._shape is not None:
+            hdu.header['YSHAPE'] = self._shape[0]
+            hdu.header['XSHAPE'] = self._shape[1]     
+        hdu.header['KORDER'] = self._korder       
         return hdu
     
     def write(self,filename,overwrite=True):
