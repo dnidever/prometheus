@@ -1500,13 +1500,15 @@ class PSFBase:
         if self.haslookup and nolookup==False:
             lumodel = self.lookup(x,y,pars,deriv=deriv)
             if deriv:
-                for i in range(len(lumodel)):
-                    out[i] += lumodel[i]
-                out[i] = np.maximum(out[i],0.0)  # make sure it's non-negative
+                # [0] is the model, [1] is the list of derivatives
+                out[0][:] += lumodel[0][:]
+                out[0][:] = np.maximum(out[0],0.0)  # make sure it's non-negative                    
+                for i in range(len(lumodel[1])):
+                    out[1][i][:] += lumodel[1][i][:]
             else:
                 out += lumodel
-                out = np.maximum(out,0.0)  # make sure it's non-negative                
-        
+                out = np.maximum(out,0.0)  # make sure it's non-negative
+                
         # Mask any corner pixels
         rr = np.sqrt((x-inpars[1])**2+(y-inpars[2])**2)
         if deriv:
@@ -1623,45 +1625,36 @@ class PSFBase:
         ## psf expects on pars array
         pars = np.array(args)
         if self.verbose: print('jac: ',pars)
-        # Make parameters for the function, STELLAR + MODEL parameters
-        #   *without* sky
+
+        # Just stellar parameters
         if not allpars:
             if len(pars)==3:
-                inpars = np.hstack((pars,self.params))
                 sky = None
             elif len(pars)==4:
-                # drop sky which is the fourth parameter
-                inpars = np.hstack((pars[0:3],self.params))
                 sky = pars[3]
             else:
                 raise ValueError('PARS must have 3 or 4 parameters')
             nderiv = 3
+            mpars = self.params
         # All parameters
         else:
             nmpars = len(self.params)
             mpars = pars[-nmpars:]
             npars = len(pars)-nmpars
-            if npars==4:  # sky input, drop it
+            pars = pars[0:-nmpars]
+            if npars==4:  # sky input
                 sky = pars[3]
-                inpars = np.hstack((pars[0:3],mpars)) 
             else:
-                inpars = pars.copy()
-                sky = None
+                sky = None           
             nderiv = None  # want all the derivatives
-
-        # USE __CALL__ HERE!  that takes the lookup table into account
-            
-        # Get the derivatives
-        if retmodel:  # want model as well
-            m,deriv = self.evaluate(xdata[0],xdata[1],inpars,deriv=True,nderiv=nderiv,**kwargs)
-            if sky is not None: m += sky  # add sky
-        else:
-            deriv = self.deriv(xdata[0],xdata[1],inpars,nderiv=nderiv,**kwargs)
+        
+        # Get the derivatives and model
+        m,deriv = self(xdata[0],xdata[1],pars,mpars=mpars,deriv=True,nderiv=nderiv,**kwargs)            
         deriv = np.array(deriv).T
         # Initialize jacobian matrix
         #   the parameters are [height,xmean,ymean,sky]
         #   if allpars, parameters are [height,xmean,ymean,sky,model parameters]
-        jac = np.zeros((len(xdata[0]),len(pars)),float)
+        jac = np.zeros((len(xdata[0]),len(args)),float)
         if sky is None:
             jac[:,:] = deriv
         else:  # add sky derivative in
