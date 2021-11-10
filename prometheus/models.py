@@ -1285,7 +1285,7 @@ def empirical(x, y, pars, data, shape=None, deriv=False, korder=3):
 
     # Higher-order X/Y terms
     if ndata>1:
-        relx,rely = relcoord(x0,y0,imshape)
+        relx,rely = relcoord(x0,y0,shape)
         coeff = [1, relx, rely, relx*rely]
     else:
         coeff = [1]
@@ -1364,14 +1364,10 @@ class PSFBase:
         self.niter = 0
         self._bounds = None
         self._unitfootflux = None  # unit flux in footprint
-        self.lookup = False
+        self.lookup = None
         
         # add a precomputed circular mask here to mask out the corners??
 
-
-        
-    # ADD AN EMPIRICAL ATTRIBUTE THAT SPECIFIES IF THERE IS AN EMPIRICAL
-    # LOOK-UP TABLE, separate parameter for what variation level (constant or linear)
         
     @property
     def params(self):
@@ -1501,14 +1497,23 @@ class PSFBase:
         out = self.evaluate(x,y,inpars,deriv=deriv,**kwargs)
 
         # Add the lookup component
-        #if self.lookup and nolookup==False:
-        #    lumodel = self.call_lookup(x,y,inpars[0])
-        #    out += lumodel
+        if self.haslookup and nolookup==False:
+            lumodel = self.lookup(x,y,pars,deriv=deriv)
+            if deriv:
+                for i in range(len(lumodel)):
+                    out[i] += lumodel[i]
+                out[i] = np.maximum(out[i],0.0)  # make sure it's non-negative
+            else:
+                out += lumodel
+                out = np.maximum(out,0.0)  # make sure it's non-negative                
         
         # Mask any corner pixels
         rr = np.sqrt((x-inpars[1])**2+(y-inpars[2])**2)
-        out[rr>self.radius] = 0
-        
+        if deriv:
+            out[0][rr>self.radius] = 0
+        else:
+            out[rr>self.radius] = 0
+            
         # Add sky to model
         if sky is not None:
             # With derivative
@@ -1643,6 +1648,9 @@ class PSFBase:
                 inpars = pars.copy()
                 sky = None
             nderiv = None  # want all the derivatives
+
+        # USE __CALL__ HERE!  that takes the lookup table into account
+            
         # Get the derivatives
         if retmodel:  # want model as well
             m,deriv = self.evaluate(xdata[0],xdata[1],inpars,deriv=True,nderiv=nderiv,**kwargs)
@@ -1798,7 +1806,7 @@ class PSFBase:
                 bounds[0][1] -= imx0  # lower
                 bounds[0][2] -= imy0
                 bounds[1][1] -= imx0  # upper
-                bounds[1][2] -= imy0                
+                bounds[1][2] -= imy0
         if radius is None:
             radius = np.maximum(self.fwhm(),1)
         bbox = self.starbbox((xc,yc),im.shape,radius)
@@ -2081,10 +2089,10 @@ class PSFBase:
         return resid
             
     def __str__(self):
-        return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+',npix='+str(self.npix)+',lookup='+str(self.lookup)+') FWHM=%.2f' % (self.fwhm())
+        return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+',npix='+str(self.npix)+',lookup='+str(self.haslookup)+') FWHM=%.2f' % (self.fwhm())
 
     def __repr__(self):
-        return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+',npix='+str(self.npix)+',lookup='+str(self.lookup)+') FWHM=%.2f' % (self.fwhm())
+        return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+',npix='+str(self.npix)+',lookup='+str(self.haslookup)+') FWHM=%.2f' % (self.fwhm())
 
     @property
     def unitfootflux(self):
@@ -2276,6 +2284,11 @@ class PSFBase:
         """ Create a new copy of this LSF object."""
         return copy.deepcopy(self)        
 
+    @property
+    def haslookup(self):
+        """ Check if there is a lookup table."""
+        return (self.lookup is not None)
+    
     def lookup_relcoord(self,x,y):
         """ Convert absolute X/Y coordinates to relative ones to use
              with the lookup table."""
@@ -2283,8 +2296,8 @@ class PSFBase:
 
     def call_lookup(self,x,y,amplitude):
         """ Calculate the lookup component of the PSF."""
-        if self.lookup==False:
-            raise ValueError('There is not lookup table for this PSF')
+        if self.haslookup==False:
+            raise ValueError('There is no lookup table for this PSF')
         relx,rely = self.lookup_relcoord(x,y)
         # interpolate using spline functions
         model1 = np.zeros(x.shape,float)
@@ -2740,7 +2753,7 @@ class PSFEmpirical(PSFBase):
     """ Empirical look-up table PSF, can vary spatially."""
 
     # Initalize the object
-    def __init__(self,mpars,imshape=None,korder=3,npix=51,binned=True,order=0):
+    def __init__(self,mpars,imshape=None,korder=3,npix=51,binned=True,order=0,lookup=False):
         if mpars is None:
             mpars = PSFGaussian(npix=npix)()  # initialize with Gaussian of 1
             if order==1:
@@ -2749,19 +2762,34 @@ class PSFEmpirical(PSFBase):
                 mpars[:,:,0] = mpars0
                 if imshape is None:
                     imshape = (2048,2048)  # dummy image shape
-        if mpars.ndim==2:
+        # List of RectBivariateSpline objects input
+        if type(mpars) is list:
+            nx = mpars[0].tck[0].shape
+            ny = mpars[0].tck[1].shape
+            npix = ny
+            npars = len(mpars)
+            if npars==1:
+                order = 0
+            elif npars==4:
+                order = 1
+            else:
+                raise ValueError('Only order = 0 (1 term) or 1 (4 terms) supported at this time')
+        elif mpars.ndim==2:
             npix,nx = mpars.shape
             npars = 1
             order = 0
-        else:
+        elif mpars.ndim==3:
             npix,nx,npars = mpars.shape    # Python images are (Y,X)                    
             order = 1
+        else:
+            raise ValueError('Input not understood')
         # Need image shape if there are higher-order terms
         if order==1 and imshape is None:
             raise ValueError('Image shape must be input for spatially varying PSF')
         super().__init__([],npix=npix,binned=True)
         self.npix = npix
         self.order = order
+        self.islookup = lookup  # is this a lookup table
         self._data = mpars
         self._npars = npars
         self._korder = korder
@@ -2770,7 +2798,7 @@ class PSFEmpirical(PSFBase):
         for i in range(npars):
             # spline is initialized with x,y, z(Nx,Ny)
             # and evaluated with f(x,y)
-            # since we are using im(Ny,Nx), we have to evalute with f(y,x)
+            # since we are using im(Ny,Nx), we have to evaluate with f(y,x)
             if mpars.ndim==2:
                 fpars.append(RectBivariateSpline(x,x,mpars,kx=korder,ky=korder,s=0))
             else:
@@ -2785,15 +2813,24 @@ class PSFEmpirical(PSFBase):
         self._steps = None
 
     def __str__(self):
-        return self.__class__.__name__+'(npix='+str(self.npix)+') FWHM=%.2f' % (self.fwhm())
-
+        if self.islookup==False:
+            return self.__class__.__name__+'(npix='+str(self.npix)+') FWHM=%.2f' % (self.fwhm())
+        else:
+            return self.__class__.__name__+'(npix='+str(self.npix)+')'            
+        
     def __repr__(self):
-        return self.__class__.__name__+'(npix='+str(self.npix)+') FWHM=%.2f' % (self.fwhm())        
+        if self.islookup==False:
+            return self.__class__.__name__+'(npix='+str(self.npix)+') FWHM=%.2f' % (self.fwhm())
+        else:
+            return self.__class__.__name__+'(npix='+str(self.npix)+')'                    
         
     def fwhm(self):
         """ Return the FWHM of the model."""
         # get contour at half max and then get average radius
-        return contourfwhm(self())
+        if self._lookup:
+            return contourfwhm(self())
+        else:
+            return 0.0
 
     def flux(self,pars=None,footprint=True):
         """ Return the flux/volume of the model given the height or parameters."""

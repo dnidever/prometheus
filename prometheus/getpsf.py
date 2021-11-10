@@ -45,7 +45,7 @@ def starcube(cat,image,npix=51,fillvalue=np.nan):
     for i in range(nstars):
         xcen = cat['x'][i]            
         ycen = cat['y'][i]
-        bbox = starbbox((xcen,ycen),image.shape,nhpix)
+        bbox = models.starbbox((xcen,ycen),image.shape,nhpix)
         im = image[bbox.slices]
         flux = image.data[bbox.slices]-image.sky[bbox.slices]
         err = image.error[bbox.slices]
@@ -70,7 +70,7 @@ def starcube(cat,image,npix=51,fillvalue=np.nan):
         cube[:,:,i] = im2
     return cube
 
-def mkempirical(cube,order=0,coords=None,shape=None,rect=False):
+def mkempirical(cube,order=0,coords=None,shape=None,rect=False,lookup=False):
     """ Take a star cube and collapse it to make an empirical PSF using median
         and outlier rejection."""
 
@@ -106,12 +106,15 @@ def mkempirical(cube,order=0,coords=None,shape=None,rect=False):
     rr = np.sqrt(xx**2+yy**2)        
     x = xx[0,:]
     y = yy[:,0]
+    mask = (rr<=nhpix)
     
     # Constant
     if order==0:
         # Make sure it goes to zero at large radius
-        outer = np.median(medim[rr>nhpix*0.8])
-        medim -= outer
+        medim *= mask  # mask corners
+        # Make sure values are positive
+        if lookup==False:
+            medim = np.maximum(medim,0.0)
         if rect:
             fpars = [RectBivariateSpline(y,x,medim)]
         else:
@@ -124,7 +127,7 @@ def mkempirical(cube,order=0,coords=None,shape=None,rect=False):
         pars = np.zeros((ny,nx,4),float)
         # scale coordinates to -1 to +1
         xcen,ycen = coords
-        relx,rely = relcoord(xcen,ycen,shape)
+        relx,rely = models.relcoord(xcen,ycen,shape)
         # Loop over pixels and fit line to x/y
         for i in range(ny):
             for j in range(nx):
@@ -136,8 +139,12 @@ def mkempirical(cube,order=0,coords=None,shape=None,rect=False):
         if rect:
             fpars = []
             for i in range(4):
-                #outer = np.median(pars[rr>nhpix*0.8,i])
-                #pars[:,:,i] -= outer
+                # Make sure edges are zero on average for higher-order terms
+                outer = np.median(pars[rr>nhpix*0.8,i])
+                pars[:,:,i] -= outer
+                # Mask corners
+                pars[:,:,i] *= mask
+                # Each higher-order term must have ZERO total volume
                 # Set up the spline function that we can use to do
                 # the interpolation
                 fpars.append(RectBivariateSpline(y,x,pars[:,:,i]))
@@ -525,103 +532,11 @@ class PSFFitter(object):
     def mklookup(self,order=0):
         """ Make an empirical look-up table for the residuals."""
 
-        # Get the residuals data
-        npix = self.psf.npix
-        nhpix = npix//2
-        resid = np.zeros((npix,npix,self.nstars),float)
-        xx,yy = np.meshgrid(np.arange(npix)-nhpix,np.arange(npix)-nhpix)
-        rr = np.sqrt(xx**2+yy**2)        
-        x = xx[0,:]
-        y = yy[:,0]
-        for i in range(self.nstars):
-            height = self.starheight[i]
-            xcen = self.starxcen[i]            
-            ycen = self.starycen[i]
-            bbox = self.psf.starbbox((xcen,ycen),self.image.shape,radius=nhpix)
-            im = self.image[bbox.slices]
-            flux = self.image.data[bbox.slices]-self.image.sky[bbox.slices]
-            err = self.image.error[bbox.slices]
-            xim,yim = np.meshgrid(im.x,im.y)
-            xim = xim.astype(float)-xcen
-            yim = yim.astype(float)-ycen
-            # We need to interpolate this onto the grid
-            f = RectBivariateSpline(yim[:,0],xim[0,:],flux/height)
-            im2 = np.zeros((npix,npix),float)+np.nan
-            xcover = (x>=bbox.ixmin-xcen) & (x<=bbox.ixmax-1-xcen)
-            xmin,xmax = dln.minmax(np.where(xcover)[0])
-            ycover = (y>=bbox.iymin-ycen) & (y<=bbox.iymax-1-ycen)
-            ymin,ymax = dln.minmax(np.where(ycover)[0])            
-            im2[ymin:ymax+1,xmin:xmax+1] = f(y[ycover],x[xcover],grid=True)
-            # Get model
-            model = self.psf(pars=[1.0,0.0,0.0],bbox=[[-nhpix,nhpix+1],[-nhpix,nhpix+1]])
-            # Stuff it into 3D array
-            resid[:,:,i] = im2-model
-            
-        # Constant
-        if order==0:
-            # Do outlier rejection in each pixel
-            med = np.nanmedian(resid,axis=2)
-            bad = ~np.isfinite(med)
-            if np.sum(bad)>0:
-                med[bad] = np.nanmedian(med)
-            sig = dln.mad(resid,axis=2)
-            bad = ~np.isfinite(sig)
-            if np.sum(bad)>0:
-                sig[bad] = np.nanmedian(sig)        
-            # Mask outlier points
-            mask = ( (np.abs(resid-med.reshape((med.shape)+(-1,)))<3*sig.reshape((med.shape)+(-1,))) &
-                     np.isfinite(resid) )
-            # Now take the mean of the unmasked pixels
-            resid[~mask] = np.nan
-            pars = np.nanmean(resid,axis=2)
-            # Make sure it goes to zero at large radius
-            outer = np.median(pars[rr>nhpix*0.8])
-            pars -= outer
-            # Set up the spline function that we can use to do
-            # the interpolation
-            fpars = [RectBivariateSpline(y,x,pars)]
-            
-        # Linear
-        elif order==1:
-            pars = np.zeros((npix,npix,4),float)
-            # scale coordinates to -1 to +1
-            relx = (self.starxcen-self.image.shape[1]//2)/self.image.shape[1]*2
-            rely = (self.starycen-self.image.shape[0]//2)/self.image.shape[0]*2
-            #return resid,relx,rely
-            # Loop over pixels and fit line to x/y
-            for i in range(npix):
-                for j in range(npix):
-                    data1 = resid[i,j,:]
-                    # not sure this is any faster than curve_fit
-                    # maybe use a small maxiter
-                    pars1,perror1 = utils.poly2dfit(relx,rely,data1)
-                    
-                    #gd, = np.where(np.isfinite(data1))
-                    #xdata = [relx[gd],rely[gd]]
-                    #initpars = np.zeros(4,float)
-                    #med = np.median(data1[gd])
-                    #xcoef,xadev = ladfit.ladfit(relx[gd],data1[gd])
-                    #ycoef,yadev = ladfit.ladfit(rely[gd],data1[gd])
-                    #initpars = np.array([xcoef[0],xcoef[1],ycoef[1],0.0])
-                    #diff = data1-poly2d([relx,rely],*initpars)
-                    #meddiff = np.nanmedian(diff)
-                    #sigdiff = dln.mad(diff)
-                    #gd, = np.where( (np.abs(diff-meddiff)<3*sigdiff) & np.isfinite(diff))
-                    #xdata = [relx[gd],rely[gd]]
-                    #pars1,cov1 = curve_fit(poly2d,xdata,data1[gd],initpars,sigma=np.zeros(len(gd),float)+1)
-                    # REPLACE CURVE_FIT WITH SOMETHING FASTER!!
-                    pars[i,j,:] = pars1
-            # Make sure it goes to zero at large radius
-            fpars = []
-            for i in range(4):
-                outer = np.median(pars[rr>nhpix*0.8,i])
-                pars[:,:,i] -= outer
-                # Set up the spline function that we can use to do
-                # the interpolation
-                fpars.append(RectBivariateSpline(y,x,pars[:,:,i]))
-                    
-        else:
-            raise ValueError('Only lookup order=0 or 1 allowed')
+        # Make the empirical EPSF
+        cube = self.psf.resid(self.cat,self.image,fillvalue=np.nan)
+        coords = (self.cat['x'].data,self.cat['y'].data)
+        epsf,nbadstar,rms = mkempirical(cube,order=order,coords=coords,shape=self.image.shape,lookup=True)
+        lookup = models.PSFEmpirical(epsf,imshape=self.image.shape,order=order,lookup=True)
 
         # DAOPHOT does some extra analysis to make sure the flux
         # in the residual component is okay
@@ -632,12 +547,7 @@ class PSFFitter(object):
         #  -make sure all PSF values are >=0
                              
         # Add the lookup table to the PSF model
-        self.psf.lookup = True
-        self.psf._lookup_order = order
-        self.psf._lookup_data = pars
-        self.psf._lookup_interp = fpars  # spline functions                             
-        self.psf._lookup_midpt = [self.image.shape[0]//2,self.image.shape[1]//2]
-        self.psf._lookup_shape = self.image.shape      
+        self.psf.lookup = lookup
 
         #import pdb; pdb.set_trace()
         
@@ -732,7 +642,8 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
     # Empirical PSF - done differently
     if type(psf)==models.PSFEmpirical:
         cube1 = starcube(cat,image,npix=psf.npix,fillvalue=np.nan)
-        epsf1,nbadstar1,rms1 = mkempirical(cube1,order=psf.order)
+        coords = (cat['x'].data,cat['y'].data)
+        epsf1,nbadstar1,rms1 = mkempirical(cube1,order=psf.order,coords=coords,shape=psf._shape)
         initpsf = models.PSFEmpirical(epsf1,imshape=image.shape,order=psf.order)
         pf = PSFFitter(initpsf,image,cat,fitradius=fitradius,verbose=False)
         # Fit the height, xcen, ycen properly
@@ -754,10 +665,11 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
         psfcat = Table(psfcat)
         # Remake the empirical EPSF    
         cube = starcube(psfcat,image,npix=psf.npix,fillvalue=np.nan)
-        epsf,nbadstar,rms = mkempirical(cube,order=psf.order)
+        epsf,nbadstar,rms = mkempirical(cube,order=psf.order,coords=coords,shape=psf._shape)
         newpsf = models.PSFEmpirical(epsf,imshape=image.shape,order=psf.order)
         if verbose:
-            print('Median RMS: '+str(np.median(pf.starrms)))        
+            print('Median RMS: '+str(np.median(pf.starrms)))
+            print('dt = %.2f sec' % (time.time()-t0))
         return newpsf, None, None, psfcat, pf
         
     pf = PSFFitter(psf,image,cat,fitradius=fitradius,verbose=False) #verbose)
@@ -1041,11 +953,22 @@ def getpsf(psf,image,cat,fitradius=None,lookup=False,lorder=0,method='qr',subnei
     if lookup:
         if verbose:
             print('Making empirical lookup table with order='+str(lorder))
-            
-        #return pf.mklookup(lorder)
 
         pf.mklookup(lorder)
+        # Fit the stars again and get new RMS values
+        xdata = np.arange(pf.ntotpix)
+        out = pf.model(xdata,*pf.psf.params)
         newpsf = pf.psf.copy()
+        # Update information in the output catalog
+        ind1,ind2 = dln.match(outcat['id'],pcat['id'])
+        outcat['reject'] = 1
+        outcat['height'][ind1] = pf.starheight[ind2]
+        outcat['x'][ind1] = pf.starxcen[ind2]
+        outcat['y'][ind1] = pf.starycen[ind2]
+        outcat['rms'][ind1] = pf.starrms[ind2]
+        outcat['chisq'][ind1] = pf.starchisq[ind2]                
+        if verbose:
+            print('Median RMS: '+str(np.median(pf.starrms)))            
         
     if verbose:
         print('dt = %.2f sec' % (time.time()-t0))
