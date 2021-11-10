@@ -40,7 +40,25 @@ from . import leastsquares as lsq
 warnings.filterwarnings('ignore')
 
 def hfluxrad(im):
-    """ Calculate the half-flux radius of a star in an image."""
+    """
+    Calculate the half-flux radius of a star in an image.
+
+    Parameters
+    ----------
+    im : numpy array
+       The image of a star.
+
+    Returns
+    -------
+    hfluxrad: float
+       The half-flux radius.
+
+    Example
+    -------
+
+    hfrad = hfluxrad(im)
+
+    """
     ny,nx = im.shape
     xx,yy = np.meshgrid(np.arange(nx)-nx//2,np.arange(ny)-ny//2)
     rr = np.sqrt(xx**2+yy**2)
@@ -53,7 +71,25 @@ def hfluxrad(im):
     return hfluxrad
     
 def contourfwhm(im):
-    """ Return the FWHM of the PSF image."""
+    """
+    Measure the FWHM of a PSF or star image using contours.
+
+    Parameters
+    ----------
+    im : numpy array
+     The 2D image of a star.
+
+    Returns
+    -------
+    fwhm : float
+       The full-width at half maximum.
+
+    Example
+    -------
+
+    fwhm = contourfwhm(im)
+
+    """
     # get contour at half max and then get average radius
     ny,nx = im.shape
     xcen = nx//2
@@ -87,7 +123,25 @@ def contourfwhm(im):
     return fwhm
 
 def imfwhm(im):
-    """ Return the FWHM of the PSF image."""
+    """
+    Measure the FWHM of a PSF or star image.
+
+    Parameters
+    ----------
+    im : numpy array
+      The image of a star.
+
+    Returns
+    -------
+    fwhm : float
+      The full-width at half maximum of the star.
+
+    Example
+    -------
+
+    fwhm = imfwhm(im)
+
+    """
     ny,nx = im.shape
     xx,yy = np.meshgrid(np.arange(nx)-nx//2,np.arange(ny)-ny//2)
     rr = np.sqrt(xx**2+yy**2)
@@ -141,6 +195,24 @@ def bbox2xy(bbox):
     """
     Convenience method to convert boundary box of X/Y limits to 2-D X and Y arrays.  The upper limits
     are EXCLUSIVE following the python convention.
+
+    Parameters
+    ----------
+    bbox : BoundingBox object
+      A BoundingBox object defining a rectangular region of an image.
+
+    Returns
+    -------
+    x : numpy array
+      The 2D array of X-values of the bounding box region.
+    y : numpy array
+      The 2D array of Y-values of the bounding box region.
+
+    Example
+    -------
+
+    x,y = bbox2xy(bbox)
+
     """
     if isinstance(bbox,BoundingBox):
         x0,x1 = bbox.xrange
@@ -158,7 +230,42 @@ def bbox2xy(bbox):
     return x,y
 
 def gaussian2d(x,y,pars,deriv=False,nderiv=None):
-    """Two dimensional Gaussian model function"""
+    """
+    Two dimensional Gaussian model function.
+    
+    Parameters
+    ----------
+    x : numpy array
+      Array of X-values of points for which to compute the Gaussian model.
+    y : numpy array
+      Array of Y-values of points for which to compute the Gaussian model.
+    pars : numpy array or list
+       Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+    deriv : boolean, optional
+       Return the derivatives as well.
+    nderiv : int, optional
+       The number of derivatives to return.  The default is None
+        which means that all are returned if deriv=True.
+
+    Returns
+    -------
+    g : numpy array
+      The Gaussian model for the input x/y values and parameters (same
+        shape as x/y).
+    derivative : list
+      List of derivatives of g relative to the input parameters.
+        This is only returned if deriv=True.
+
+    Example
+    -------
+
+    g = gaussian2d(x,y,pars)
+
+    or
+
+    g,derivative = gaussian2d(x,y,pars,deriv=True)
+
+    """
     # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
 
     xdiff = x - pars[1]
@@ -239,7 +346,25 @@ def gaussian2d(x,y,pars,deriv=False,nderiv=None):
 
 
 def gaussian2d_fwhm(pars):
-    """ Return the FWHM of a 2D Gaussian."""
+    """
+    Return the FWHM of a 2D Gaussian.
+
+    Parameters
+    ----------
+    pars : numpy array or list
+       Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+
+    Returns
+    -------
+    fwhm : float
+       The full-width at half maximum of the Gaussian.
+    
+    Example
+    -------
+
+    fwhm = gaussian2d_fwhm(pars)
+
+    """
     # pars = [amplitude, x0, y0, xsig, ysig, theta]
 
     # xdiff = x-x0
@@ -261,7 +386,25 @@ def gaussian2d_fwhm(pars):
 
 
 def gaussian2d_flux(pars):
-    """ Return the total Flux of a 2D Gaussian."""
+    """
+    Return the total flux (or volume) of a 2D Gaussian.
+
+    Parameters
+    ----------
+    pars : numpy array or list
+       Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+
+    Returns
+    -------
+    flux : float
+       Total flux or volumne of the 2D Gaussian.
+    
+    Example
+    -------
+
+    flux = gaussian2d_flux(pars)
+
+    """
     # Volume is 2*pi*A*sigx*sigy
     amp = pars[0]
     xsig = pars[3]
@@ -272,7 +415,34 @@ def gaussian2d_flux(pars):
     
 
 def gaussian2d_sigtheta2abc(xstd,ystd,theta):
-    """ Convert 2D Gaussian sigma_x, sigma_y and theta to a, b, c coefficients."""
+    """
+    Convert 2D Gaussian sigma_x, sigma_y and theta to a, b, c coefficients.
+    f(x,y) = A*exp(-0.5 * (a*xdiff**2 + b*xdiff*ydiff + c*ydiff**2))
+
+    Parameters
+    ----------
+    xstd : float
+      The Gaussian sigma in the x-dimension.
+    ystd : float
+      The Gaussian sigma in the y-dimension.
+    theta : float
+      The orientation angle of the elliptical 2D Gaussian (radians).
+
+    Returns
+    -------
+    a : float
+      The x**2 coefficient in the 2D elliptical Gaussian equation.
+    b : float
+      The y**2 coefficient in the 2D elliptical Gaussian equation.
+    c : float
+      The x*y coefficient in the 2D elliptical Gaussian equation.
+
+    Example
+    -------
+ 
+    a,b,c = gaussian2d_sigtheta2abc(xstd,ystd,theta)
+
+    """
     
     # xdiff = x-x0
     # ydiff = y-y0
@@ -305,7 +475,35 @@ def gaussian2d_sigtheta2abc(xstd,ystd,theta):
 
     
 def gaussian2d_abc2sigtheta(a,b,c):
-    """ Convert 2D Gaussian a, b, c coefficients to sigma_x, sigma_y and theta."""
+    """
+    Convert 2D Gaussian a, b, c coefficients to sigma_x, sigma_y and theta.
+    The inverse of guassian2d_sigtheta2abc().
+    f(x,y) = A*exp(-0.5 * (a*xdiff**2 + b*xdiff*ydiff + c*ydiff**2))
+
+    Parameters
+    ----------
+    a : float
+      The x**2 coefficient in the 2D elliptical Gaussian equation.
+    b : float
+      The y**2 coefficient in the 2D elliptical Gaussian equation.
+    c : float
+      The x*y coefficient in the 2D elliptical Gaussian equation.
+
+    Returns
+    -------
+    xstd : float
+      The Gaussian sigma in the x-dimension.
+    ystd : float
+      The Gaussian sigma in the y-dimension.
+    theta : float
+      The orientation angle of the elliptical 2D Gaussian (radians).
+
+    Example
+    -------
+
+    xstd,ystd,stheta = gaussian2d_abc2sigtheta(a,b,c)
+
+    """
     
     # xdiff = x-x0
     # ydiff = y-y0
@@ -352,7 +550,46 @@ def gaussian2d_abc2sigtheta(a,b,c):
 
     
 def gaussian2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
-    """ Two dimensional Gaussian model function integrated over the pixels."""
+    """
+    Two dimensional Gaussian model function integrated over the pixels.
+
+   
+    Parameters
+    ----------
+    x : numpy array
+      Array of X-values of points for which to compute the Gaussian model.
+    y : numpy array
+      Array of Y-values of points for which to compute the Gaussian model.
+    pars : numpy array or list
+       Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+    deriv : boolean, optional
+       Return the derivatives as well.
+    nderiv : int, optional
+       The number of derivatives to return.  The default is None
+        which means that all are returned if deriv=True.
+    osamp : int, optional
+       The oversampling of the pixel when doing the integrating.
+          Default is 4.
+
+    Returns
+    -------
+    g : numpy array
+      The Gaussian model for the input x/y values and parameters (same
+        shape as x/y).
+    derivative : list
+      List of derivatives of g relative to the input parameters.
+        This is only returned if deriv=True.
+
+    Example
+    -------
+
+    g = gaussian2d_integrate(x,y,pars)
+
+    or
+
+    g,derivative = gaussian2d_integrate(x,y,pars,deriv=True)
+
+    """
 
     x = np.atleast_1d(x)
     y = np.atleast_1d(y)
@@ -455,7 +692,42 @@ def gaussian2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
     
 
 def moffat2d(x, y, pars, deriv=False, nderiv=None):
-    """Two dimensional Moffat model function"""
+    """
+    Two dimensional Moffat model function.
+
+    Parameters
+    ----------
+    x : numpy array
+      Array of X-values of points for which to compute the Moffat model.
+    y : numpy array
+      Array of Y-values of points for which to compute the Moffat model.
+    pars : numpy array or list
+       Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
+    deriv : boolean, optional
+       Return the derivatives as well.
+    nderiv : int, optional
+       The number of derivatives to return.  The default is None
+        which means that all are returned if deriv=True.
+
+    Returns
+    -------
+    g : numpy array
+      The Moffat model for the input x/y values and parameters (same
+        shape as x/y).
+    derivative : list
+      List of derivatives of g relative to the input parameters.
+        This is only returned if deriv=True.
+
+    Example
+    -------
+
+    g = moffat2d(x,y,pars)
+
+    or
+
+    g,derivative = moffat2d(x,y,pars,deriv=True)
+
+    """
     # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
 
     xdiff = x - pars[1]
@@ -540,7 +812,26 @@ def moffat2d(x, y, pars, deriv=False, nderiv=None):
         return g
 
 def moffat2d_fwhm(pars):
-    """ Return the FWHM of a 2D Moffat function."""
+    """
+    Return the FWHM of a 2D Moffat function.
+
+    Parameters
+    ----------
+    pars : numpy array or list
+       Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
+
+    Returns
+    -------
+    fwhm : float
+       The full-width at half maximum of the Moffat.
+    
+    Example
+    -------
+
+    fwhm = moffat2d_fwhm(pars)
+
+    """
+
     # [amplitude, x0, y0, xsig, ysig, theta, beta]
     # https://nbviewer.jupyter.org/github/ysbach/AO_2017/blob/master/04_Ground_Based_Concept.ipynb#1.2.-Moffat
 
@@ -557,7 +848,26 @@ def moffat2d_fwhm(pars):
 
 
 def moffat2d_flux(pars):
-    """ Return the total Flux of a 2D Moffat."""
+    """
+    Return the total Flux of a 2D Moffat.
+
+    Parameters
+    ----------
+    pars : numpy array or list
+       Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
+
+    Returns
+    -------
+    flux : float
+       Total flux or volumne of the 2D Moffat.
+    
+    Example
+    -------
+
+    flux = moffat2d_flux(pars)
+
+    """
+
     # [amplitude, x0, y0, xsig, ysig, theta, beta]
     # Volume is 2*pi*A*sigx*sigy
     # area of 1D moffat function is pi*alpha**2 / (beta-1)
@@ -579,8 +889,46 @@ def moffat2d_flux(pars):
 
 
 def moffat2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
-    """Two dimensional Moffat model function integrated over the pixels"""
-    # pars = [amplitude, x0, y0, sigma, beta]
+    """
+    Two dimensional Moffat model function integrated over the pixels.
+
+    Parameters
+    ----------
+    x : numpy array
+      Array of X-values of points for which to compute the Moffat model.
+    y : numpy array
+      Array of Y-values of points for which to compute the Moffat model.
+    pars : numpy array or list
+       Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
+    deriv : boolean, optional
+       Return the derivatives as well.
+    nderiv : int, optional
+       The number of derivatives to return.  The default is None
+        which means that all are returned if deriv=True.
+    osamp : int, optional
+       The oversampling of the pixel when doing the integrating.
+          Default is 4.
+
+    Returns
+    -------
+    g : numpy array
+      The Moffat model for the input x/y values and parameters (same
+        shape as x/y).
+    derivative : list
+      List of derivatives of g relative to the input parameters.
+        This is only returned if deriv=True.
+
+    Example
+    -------
+
+    g = moffat2d_integrate(x,y,pars)
+
+    or
+
+    g,derivative = moffat2d_integrate(x,y,pars,deriv=True)
+
+    """
+    # pars = [amplitude, x0, y0, xstd, ystd, theta, beta]
 
     x = np.atleast_1d(x)
     y = np.atleast_1d(y)
@@ -652,7 +1000,43 @@ def moffat2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
 
     
 def penny2d(x, y, pars, deriv=False, nderiv=None):
-    """ Gaussian core and Lorentzian-like wings, only Gaussian is tilted."""
+    """
+    Gaussian core and Lorentzian-like wings, only Gaussian is tilted.
+
+    Parameters
+    ----------
+    x : numpy array
+      Array of X-values of points for which to compute the Penny model.
+    y : numpy array
+      Array of Y-values of points for which to compute the Penny model.
+    pars : numpy array or list
+       Parameter list.
+        pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
+    deriv : boolean, optional
+       Return the derivatives as well.
+    nderiv : int, optional
+       The number of derivatives to return.  The default is None
+        which means that all are returned if deriv=True.
+
+    Returns
+    -------
+    g : numpy array
+      The Penny model for the input x/y values and parameters (same
+        shape as x/y).
+    derivative : list
+      List of derivatives of g relative to the input parameters.
+        This is only returned if deriv=True.
+
+    Example
+    -------
+
+    g = penny2d(x,y,pars)
+
+    or
+
+    g,derivative = penny2d(x,y,pars,deriv=True)
+
+    """
     # Lorentzian are azimuthally symmetric.
     # Lorentzian cannot be normalized, use Moffat beta=1.2 instead
     # pars = [amp,x0,y0,xsig,ysig,theta, relamp,sigma]
@@ -757,7 +1141,27 @@ def penny2d(x, y, pars, deriv=False, nderiv=None):
 
 
 def penny2d_fwhm(pars):
-    """ Return the FWHM of a 2D Penny function."""
+    """
+    Return the FWHM of a 2D Penny function.
+
+    Parameters
+    ----------
+    pars : numpy array or list
+       Parameter list.
+        pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
+
+    Returns
+    -------
+    fwhm : float
+       The full-width at half maximum of the Penny function.
+    
+    Example
+    -------
+
+    fwhm = penny2d_fwhm(pars)
+
+    """
+
     # [amplitude, x0, y0, xsig, ysig, theta, relative amplitude, sigma]
 
     amp = pars[0]
@@ -790,7 +1194,26 @@ def penny2d_fwhm(pars):
 
 
 def penny2d_flux(pars):
-    """ Return the total Flux of a 2D Penny function."""
+    """
+    Return the total Flux of a 2D Penny function.
+
+    Parameters
+    ----------
+    pars : numpy array or list
+       Parameter list.
+        pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
+
+    Returns
+    -------
+    flux : float
+       Total flux or volumne of the 2D Penny function.
+    
+    Example
+    -------
+
+    flux = penny2d_flux(pars)
+
+    """
     # [amplitude, x0, y0, xsig, ysig, theta, relative amplitude, sigma]    
 
     # Volume is 2*pi*A*sigx*sigy
@@ -817,7 +1240,48 @@ def penny2d_flux(pars):
     return volume
 
 def penny2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
-    """ Gaussian core and Lorentzian-like wings, only Gaussian is tilted integrated over the pixels."""
+    """
+    Gaussian core and Lorentzian-like wings, only Gaussian is tilted
+    integrated over the pixels.
+
+    Parameters
+    ----------
+    x : numpy array
+      Array of X-values of points for which to compute the Penny model.
+    y : numpy array
+      Array of Y-values of points for which to compute the Penny model.
+    pars : numpy array or list
+       Parameter list.
+        pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
+    deriv : boolean, optional
+       Return the derivatives as well.
+    nderiv : int, optional
+       The number of derivatives to return.  The default is None
+        which means that all are returned if deriv=True.
+    osamp : int, optional
+       The oversampling of the pixel when doing the integrating.
+          Default is 4.
+
+    Returns
+    -------
+    g : numpy array
+      The Penny model for the input x/y values and parameters (same
+        shape as x/y).
+    derivative : list
+      List of derivatives of g relative to the input parameters.
+        This is only returned if deriv=True.
+
+    Example
+    -------
+
+    g = penny2d_integrate(x,y,pars)
+
+    or
+
+    g,derivative = penny2d_integrate(x,y,pars,deriv=True)
+
+
+    """
     # Lorentzian are azimuthally symmetric.
     # Lorentzian cannot be normalized, use Moffat beta=1.2 instead
     # pars = [amp,x0,y0,xsig,ysig,theta, relamp,sigma]
@@ -951,7 +1415,44 @@ def penny2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
 
 
 def gausspow2d(x, y, pars, deriv=False, nderiv=None):
-    """ DoPHOT PSF, sum of elliptical Gaussians."""
+    """
+    DoPHOT PSF, sum of elliptical Gaussians.
+
+    Parameters
+    ----------
+    x : numpy array
+      Array of X-values of points for which to compute the Gausspow model.
+    y : numpy array
+      Array of Y-values of points for which to compute the Gausspow  model.
+    pars : numpy array or list
+       Parameter list.
+        pars = [amplitude, x0, y0, sigx, sigy, theta, beta4, beta6]
+    deriv : boolean, optional
+       Return the derivatives as well.
+    nderiv : int, optional
+       The number of derivatives to return.  The default is None
+        which means that all are returned if deriv=True.
+
+    Returns
+    -------
+    g : numpy array
+      The Gausspow model for the input x/y values and parameters (same
+        shape as x/y).
+    derivative : list
+      List of derivatives of g relative to the input parameters.
+        This is only returned if deriv=True.
+
+    Example
+    -------
+
+    g = gausspow2d(x,y,pars)
+
+    or
+
+    g,derivative = gausspow2d(x,y,pars,deriv=True)
+
+    """
+
     # Schechter, Mateo & Saha (1993), eq. 1 on pg.4
     # I(x,y) = Io * (1+z2+0.5*beta4*z2**2+(1/6)*beta6*z2**3)**(-1)
     # z2 = [0.5*(x**2/sigx**2 + 2*sigxy*x*y + y**2/sigy**2]
@@ -1046,7 +1547,27 @@ def gausspow2d(x, y, pars, deriv=False, nderiv=None):
 
 
 def gausspow2d_fwhm(pars):
-    """ Return the FWHM of a 2D DoPHOT Gausspow function."""
+    """
+    Return the FWHM of a 2D DoPHOT Gausspow function.
+
+    Parameters
+    ----------
+    pars : numpy array or list
+       Parameter list.
+        pars = [amplitude, x0, y0, sigx, sigy, theta, beta4, beta6]
+
+    Returns
+    -------
+    fwhm : float
+       The full-width at half maximum of the Penny function.
+    
+    Example
+    -------
+
+    fwhm = gausspow2d_fwhm(pars)
+
+    """
+
     # pars = [amplitude, x0, y0, xsig, ysig, theta, beta4, beta6]    
 
     amp = pars[0]
@@ -1086,7 +1607,27 @@ def gausspow2d_fwhm(pars):
     return fwhm
 
 def gausspow2d_flux(pars):
-    """ Return the flux of a 2D DoPHOT Gausspow function."""
+    """
+    Return the flux of a 2D DoPHOT Gausspow function.
+
+    Parameters
+    ----------
+    pars : numpy array or list
+       Parameter list.
+        pars = [amplitude, x0, y0, sigx, sigy, theta, beta4, beta6]
+
+    Returns
+    -------
+    flux : float
+       Total flux or volumne of the 2D Gausspow function.
+    
+    Example
+    -------
+
+    flux = gausspow2d_flux(pars)
+
+    """
+
     # pars = [amplitude, x0, y0, xsig, ysig, theta, beta4, beta6]
 
     amp = pars[0]
@@ -1114,7 +1655,47 @@ def gausspow2d_flux(pars):
 
     
 def gausspow2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
-    """ DoPHOT PSF, integrated over the pixels."""
+    """
+    DoPHOT PSF, integrated over the pixels.
+
+    Parameters
+    ----------
+    x : numpy array
+      Array of X-values of points for which to compute the Gausspow model.
+    y : numpy array
+      Array of Y-values of points for which to compute the Gausspow  model.
+    pars : numpy array or list
+       Parameter list.
+        pars = [amplitude, x0, y0, sigx, sigy, theta, beta4, beta6]
+    deriv : boolean, optional
+       Return the derivatives as well.
+    nderiv : int, optional
+       The number of derivatives to return.  The default is None
+        which means that all are returned if deriv=True.
+    osamp : int, optional
+       The oversampling of the pixel when doing the integrating.
+          Default is 4.
+
+    Returns
+    -------
+    g : numpy array
+      The Gausspow model for the input x/y values and parameters (same
+        shape as x/y).
+    derivative : list
+      List of derivatives of g relative to the input parameters.
+        This is only returned if deriv=True.
+
+    Example
+    -------
+
+    g = gausspow2d_integrate(x,y,pars)
+
+    or
+
+    g,derivative = gausspow2d_integreate(x,y,pars,deriv=True)
+
+    """
+
     # Schechter, Mateo & Saha (1993), eq. 1 on pg.4
     # I(x,y) = Io * (1+z2+0.5*beta4*z2**2+(1/6)*beta6*z2**3)**(-1)
     # z2 = [0.5*(x**2/sigx**2 + 2*sigxy*x*y + y**2/sigy**2]
@@ -1235,15 +1816,76 @@ def gausspow2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
 
 
 def relcoord(x,y,shape):
-    """ Convert absolute X/Y coordinates to relative ones to use
-    with the lookup table."""
+    """
+    Convert absolute X/Y coordinates to relative ones to use
+    with the lookup table.
+
+    Parameters
+    ----------
+    x : numpy array
+      Input x-values of positions in an image.
+    y : numpy array
+      Input Y-values of positions in an image.
+    shape : tuple or list
+      Two-element tuple or list of the (Ny,Nx) size of the image.
+
+    Returns
+    -------
+    relx : numpy array
+      The relative x-values ranging from -1 to +1.
+    rely : numpy array
+      The relative y-values ranging from -1 to +1.
+
+    Example
+    -------
+
+    relx,rely = relcoord(x,y,shape)
+
+    """
+
     midpt = [shape[0]//2,shape[1]//2]
     relx = (x-midpt[1])/shape[1]*2
     rely = (y-midpt[0])/shape[0]*2
     return relx,rely
     
 def empirical(x, y, pars, data, shape=None, deriv=False, korder=3):
-    """Empirical PSF"""
+    """
+    Evaluate an empirical PSF.
+
+    Parameters
+    ----------
+    x : numpy array
+      Array of X-values of points for which to compute the empirical model.
+    y : numpy array
+      Array of Y-values of points for which to compute the empirical model.
+    pars : numpy array or list
+       Parameter list.  pars = [amplitude, x0, y0].
+    deriv : boolean, optional
+       Return the derivatives as well.
+    nderiv : int, optional
+       The number of derivatives to return.  The default is None
+        which means that all are returned if deriv=True.
+
+    Returns
+    -------
+    g : numpy array
+      The empirical model for the input x/y values and parameters (same
+        shape as x/y).
+    derivative : list
+      List of derivatives of g relative to the input parameters.
+        This is only returned if deriv=True.
+
+    Example
+    -------
+
+    g = empirical(x,y,pars)
+
+    or
+
+    g,derivative = empirical(x,y,pars,deriv=True)
+
+    """
+
     npars = len(pars)
 
     # Parameters for the profile
@@ -1323,7 +1965,30 @@ def empirical(x, y, pars, data, shape=None, deriv=False, korder=3):
 
 
 def psfmodel(name,pars=None,**kwargs):
-    """ Select PSF model based on the name."""
+    """
+    Select PSF model based on the name.
+
+    Parameters
+    ----------
+    name : str
+      The type of PSF model to use: 'gaussian', 'moffat', 'penny', 'gausspow', 'empirical'.
+    pars : numpy array
+      The model parameters.
+    kwargs : dictionary
+      Any other keyword arguments that should be to initialize the PSF model.
+
+    Returns
+    -------
+    psf : PSF model
+      The requested PSF model.
+
+    Example
+    -------
+
+    psf = psfmodel('gaussian',[2.0, 2.5, 0.5])
+
+    """
+
     if str(name).lower() in _models.keys():
         return _models[str(name).lower()](pars,**kwargs)
     else:
@@ -1376,6 +2041,7 @@ class PSFBase:
 
     @params.setter
     def params(self,value):
+        """ Set the PSF model parameters."""
         self._params = value
 
     def starbbox(self,coords,imshape,radius=None):
@@ -1414,6 +2080,7 @@ class PSFBase:
         """
         Generate a model PSF for the input X/Y value and parameters.  If no inputs
         are given, then a postage stamp PSF image is returned.
+        This will include the contribution from the lookup table.
 
         Parameters
         ----------
@@ -1532,6 +2199,7 @@ class PSFBase:
     def model(self,xdata,*args,allpars=False,**kwargs):
         """
         Function to use with curve_fit() to fit a single stellar profile.
+        This includes the contribution of the lookup table.
 
         Parameters
         ----------
@@ -1584,6 +2252,7 @@ class PSFBase:
     def jac(self,xdata,*args,retmodel=False,allpars=False,**kwargs):
         """
         Method to return Jacobian matrix.
+        This includes the contribution of the lookup table.
 
         Parameters
         ----------
@@ -2001,7 +2670,6 @@ class PSFBase:
 
         subim = psf.sub(image,cat)
 
-
         """
 
         if isinstance(cat,np.ndarray):
@@ -2039,8 +2707,32 @@ class PSFBase:
                     
 
     def resid(self,cat,image,fillvalue=np.nan):
-        """ Produce a residual map of the cutout of the star (within the PSF footprint) and
-            the best-fitting PSF."""
+        """
+        Produce a residual map of the cutout of the star (within the PSF footprint) and
+        the best-fitting PSF.
+
+        Parameters
+        ----------
+        cat : table
+           The catalog of stars to use.  This should have "x" and "y" columns and
+             preferably also "height".
+        image : CCDData object
+           The image to use to generate the residuals images.
+        fillvalue : float, optional
+          The fill value to use for pixels that are bad are off the image.
+            Default is np.nan
+
+        Returns
+        -------
+        resid : numpy array
+           2D cube (Npix,Npix,Nstars) of the star images with the best-fitting PSF
+             model subtracted.
+        Example
+        -------
+
+        cube = psf.resid(cat,image)
+
+        """
 
         # Get the residuals data
         nstars = len(cat)
@@ -2082,9 +2774,11 @@ class PSFBase:
         return resid
             
     def __str__(self):
+        """ String representation of the PSF."""
         return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+',npix='+str(self.npix)+',lookup='+str(self.haslookup)+') FWHM=%.2f' % (self.fwhm())
 
     def __repr__(self):
+        """ String representation of the PSF."""        
         return self.__class__.__name__+'('+str(list(self.params))+',binned='+str(self.binned)+',npix='+str(self.npix)+',lookup='+str(self.haslookup)+') FWHM=%.2f' % (self.fwhm())
 
     @property
@@ -2110,7 +2804,28 @@ class PSFBase:
     # or even have footprint=True to use the footprint flux
     
     def steps(self,pars=None,bounds=None,star=False):
-        """ Return step sizes to use when fitting the PSF model parameters (at least initial sizes)."""
+        """
+        Return step sizes to use when fitting the PSF model parameters (at least initial sizes).
+
+        Parameters
+        ----------
+        pars : numpy array or list
+          List or array of parameters for which to produce step sizes.
+        bounds : tuple, optional
+          Two-element tuple of lower and upper constrainst on pars.
+        star : boolean, optional
+          Stellar parameters are included.  Default is False.
+
+        Returns
+        -------
+        steps : numpy array
+          Array of step sizes.
+
+        Example
+        -------
+        steps = psf.steps(pars)
+
+        """
         # star=True indicates that we have stellar parameters
         # Check the initial steps against the parameters to make sure that don't
         #   go past the boundaries
@@ -2174,7 +2889,27 @@ class PSFBase:
         return self._bounds
 
     def mkbounds(self,pars,imshape):
-        """ Make bounds for a set of input parameters."""
+        """
+        Make bounds for a set of input parameters.
+
+        Parameters
+        ----------
+        pars : numpy array or list
+          List or array of parameters for which to produce constraints.
+        imshape : tuple
+          Two-element tuple of the image size.
+
+        Returns
+        -------
+        bounds : tuple
+          Two-element tuple of lower and upper constraints in pars.
+
+        Example
+        -------
+
+        bounds = psf.mkbounds(pars)
+
+        """
 
         npars = len(pars)
         nmpars = len(self.params)
@@ -2206,7 +2941,28 @@ class PSFBase:
         return bounds
 
     def checkbounds(self,pars,bounds=None):
-        """ Check the parameters against the bounds."""
+        """
+        Check the parameters against the bounds.
+
+        Parameters
+        ----------
+        pars : numpy array or list
+          List or array of parameters for which to check the constraints.
+        bounds : tuple, optional
+          Two-element tuple of lower and upper constrainst on pars.
+
+        Returns
+        -------
+        check : numpy array
+          Integer array indicating if the parameter crossed the boundaries.
+           0-fine, 1-beyond the lower bound; 2-beyond the upper bound.
+
+        Example
+        -------
+
+        check = psf.checkbounds(pars,bounds)
+
+        """
         # 0 means it's fine
         # 1 means it's beyond the lower bound
         # 2 means it's beyond the upper bound
@@ -2220,7 +2976,27 @@ class PSFBase:
         return check
         
     def limbounds(self,pars,bounds=None):
-        """ Limit the parameters to the boundaries."""
+        """
+        Limit the parameters to the boundaries.
+
+        Parameters
+        ----------
+        pars : numpy array or list
+          List or array of parameters.
+        bounds : tuple, optional
+          Two-element tuple of lower and upper constrainst on pars.
+
+        Returns
+        -------
+        outpars : numpy array
+          Array of output parameters that are limited to the bounds.
+
+        Example
+        -------
+
+        outpars = psf.limbounds(pars,bounds)
+
+        """
         if bounds is None:
             bounds = self.mkbounds(pars)
         lbounds,ubounds = bounds
@@ -2228,14 +3004,59 @@ class PSFBase:
         return outpars
 
     def limsteps(self,steps,maxsteps):
-        """ Limit the parameter steps to maximum step sizes."""
+        """
+        Limit the parameter steps to maximum step sizes.
+
+        Parameters
+        ----------
+        steps : numpy array
+          Array of step sizes to limit.
+        maxstep : numpy array
+          Array of maximum step sizes to limit the input steps to.
+
+        Returns
+        -------
+        outsteps : numpy array
+           array of step sizes that have been limited to the maximum values.
+
+        Example
+        -------
+
+        outsteps = psf.limsteps(steps,maxsteps)
+
+        """
         signs = np.sign(steps)
         outsteps = np.minimum(np.abs(steps),maxsteps)
         outsteps *= signs
         return outsteps
 
     def newpars(self,pars,steps,bounds,maxsteps):
-        """ Get new parameters given initial parameters, steps and constraints."""
+        """
+        Get new parameters given initial parameters, steps and constraints.
+        
+        Parameters
+        ----------
+        pars : numpy array or list
+          List or array of initial parameters.
+        steps : numpy array
+          Array of steps to add to pars.
+        bounds : tuple, optional
+          Two-element tuple of lower and upper constrainst on pars.
+        maxstep : numpy array
+          Array of maximum step sizes to limit the input steps to.     
+
+        Returns
+        -------
+        newpars : numpy array or list
+          Array of new parameters that have been incremented by
+           steps but limited by bounds and maxsteps.
+
+        Example
+        -------
+
+        newpars = psf.newpars(pars,steps,bounds,maxsteps)
+
+        """
 
         # Limit the steps to maxsteps
         limited_steps = self.limsteps(steps,maxsteps)
@@ -2332,8 +3153,27 @@ class PSFBase:
         pass
 
     def thumbnail(self,filename=None,figsize=6):
-        """ Generate a thumbnail image of the PSF."""
+        """
+        Generate a thumbnail image of the PSF.
 
+        Parameters
+        ----------
+        filename : str, optional
+           Filename of the output thumbnail file.  Default is "psf.png".
+        figsize : float, optional
+           The figure size in inches.  Default is 6.
+
+        Returns
+        -------
+        The PSF thumbnail is saved to a file.
+
+        Example
+        -------
+
+        psf.thumbnail('thumbnai.png')
+
+        """
+        
         if filename is None:
             filename = 'psf.png'
         if os.path.exists(filename): os.remove(filename)
