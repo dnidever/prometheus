@@ -2571,7 +2571,7 @@ class PSFBase:
                 maxpercdiff = np.max(percdiff)
                 
                 if verbose:
-                    print('N = '+str(ount))
+                    print('N = '+str(count))
                     print('bestpars = '+str(bestpar))
                     print('dbeta = '+str(dbeta))
                 

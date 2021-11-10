@@ -1075,6 +1075,7 @@ def getpsf(psf,image,cat,fitradius=None,lookup=False,lorder=0,method='qr',subnei
         # Update information in the output catalog
         ind1,ind2 = dln.match(outcat['id'],pcat['id'])
         outcat['reject'] = 1
+        outcat['reject'][ind1] = 0
         outcat['height'][ind1] = pf.starheight[ind2]
         outcat['x'][ind1] = pf.starxcen[ind2]
         outcat['y'][ind1] = pf.starycen[ind2]
@@ -1082,7 +1083,7 @@ def getpsf(psf,image,cat,fitradius=None,lookup=False,lorder=0,method='qr',subnei
         outcat['chisq'][ind1] = pf.starchisq[ind2]                
         if verbose:
             print('Median RMS: '+str(np.median(pf.starrms)))            
-        
+            
     if verbose:
         print('dt = %.2f sec' % (time.time()-t0))
     

@@ -980,6 +980,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
             percdiff_all[0::3] = diff_all[0::3]/np.maximum(oldpar_all[0::3],0.0001)*100  # height
             percdiff_all[1::3] = diff_all[1::3]*100               # x
             percdiff_all[2::3] = diff_all[2::3]*100               # y
+            diff = diff_all[gf.freepars]
             percdiff = percdiff_all[gf.freepars]
             
             # Freeze parameters/stars that converged
