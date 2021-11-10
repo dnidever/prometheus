@@ -151,7 +151,11 @@ def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fit
             # 3c) Construct the PSF iteratively
             #---------------------------------
             # Make the initial PSF slightly elliptical so it's easier to fit the orientation
-            initpsf = models.psfmodel(psfname,[fwhm/2.35,0.9*fwhm/2.35,0.0],binned=binned,npix=npsfpix)
+            if psfname.lower() != 'empirical':
+                initpsf = models.psfmodel(psfname,[fwhm/2.35,0.9*fwhm/2.35,0.0],binned=binned,npix=npsfpix)
+            else:
+                initpsf = models.psfmodel(psfname,npix=npsfpix,imshape=image.shape,order=lorder)
+            # run getpsf
             psf,psfpars,psfperror,psfcat = getpsf.getpsf(initpsf,image,psfobj,fitradius=psffitradius,
                                                          lookup=lookup,lorder=lorder,subnei=psfsubnei,
                                                          allcat=objects,reject=reject,verbose=(verbose>=2))

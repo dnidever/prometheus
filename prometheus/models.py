@@ -2423,7 +2423,16 @@ class PSFBase:
         binned = head.get('BINNED')
         if binned is not None: kwargs['binned'] = binned
         npix = head.get('NPIX')
-        if npix is not None: kwargs['npix'] = npix        
+        if npix is not None: kwargs['npix'] = npix
+        if psftype.lower()=='empirical':
+            yshape = head.get('YSHAPE')
+            xshape = head.get('XSHAPE')
+            if yshape is not None and xshape is not None:
+                imshape = (yshape,xshape)
+            else:
+                imshape = None
+            kwargs['imshape'] = imshape
+            kwargs['korder'] = head.get('KORDER')            
         return psfmodel(psftype,data,**kwargs)
 
     def tohdu(self):
@@ -2461,7 +2470,7 @@ class PSFBase:
 class PSFGaussian(PSFBase):
 
     # Initalize the object
-    def __init__(self,mpars=None,npix=511,binned=False):
+    def __init__(self,mpars=None,npix=51,binned=False):
         # MPARS are the model parameters
         if mpars is None:
             mpars = np.array([1.0,1.0,0.0])
@@ -2846,9 +2855,15 @@ class PSFEmpirical(PSFBase):
     """ Empirical look-up table PSF, can vary spatially."""
 
     # Initalize the object
-    def __init__(self,mpars,imshape=None,korder=3,npix=None):
+    def __init__(self,mpars,imshape=None,korder=3,npix=51,binned=True,order=0):
         if mpars is None:
-            raise ValueError('Must input 2D or 3D numpy array')
+            mpars = PSFGaussian(npix=npix)()  # initialize with Gaussian of 1
+            if order==1:
+                mpars0 = mpars.copy()
+                mpars = np.zeros((npix,npix,4),float)
+                mpars[:,:,0] = mpars0
+                if imshape is None:
+                    imshape = (2048,2048)  # dummy image shape
         if mpars.ndim==2:
             npix,nx = mpars.shape
             npars = 1
@@ -2859,9 +2874,9 @@ class PSFEmpirical(PSFBase):
         # Need image shape if there are higher-order terms
         if order==1 and imshape is None:
             raise ValueError('Image shape must be input for spatially varying PSF')
-        super().__init__([],npix=npix)
+        super().__init__([],npix=npix,binned=True)
         self.npix = npix
-        self._order = order
+        self.order = order
         self._data = mpars
         self._npars = npars
         self._korder = korder
@@ -2952,8 +2967,11 @@ class PSFEmpirical(PSFBase):
         hdulist.append(fits.PrimaryHDU(self._data))
         hdulist[0].header['PSFTYPE'] = 'Empirical'
         hdulist[0].header['NPIX'] = self.npix
-        hdulist[0].header['ORDER'] = self._order
-        hdulist[0].header['SHAPE'] = self._shape
+        hdulist[0].header['BINNED'] = self.binned
+        hdulist[0].header['ORDER'] = self.order
+        if self._shape is not None:
+            hdulist[0].header['YSHAPE'] = self._shape[0]
+            hdulist[0].header['XSHAPE'] = self._shape[1]     
         hdulist[0].header['KORDER'] = self._korder        
         hdulist.writeto(filename,overwrite=overwrite)
         hdulist.close()

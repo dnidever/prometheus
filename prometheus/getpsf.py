@@ -91,7 +91,7 @@ def subtractnei(image,allcat,psfcat,psf):
         good = ((flux1/err1>2) & (flux1>0) & (model1/np.max(model1)>0.25))
         height = np.median(flux1[good]/model1[good]) * initpars[0]
         pars = [height, x1, y1]
-        #starcat,perror = psf.fit(flux,pars=initpars,radius=fitradius,recenter=False)
+        #starcat,perror = psf.fit(flux,pars=initpars,radius=fitradius,recenter=False,niter=2)
         #pars = [starcat['height'][0],starcat['x'][0],starcat['y'][0]]
         im1 = psf(pars=pars,bbox=bbox)
         resid[bbox.slices].data -= im1
@@ -205,7 +205,8 @@ class PSFFitter(object):
             print('model: '+str(self.niter)+' '+str(args))
         
         psf = self.psf.copy()
-        psf._params = list(args)
+        if type(psf)!=models.PSFEmpirical:
+            psf._params = list(args)
         # Loop over the stars and generate the model image
         allim = np.zeros(self.ntotpix,float)
         pixcnt = 0
@@ -599,9 +600,51 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
 
     t0 = time.time()
     print = utils.getprintfunc() # Get print function to be used locally, allows for easy logging   
+
+    # Initialize the output catalog best-fitting values for the PSF stars
+    dt = np.dtype([('id',int),('height',float),('x',float),('y',float),('npix',int),('rms',float),
+                   ('chisq',float),('ixmin',int),('ixmax',int),('iymin',int),('iymax',int)])
+    psfcat = np.zeros(len(cat),dtype=dt)
+    if 'id' in cat.colnames:
+        psfcat['id'] = cat['id']
+    else:
+        psfcat['id'] = np.arange(len(cat))+1
     
+
     # Fitting the PSF to the stars
     #-----------------------------
+
+    # Empirical PSF - done differently
+    if type(psf)==models.PSFEmpirical:
+        cube1 = models.starcube(cat,image,npix=psf.npix,fillvalue=np.nan)
+        epsf1,nbadstar1,rms1 = models.mkempirical(cube1,order=psf.order)
+        initpsf = models.PSFEmpirical(epsf1,imshape=image.shape,order=psf.order)
+        pf = PSFFitter(initpsf,image,cat,fitradius=fitradius,verbose=False)
+        # Fit the height, xcen, ycen properly
+        xdata = np.arange(pf.ntotpix)
+        out = pf.model(xdata,[])
+        # Put information into the psfcat table
+        psfcat['height'] = pf.starheight
+        psfcat['x'] = pf.starxcen
+        psfcat['y'] = pf.starycen
+        psfcat['chisq'] = pf.starchisq
+        psfcat['rms'] = pf.starrms
+        psfcat['npix'] = pf.starnpix    
+        for i in range(len(cat)):
+            bbox = pf.bboxdata[i]
+            psfcat['ixmin'][i] = bbox.ixmin
+            psfcat['ixmax'][i] = bbox.ixmax
+            psfcat['iymin'][i] = bbox.iymin
+            psfcat['iymax'][i] = bbox.iymax        
+        psfcat = Table(psfcat)
+        # Remake the empirical EPSF    
+        cube = models.starcube(psfcat,image,npix=psf.npix,fillvalue=np.nan)
+        epsf,nbadstar,rms = models.mkempirical(cube,order=psf.order)
+        newpsf = models.PSFEmpirical(epsf,imshape=image.shape,order=psf.order)
+        if verbose:
+            print('Median RMS: '+str(np.median(pf.starrms)))        
+        return newpsf, None, None, psfcat, pf
+        
     pf = PSFFitter(psf,image,cat,fitradius=fitradius,verbose=False) #verbose)
     xdata = np.arange(pf.ntotpix)
     initpar = psf.params.copy()
@@ -800,15 +843,19 @@ def getpsf(psf,image,cat,fitradius=None,lookup=False,lorder=0,method='qr',subnei
 
     # Generate an empirical image of the stars
     # and fit a model to it to get initial estimates
-    cube = models.starcube(psfcat,image,npix=psf.npix,fillvalue=np.nan)
-    epsf,nbadstar,rms = models.mkempirical(cube,order=0)
-    epsfim = CCDData(epsf,error=epsf.copy()*0+1,mask=~np.isfinite(epsf))
-    pars,perror,mparams = psf.fit(epsfim,pars=[1.0,psf.npix/2,psf.npix//2],allpars=True)
-    initpar = mparams.copy()
-    curpsf = psf.copy()
-    curpsf.params = initpar
-    if verbose:
-        print('Initial estimate from empirical PSF fit = '+str(mparams))
+    if type(psf)!=models.PSFEmpirical:
+        cube = models.starcube(psfcat,image,npix=psf.npix,fillvalue=np.nan)
+        epsf,nbadstar,rms = models.mkempirical(cube,order=0)
+        epsfim = CCDData(epsf,error=epsf.copy()*0+1,mask=~np.isfinite(epsf))
+        pars,perror,mparams = psf.fit(epsfim,pars=[1.0,psf.npix/2,psf.npix//2],allpars=True)
+        initpar = mparams.copy()
+        curpsf = psf.copy()
+        curpsf.params = initpar
+        if verbose:
+            print('Initial estimate from empirical PSF fit = '+str(mparams))
+    else:
+        curpsf = psf.copy()
+        initpar = psf.params.copy()
         
     # Outlier rejection iterations
     nrejiter = 0
