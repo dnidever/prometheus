@@ -110,3 +110,36 @@ def aperphot(image,objects,aper=[3],gain=None,mag_zeropoint=25.0):
     
     return outcat
 
+def apercorr(psf,image,objects,psfobj,model):
+    """ Calculate aperture correction."""
+
+    # Remove models for PSF stars from "model" and
+    # subtract that from image.  Then do aperture photometry
+    modelnei = model.copy()
+    modelnei = psf.sub(modelnei,objpsf,nocopy=True)
+
+    # Subtract everything except the PSF stars from the image
+    resid = image.copy()
+    if image.mask is not None:
+        resid.data[~resid.mask] -= modelnei.data[~resid.mask]
+    else:
+        resid.data -= modelnei.data            
+
+
+    # Do aperture photometry with lots of apertures on the PSF
+    #  stars
+    apers = np.array([3.0,3.7965,4.8046,6.0803,7.6947,9.7377,12.3232,
+                      15.5952,19.7360,24.9762,31.6077,40.0000])
+    apercat = aperphot(resid,psfobj,apers)
+
+    # Fit curve of growth
+    # use magnitude differences between successive apertures.
+
+    # Calculate "total" magnitude for the PSF stars
+    
+    # Calculate median offset between total and PSF magnitude
+
+    # Apply aperture correction to the data
+    #  add apcorr column and keep initial mags in instmag
+    
+    

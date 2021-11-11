@@ -26,7 +26,8 @@ except ImportError:
     
 # run PSF fitting on an image
 def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fitradius=None,npsfpix=51,
-        binned=False,lookup=False,lorder=0,recenter=True,reject=False,timestamp=False,verbose=False):
+        binned=False,lookup=False,lorder=0,recenter=True,reject=False,apcorr=False,timestamp=False,
+        verbose=False):
     """
     Run PSF photometry on an image.
 
@@ -61,6 +62,8 @@ def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fit
        Allow the centroids to be fit.  Default is True.
     reject : boolean, optional
        When constructin the PSF, reject PSF stars with high RMS values.  Default is False.
+    apcorr : boolean, optional
+       Apply aperture correction.  Default is False.
     timestamp : boolean, optional
          Add timestamp in verbose output (if verbose=True). Default is False.       
     verbose : boolean, optional
@@ -194,6 +197,14 @@ def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fit
         outobj = allobjects.copy()
         for n in psfout.columns:
             outobj[n] = psfout[n]
+
+
+    # 5) Apply aperture correction
+    #-----------------------------
+    if apcorr:
+        if verbose:
+            print('Step 5: Applying aperture correction')
+        outobj = aperture.apcorr(psf,image,outobj,model)
             
     if verbose:
         print('dt = %.2f sec' % (time.time()-start))

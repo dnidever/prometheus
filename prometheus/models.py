@@ -2641,10 +2641,74 @@ class PSFBase:
         else:
             return bestpar,perror,model
 
-    
+
+    def add(self,im,cat,sky=False,radius=None,nocopy=False):
+        """
+        Method to add stars using the PSF model from an image.
+
+        Parameters
+        ----------
+        im : CCDData object
+            Image to use for fitting.
+        cat : catalog
+            Catalog of stellar parameters.  Columns must include height, x, y and sky.
+        sky : boolean, optional
+            Include sky in the model that is subtracted.  Default is False.
+        radius : float, optional
+            PSF radius to use.  The default is to use the full size of the PSF.
+        nocopy: boolean, optional
+            Return the original image with the stars added.  Default is False
+              and a copy of the image will be returned.
+
+        Returns
+        -------
+        addim : CCDData object
+            Image with stellar models added.
+
+        Example
+        -------
+
+        addim = psf.add(image,cat)
+
+        """
+
+        if isinstance(cat,np.ndarray):
+            columns = cat.dtype.names
+        elif isinstance(cat,dict):
+            columns = cat.keys()
+        elif isinstance(cat,Table):
+            columns = cat.columns
+        else:
+            raise ValueError('Only ndarray, astropy Table or dictionaries supported for catalogs')
+
+        for n in ['height','x','y','sky']:
+            if not n in columns:
+                raise ValueError('Catalog must have height, x, y and sky columns')
+            
+        ny,nx = im.shape    # python images are (Y,X)
+        nstars = np.array(cat).size
+        hpix = self.npix//2
+        if radius is None:
+            radius = self.radius
+        else:
+            radius = np.minimum(self.radius,radius)
+        if nocopy:
+            addim = im
+        else:
+            addim = im.data.copy()            
+        for i in range(nstars):
+            pars = [cat['height'][i],cat['x'][i],cat['y'][i]]
+            if sky:
+                pars.append(cat['sky'][i])
+            bbox = self.starbbox((pars[1],pars[2]),im.shape,radius)
+            im1 = self(pars=pars,bbox=bbox)
+            addim[bbox.slices] += im1            
+        return addim
+                    
+        
     def sub(self,im,cat,sky=False,radius=None,nocopy=False):
         """
-        Method to subtract a single star using the PSF model.
+        Method to subtract stars using the PSF model from an image.
 
         Parameters
         ----------
