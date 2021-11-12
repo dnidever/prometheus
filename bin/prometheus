@@ -23,15 +23,23 @@ except ImportError:
 # Main command-line program
 if __name__ == "__main__":
     parser = ArgumentParser(description='Run Prometheus on an image')
-    parser.add_argument('files', type=str, nargs='+', help='Images FITS files or list')
-    parser.add_argument('-p','--psf', type=str, nargs=1, default='gaussian', help='PSF model type')
+    parser.add_argument('files', type=str, nargs='+', help='Images FITS files or list.')
+    parser.add_argument('-p','--psf', type=str, nargs=1, default='gaussian', help='PSF model type.')
+    parser.add_argument('--iterdet', type=int, nargs=1, default=0, help='Number of detection iterations.')
+    parser.add_argument('--psfsubnei', action='store_true', help='Subtract PSF neighbors.')
+    parser.add_argument('--psffitradius', type=str, nargs=1, default=None, help='Fitting radius when constructing PSF.  Default is PSF FWHM.')
+    parser.add_argument('--fitradius', type=str, nargs=1, default=None, help='Fitting radius of stars in image.  Default is PSF FWHM.')
+    parser.add_argument('--npsfpix', type=int, nargs=1, default=51, help='Size of PSF footprint.')
+    parser.add_argument('--binned', action='store_true', help='Binned analytical model.')
+    parser.add_argument('--lookup', action='store_true', help='Use an empirical lookup table.')
+    parser.add_argument('--lorder', type=int, nargs=1, default=0, help='Order of empirical/lookup spatial variations.')
+    parser.add_argument('--psftrim', type=str, nargs=1, default='', help='Trim PSF size to radius where psftrim fraction of flux is removed.')
+    parser.add_argument('--norecenter', action='store_true', help='Do not fit the x/y centroid positions when PSF fitting')
+    parser.add_argument('-r','--reject', action='store_true', help='Reject high RMS PSF stars.')
+    parser.add_argument('--apcorr', action='store_true', help='Apply aperture correction.')               
     parser.add_argument('--outfile', type=str, nargs=1, default='', help='Output filename')
     parser.add_argument('-d','--outdir', type=str, nargs=1, default='', help='Output directory')        
     parser.add_argument('-l','--list', action='store_true', help='Input is a list of FITS files')
-    parser.add_argument('--psffitradius', type=str, nargs=1, default=None, help='Fitting radius when constructing PSF.  Default is PSF FWHM.')
-    parser.add_argument('--fitradius', type=str, nargs=1, default=None, help='Fitting radius of stars in image.  Default is PSF FWHM.')    
-    parser.add_argument('--norecenter', action='store_true', help='Do not fit the x/y centroid positions when PSF fitting')
-    parser.add_argument('-r','--reject', action='store_true', help='Reject high RMS PSF stars.')        
     parser.add_argument('--verbose', type=int, default=0, help='Verbose output')
     parser.add_argument('-t','--timestamp', action='store_true', help='Add timestamp to Verbose output')    
     args = parser.parse_args()
@@ -39,6 +47,22 @@ if __name__ == "__main__":
     t0 = time.time()
     files = args.files
     psftype = dln.first_el(args.psf)
+    iterdet = args.iterdet
+    psfsubnei = args.psfsubnei
+    psffitradius = args.psffitradius
+    fitradius = args.fitradius    
+    npsfpix = dln.first_el(args.fitradius)
+    binned = args.binned
+    lookup = args.lookup
+    lorder = dln.first_el(args.lorder)
+    psftrim = dln.first_el(args.psftrim)
+    if psftrim=='':
+        psftrim = None
+    else:
+        psftrim = float(psftrim)
+    norecenter = args.norecenter
+    reject = args.reject
+    apcorr = args.apcorr
     inpoutfile = dln.first_el(args.outfile)
     outdir = dln.first_el(args.outdir)
     if outdir == '':
@@ -46,13 +70,10 @@ if __name__ == "__main__":
     else:
         if os.path.exists(outdir) is False:
             os.mkdir(outdir)
-    verbose = args.verbose
-    psffitradius = args.psffitradius
-    fitradius = args.fitradius    
-    norecenter = args.norecenter
-    reject = args.reject
-    timestamp = args.timestamp    
     inlist = dln.first_el(args.list)
+    verbose = args.verbose
+    timestamp = args.timestamp    
+
 
     # Check PSF type
     if psftype not in models._models.keys():
@@ -106,8 +127,9 @@ if __name__ == "__main__":
                     print('Image %3d:  %s  ' % (i+1,f))
                     
             # Run Prometheus
-            out, model, sky, psf = pm.run(image,psfname=psftype,psffitradius=psffitradius,fitradius=fitradius,
-                                          recenter=~norecenter,reject=reject,verbose=verbose)
+            out, model, sky, psf = pm.run(image,psfname=psftype,iterdet=iterdet,psfsubnei=psfsubnei,psffitradius=psffitradius,
+                                          fitradius=fitradius,npsfpix=npsfpix,binned=binned,lookup=lookup,lorder=lorder,
+                                          psftrim=psftrim,recenter=~norecenter,reject=reject,apcorr=apcorr,verbose=verbose)
                 
             # Save the output
             if inpoutfile!='':

@@ -26,8 +26,8 @@ except ImportError:
     
 # run PSF fitting on an image
 def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fitradius=None,npsfpix=51,
-        binned=False,lookup=False,lorder=0,recenter=True,reject=False,apcorr=False,timestamp=False,
-        verbose=False):
+        binned=False,lookup=False,lorder=0,psftrim=None,recenter=True,reject=False,apcorr=False,
+        timestamp=False,verbose=False):
     """
     Run PSF photometry on an image.
 
@@ -58,6 +58,8 @@ def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fit
         Use an empirical lookup table.  Default is False.
     lorder : int, optional
        The order of the spatial variations (0=constant, 1=linear).  Default is 0.
+    psftrim: float, optional
+       Trim the PSF size to a radius where "psftrim" fraction of flux is removed.  Default is None.
     recenter : boolean, optional
        Allow the centroids to be fit.  Default is True.
     reject : boolean, optional
@@ -162,6 +164,9 @@ def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fit
             psf,psfpars,psfperror,psfcat = getpsf.getpsf(initpsf,image,psfobj,fitradius=psffitradius,
                                                          lookup=lookup,lorder=lorder,subnei=psfsubnei,
                                                          allcat=objects,reject=reject,verbose=(verbose>=2))
+            # Trim the PSF
+            if psftrim is not None:
+                psf.trim(psftrim)
             if verbose:
                 print('Final PSF: '+str(psf))
                 gd, = np.where(psfcat['reject']==0)
