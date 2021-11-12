@@ -3163,6 +3163,41 @@ class PSFBase:
         """ Create a new copy of this LSF object."""
         return copy.deepcopy(self)        
 
+    def trim(self,trimflux):
+        """ Trim the PSF size to a radius where "trimflux" is removed."""
+        xx,yy = np.meshgrid(np.arange(self.npix)-self.npix//2,np.arange(self.npix)-self.npix//2)
+        rr = np.sqrt(xx**2+yy**2)
+        im = self()
+        r = rr.ravel()
+        f = im.ravel()
+        si = np.argsort(r)
+        rsi = r[si]
+        fsi = f[si]
+        totflux = np.sum(im)
+        cfsi = np.cumsum(fsi)/totflux
+        ind = np.max(np.where(cfsi<(1-trimflux))[0])
+        rtrim = rsi[ind]
+        rtrim = int(np.ceil(rtrim))
+        newnpix = np.minimum(2*rtrim+1,self.npix)
+        if newnpix!=self.npix:
+            newradius = newnpix//2
+            off = (self.npix-newnpix)//2
+            if type(self)==PSFEmpirical:
+                data = self._data
+                if data.ndim==2:
+                    data = data[off:-off,off:-off]
+                elif data.ndim==3:
+                    data = data[off:-off,off:-off,:]
+                # Re-initialize a temporary PSF to generate the splines
+                temp = PSFEmpirical(data,imshape=self._shape,korder=self._fpars[0].degrees[0],
+                                    npix=newnpix,order=self.order,lookup=self.lookup)
+                self._data = data
+                self._fpars = copy.deepcopy(temp._fpars)
+                del temp
+            self.npix = newnpix
+            self.radius = newradius
+            self._unitfootflux = np.sum(self())
+        
     @property
     def haslookup(self):
         """ Check if there is a lookup table."""

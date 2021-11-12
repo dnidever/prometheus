@@ -205,7 +205,13 @@ def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fit
         if verbose:
             print('Step 5: Applying aperture correction')
         outobj = aperture.apcorr(psf,image,outobj,model)
-            
+
+    # Add coordinates if there's a WCS
+    if image.wcs is not None:
+        skyc = image.wcs.pixel_to_world(outobj['x'],outobj['y'])
+        outobj['ra'] = skyc.ra
+        outobj['dec'] = skyc.dec     
+        
     if verbose:
         print('dt = %.2f sec' % (time.time()-start))
 
