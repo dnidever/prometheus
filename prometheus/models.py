@@ -2726,7 +2726,7 @@ class PSFBase:
 
         Returns
         -------
-        subim : CCDData object
+        subim : numpy array
             Image with stellar models subtracted.
 
         Example
@@ -2745,9 +2745,11 @@ class PSFBase:
         else:
             raise ValueError('Only ndarray, astropy Table or dictionaries supported for catalogs')
 
-        for n in ['height','x','y','sky']:
+        for n in ['height','x','y']:
             if not n in columns:
-                raise ValueError('Catalog must have height, x, y and sky columns')
+                raise ValueError('Catalog must have height, x, and y columns')
+        if sky and 'sky' not in columns:
+            raise ValueError('Catalog must have sky column')
             
         ny,nx = im.shape    # python images are (Y,X)
         nstars = np.array(cat).size

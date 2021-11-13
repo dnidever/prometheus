@@ -161,7 +161,7 @@ def pickpsfstars(objects,fwhm,nstars=100,logger=None,verbose=False):
     # -good clas_star values (unless FWHM too large)
     # -good mag range, bright but not too bright
     # -no flags set
-    gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.1) & 
+    gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.05) & 
                  (objects['fwhm']>0.5*fwhm) & (objects['fwhm']<1.5*fwhm) &
                  (objects['mag_auto']>(minmag+1.0)) & (objects['mag_auto']<(maxmag-0.5)) &
                  (objects['flags']==0) & (neidist>15.0) & (neimagdiff>1.0))
@@ -170,7 +170,7 @@ def pickpsfstars(objects,fwhm,nstars=100,logger=None,verbose=False):
     if ngdobjects<10:
         if verbose:
             print("Too few PSF stars on first try. Loosening cuts")
-        gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.15) & 
+        gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.10) & 
                      (objects['fwhm']>0.2*fwhm) & (objects['fwhm']<1.8*fwhm) &
                      (objects['mag_auto']>(minmag+0.5)) & (objects['mag_auto']<(maxmag-0.5)) &
                      (neidist>10) & (neimagdiff>1.0))

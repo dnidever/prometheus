@@ -166,7 +166,10 @@ def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fit
                                                          allcat=objects,reject=reject,verbose=(verbose>=2))
             # Trim the PSF
             if psftrim is not None:
+                oldnpix = psf.npix
                 psf.trim(psftrim)
+                if verbose:
+                    print('Trimming PSF size from '+str(oldnpix)+' to '+str(self.npix))
             if verbose:
                 print('Final PSF: '+str(psf))
                 gd, = np.where(psfcat['reject']==0)
@@ -202,17 +205,28 @@ def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fit
         outobj = allobjects.copy()
         for n in psfout.columns:
             outobj[n] = psfout[n]
-
+        # change mag, magerr to psfmag, psfmag_err
+        outobj['mag'].name = 'psfmag'
+        outobj['mag_error'].name = 'psfmag_error'        
 
     # 5) Apply aperture correction
     #-----------------------------
     if apcorr:
         if verbose:
             print('Step 5: Applying aperture correction')
-        outobj = aperture.apcorr(psf,image,outobj,model)
+        outobj,grow = aperture.apercorr(psf,image,outobj,psfcat,model,verbose=verbose)
 
+    # Add exposure time correction
+    exptime = image.header.get('exptime')
+    if exptime is not None:
+        if verbose:
+            print('Applying correction for exposure time %.2 s' % exptime)
+        outobj['psfmag'] += 2.5*np.log10(exptime)
+        
     # Add coordinates if there's a WCS
     if image.wcs is not None:
+        if verbose:
+            print('Adding RA/DEC coordinates to catalog')
         skyc = image.wcs.pixel_to_world(outobj['x'],outobj['y'])
         outobj['ra'] = skyc.ra
         outobj['dec'] = skyc.dec     
