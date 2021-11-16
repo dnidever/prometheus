@@ -74,7 +74,7 @@ def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fit
     Returns
     -------
     cat : table
-       The output table of best-fit PSF values for all of the 
+       The output table of best-fit PSF values for all of the sources.
     model : CCDData object
        The best-fitting model for the stars (without sky).
     sky : CCDData object
@@ -107,7 +107,7 @@ def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fit
         image = CCDData.read(filename)
     if isinstance(image,CCDData) is False:
         raise ValueError('Input image must be a filename or CCDData object')
-
+    
     residim = image.copy()
     
     # Processing steps
@@ -208,7 +208,7 @@ def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fit
         # change mag, magerr to psfmag, psfmag_err
         outobj['mag'].name = 'psfmag'
         outobj['mag_error'].name = 'psfmag_error'        
-
+        
     # 5) Apply aperture correction
     #-----------------------------
     if apcorr:
@@ -220,16 +220,17 @@ def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fit
     exptime = image.header.get('exptime')
     if exptime is not None:
         if verbose:
-            print('Applying correction for exposure time %.2 s' % exptime)
+            print('Applying correction for exposure time %.2f s' % exptime)
         outobj['psfmag'] += 2.5*np.log10(exptime)
         
     # Add coordinates if there's a WCS
     if image.wcs is not None:
-        if verbose:
-            print('Adding RA/DEC coordinates to catalog')
-        skyc = image.wcs.pixel_to_world(outobj['x'],outobj['y'])
-        outobj['ra'] = skyc.ra
-        outobj['dec'] = skyc.dec     
+        if image.wcs.has_celestial:
+            if verbose:
+                print('Adding RA/DEC coordinates to catalog')
+            skyc = image.wcs.pixel_to_world(outobj['x'],outobj['y'])
+            outobj['ra'] = skyc.ra
+            outobj['dec'] = skyc.dec     
         
     if verbose:
         print('dt = %.2f sec' % (time.time()-start))

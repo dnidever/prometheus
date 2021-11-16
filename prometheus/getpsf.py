@@ -820,7 +820,7 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
             if verbose:
                 print('  pars = '+str(bestpar))
                 print('  dbeta = '+str(dbeta))
-            
+                
             # Update the parameters
             oldpar = bestpar.copy()
             bestpar = psf.newpars(bestpar,dbeta,bounds,maxsteps)

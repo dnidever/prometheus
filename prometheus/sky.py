@@ -18,8 +18,11 @@ def sepsky(image,box_size=(64,64),filter_size=(3,3)):
     # Check if the data is "sep ready"
 
     data = image.sepready(image.data)
-    mask = image.sepready(image.mask)
-
+    if image.mask is not None:
+        mask = image.sepready(image.mask)
+    else:
+        mask = None
+        
     #image.native()  # make sure the arrays use native byte-order
     
     ## Background subtraction with SEP

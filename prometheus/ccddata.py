@@ -23,8 +23,8 @@ def poissonnoise(data,gain=1.0,rdnoise=0.0):
     """ Generate Poisson noise model (ala DAOPHOT)."""
     # gain
     # rdnoise
-    
-    noise = np.sqrt(data/gain + rdnoise**2)
+    noise = np.sqrt(np.maximum(data,0)/gain + rdnoise**2)
+    noise = np.maximum(noise,1)
     return noise
 
 def getgain(image):
@@ -399,9 +399,13 @@ class CCDData(CCD):
     def ccont(self):
         """ Return C-Continuous data for data, error, mask, sky."""
 
-        return (self.sepready(self.data), self.sepready(self.error),
-                self.sepready(self.mask), self.sepready(self.sky))
-        
+        if self.mask is not None:
+            return (self.sepready(self.data), self.sepready(self.error),
+                    self.sepready(self.mask), self.sepready(self.sky))
+        else:
+            return (self.sepready(self.data), self.sepready(self.error),
+                    None, self.sepready(self.sky))
+            
         #if self.data.flags['C_CONTIGUOUS']==False:
         #    data = self.data.copy(order='C')
         #else:
@@ -594,6 +598,7 @@ class CCDData(CCD):
             unit = 'adu'
         if unit is None:
             unit = 'adu'
+            
         # make the ccddata object
         image = CCDData(data,error,mask=mask,meta=head,flags=flags,sky=sky,wcs=w,unit=unit)
         

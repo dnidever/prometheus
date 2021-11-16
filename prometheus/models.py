@@ -1170,6 +1170,9 @@ def penny2d_fwhm(pars):
     relamp = pars[6]
     sigma = pars[7]
     beta = 1.2   # Moffat
+
+    if np.sum(~np.isfinite(np.array(pars)))>0:
+        raise ValueError('PARS cannot be inf or nan')
     
     # The mean radius of an ellipse is: (2a+b)/3
     sig_major = np.max([xsig,ysig])
