@@ -195,7 +195,7 @@ def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fit
             print('Step 4: Get PSF photometry for all '+str(len(allobjects))+' objects')
         psfout,model,sky = allfit.fit(psf,image,allobjects,fitradius=fitradius,
                                       recenter=recenter,verbose=(verbose>=2))
-
+        
         # Construct residual image
         if iterdet>0:
             residim = image.copy()
@@ -203,18 +203,34 @@ def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fit
             
         # Combine aperture and PSF columns
         outobj = allobjects.copy()
+        # rename some columns for clarity
+        outobj['x'].name = 'xc'
+        outobj['y'].name = 'yc'
+        outobj['a'].name = 'asemi'
+        outobj['b'].name = 'bsemi'        
+        outobj['flux'].name = 'sumflux'
+        outobj.remove_columns(['cxx','cyy','cxy'])
+        # copy over PSF output columns
         for n in psfout.columns:
             outobj[n] = psfout[n]
-        # change mag, magerr to psfmag, psfmag_err
+        outobj['psfheight'] = outobj['height'].copy()
+        outobj['height_error'].name = 'psfheight_error'        
+        outobj['flux'].name = 'psfflux'
+        outobj['flux_error'].name = 'psfflux_error'        
+        # change mag, magerr to psfmag, psfmag_error
         outobj['mag'].name = 'psfmag'
-        outobj['mag_error'].name = 'psfmag_error'        
+        outobj['mag_error'].name = 'psfmag_error'
+        # put ID at the beginning
+        cols = np.char.array(list(outobj.columns))
+        newcols = ['id']+list(cols[cols!='id'])
+        outobj = outobj[newcols]
         
     # 5) Apply aperture correction
     #-----------------------------
     if apcorr:
         if verbose:
             print('Step 5: Applying aperture correction')
-        outobj,grow = aperture.apercorr(psf,image,outobj,psfcat,model,verbose=verbose)
+        outobj,grow,cgrow = aperture.apercorr(psf,image,outobj,psfcat,verbose=verbose)
 
     # Add exposure time correction
     exptime = image.header.get('exptime')

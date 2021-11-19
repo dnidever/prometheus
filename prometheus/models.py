@@ -2608,8 +2608,8 @@ class PSFBase:
         if not nosky:
             outcat['sky'] = bestpar[3]
             outcat['sky_error'] = perror[3]
-        outcat['flux'] = bestpar[0]*self.fwhm()
-        outcat['flux_error'] = perror[0]*self.fwhm()        
+        outcat['flux'] = bestpar[0]*self.flux()
+        outcat['flux_error'] = perror[0]*self.flux()        
         outcat['mag'] = -2.5*np.log10(np.maximum(outcat['flux'],1e-10))+25.0
         outcat['mag_error'] = (2.5/np.log(10))*outcat['flux_error']/outcat['flux']
         outcat['niter'] = count

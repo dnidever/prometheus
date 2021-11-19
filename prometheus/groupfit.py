@@ -1067,8 +1067,8 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     outcat['y'] = pars[2::3]
     outcat['y_error'] = perror[2::3]
     outcat['sky'] = gf.starsky
-    outcat['flux'] = outcat['height']*psf.fwhm()
-    outcat['flux_error'] = outcat['height_error']*psf.fwhm()    
+    outcat['flux'] = outcat['height']*psf.flux()
+    outcat['flux_error'] = outcat['height_error']*psf.flux()    
     outcat['mag'] = -2.5*np.log10(np.maximum(outcat['flux'],1e-10))+25.0
     outcat['mag_error'] = (2.5/np.log(10))*outcat['flux_error']/outcat['flux']
     outcat['niter'] = gf.starniter  # what iteration it converged on
