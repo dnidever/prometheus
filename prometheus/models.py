@@ -2495,7 +2495,12 @@ class PSFBase:
         xdata = np.vstack((X.ravel(), Y.ravel()))        
         sky = np.median(skyim)
         if nosky: sky=0.0
-        height = flux[int(np.round(yc)),int(np.round(xc))]-sky   # python images are (Y,X)
+        if 'height' in cat:
+            height = cat['height']
+        else:
+            height = flux[int(np.round(yc)),int(np.round(xc))]-sky   # python images are (Y,X)
+            height = np.maximum(height,1)  # make sure it's not negative
+            
         initpar = [height,xc,yc,sky]            
         
         # Fit PSF parameters as well
@@ -2524,6 +2529,9 @@ class PSFBase:
             bounds[0][2] = initpar[2]-1e-7
             bounds[1][1] = initpar[1]+1e-7
             bounds[1][2] = initpar[2]+1e-7
+
+        if verbose:
+            print('initpar = ',initpar)
             
         # Curve_fit
         if method=='curve_fit':
@@ -2632,7 +2640,11 @@ class PSFBase:
 
         # Set input bounds back
         bounds = copy.deepcopy(inbounds)
-            
+
+        if bestpar[0]<1e-10:
+            print('problem')
+            import pdb; pdb.set_trace()
+        
         # Return catalog
         if not retpararray:
             if allpars:
