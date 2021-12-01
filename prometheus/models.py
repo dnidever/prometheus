@@ -2640,10 +2640,6 @@ class PSFBase:
 
         # Set input bounds back
         bounds = copy.deepcopy(inbounds)
-
-        if bestpar[0]<1e-10:
-            print('problem')
-            import pdb; pdb.set_trace()
         
         # Return catalog
         if not retpararray:
