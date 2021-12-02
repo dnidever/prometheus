@@ -52,20 +52,20 @@ class GroupFitter(object):
             fitradius = psf.fwhm()
         self.fitradius = fitradius
         self.nfitpix = int(np.ceil(fitradius))  # +/- nfitpix
-        # Star heights
-        if 'height' in cat.colnames:
-            starheight = cat['height'].copy()
+        # Star amps
+        if 'amp' in cat.colnames:
+            staramp = cat['amp'].copy()
         else:
-            # estimate height from flux and fwhm
+            # estimate amp from flux and fwhm
             # area under 2D Gaussian is 2*pi*A*sigx*sigy
             if 'fwhm' in cat.columns:
-                height = cat['flux']/(2*np.pi*(cat['fwhm']/2.35)**2)
+                amp = cat['flux']/(2*np.pi*(cat['fwhm']/2.35)**2)
             else:
-                height = cat['flux']/(2*np.pi*(psf.fwhm()/2.35)**2)                
-            starheight = np.maximum(height,0)   # make sure it's positive
+                amp = cat['flux']/(2*np.pi*(psf.fwhm()/2.35)**2)                
+            staramp = np.maximum(amp,0)   # make sure it's positive
         # Initialize the parameter array
-        pars = np.zeros(self.nstars*3,float) # height, xcen, ycen
-        pars[0::3] = starheight
+        pars = np.zeros(self.nstars*3,float) # amp, xcen, ycen
+        pars[0::3] = staramp
         pars[1::3] = cat['x']
         pars[2::3] = cat['y']
         self.pars = pars
@@ -197,7 +197,7 @@ class GroupFitter(object):
         
     @property
     def starpars(self):
-        """ Return the [height,xcen,ycen] parameters in [Nstars,3] array.
+        """ Return the [amp,xcen,ycen] parameters in [Nstars,3] array.
             You can GET a star's parameters like this:
             pars = self.starpars[4]
             You can also SET a star's parameters a similar way:
@@ -206,13 +206,13 @@ class GroupFitter(object):
         return self.pars.reshape(self.nstars,3)
     
     @property
-    def starheight(self):
-        """ Return the best-fit heights for all stars."""
+    def staramp(self):
+        """ Return the best-fit amps for all stars."""
         return self.pars[0::3]
 
-    @starheight.setter
-    def starheight(self,val):
-        """ Set starheight values."""
+    @staramp.setter
+    def staramp(self,val):
+        """ Set staramp values."""
         self.pars[0::3] = val
     
     @property
@@ -364,7 +364,7 @@ class GroupFitter(object):
 
     def mkbounds(self,pars,imshape,xoff=10):
         """ Make bounds for a set of input parameters."""
-        # is [height1,xcen1,ycen1,height2,xcen2,ycen2, ...]
+        # is [amp1,xcen1,ycen1,amp2,xcen2,ycen2, ...]
 
         npars = len(pars)
         ny,nx = imshape
@@ -474,7 +474,7 @@ class GroupFitter(object):
         if verbose is None and self.verbose:
             print('model: ',self.niter,args)
 
-        # Args are [height,xcen,ycen,sky] for all Nstars
+        # Args are [amp,xcen,ycen,sky] for all Nstars
         # so 3*Nstars parameters
 
         psf = self.psf
@@ -528,7 +528,7 @@ class GroupFitter(object):
         if verbose is None and self.verbose:
             print('jac: ',self.njaciter,args)
 
-        # Args are [height,xcen,ycen,sky] for all Nstars
+        # Args are [amp,xcen,ycen,sky] for all Nstars
         # so 3*Nstars parameters
         
         psf = self.psf
@@ -601,13 +601,13 @@ class GroupFitter(object):
         else:
             return jac
 
-    def heightfit(self,trim=True):
-        """ Fit the heights only for the stars."""
+    def ampfit(self,trim=True):
+        """ Fit the amps only for the stars."""
 
         # linear least squares problem
         # Ax = b
-        # A is the set of models pixel values for height, [Npix, Nstar]
-        # x is heights [Nstar] we are solving for
+        # A is the set of models pixel values for amp, [Npix, Nstar]
+        # x is amps [Nstar] we are solving for
         # b is pixel values, oru residflatten values
         
         # All parameters
@@ -623,7 +623,7 @@ class GroupFitter(object):
         for count,i in enumerate(dostars):
             pars = allpars[i*3:(i+1)*3].copy()
             guess[count] = pars[0]
-            pars[0] = 1.0  # unit height
+            pars[0] = 1.0  # unit amp
             xind = self.xlist[i]
             yind = self.ylist[i]
             invindex = self.invindexlist[i]
@@ -647,12 +647,12 @@ class GroupFitter(object):
         # Use guess to get close to the solution
         dy2 = dy - A.dot(guess)
         par = sparse.linalg.lsqr(A,dy2,atol=1e-4,btol=1e-4)
-        dheight = par[0]
-        height = guess+dheight
+        damp = par[0]
+        amp = guess+damp
         
         # preconditioning!
         
-        return height
+        return amp
 
     
     def centroid(self):
@@ -722,7 +722,7 @@ class GroupFitter(object):
             xind = self.xlist[i]
             yind = self.ylist[i]
             jac1 = jac[count]
-            jac1 = np.delete(jac1,0,axis=1)  # delete height column
+            jac1 = np.delete(jac1,0,axis=1)  # delete amp column
             resid1 = resid[yind,xind] 
 
             # CHOLESKY_JAC_SOLVE NEEDS THE ACTUAL RESIDUALS!!!!
@@ -800,7 +800,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     image : CCDData object
        Image to use to fit PSF model to stars.
     cat : table
-       Catalog with initial height/x/y values for the stars to use to fit the PSF.
+       Catalog with initial amp/x/y values for the stars to use to fit the PSF.
     method : str, optional
        Method to use for solving the non-linear least squares problem: "cholesky",
        "qr", "svd", and "curve_fit".  Default is "cholesky".
@@ -829,7 +829,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     -------
     out : table
        Table of best-fitting parameters for each star.
-       id, height, height_error, x, x_err, y, y_err, sky
+       id, amp, amp_error, x, x_err, y, y_err, sky
     model : numpy array
        Best-fitting model of the stars and sky background.
     sky : numpy array
@@ -882,13 +882,13 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     
     # Initial estimates
     initpar = np.zeros(nstars*3,float)
-    initpar[0::3] = gf.starheight
+    initpar[0::3] = gf.staramp
     initpar[1::3] = cat['x']
     initpar[2::3] = cat['y']
         
     # Make bounds
     #  this requires all 3*Nstars parameters to be input
-    bounds = gf.mkbounds(initpar,image.shape)    
+    bounds = gf.mkbounds(initpar,image.shape,xoff=2)    
         
     # Curve_fit
     #   dealt with separately
@@ -921,7 +921,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
 
         # Iterate
         bestpar_all = initpar.copy()        
-        # centroids fixed, only keep heights
+        # centroids fixed, only keep amps
         if recenter==False:
             initpar = initpar[0::3]
         gf.niter = 0
@@ -947,14 +947,14 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
                 dbeta = np.zeros(len(gf.pars),float)
                 dbeta[gf.freepars] = dbeta_free
                                 
-            #  htcen, crowdsource method of solving heights/fluxes first
+            #  htcen, crowdsource method of solving amps/fluxes first
             #      and then centroiding to get x/y
             else:
                 dbeta = np.zeros(3*gf.nfreestars,float)
-                # Solve for the heights
-                newht = gf.heightfit()
-                dbeta[0::3] = gf.starheight[gf.freestars] - newht
-                gf.starheight[gf.freestars] = newht  # update the heights
+                # Solve for the amps
+                newht = gf.ampfit()
+                dbeta[0::3] = gf.staramp[gf.freestars] - newht
+                gf.staramp[gf.freestars] = newht  # update the amps
                 # Solve for the positions
                 newx, newy = gf.centroid()
                 dbeta[1::3] = gf.starxcen[~gf.freezestars] - newx
@@ -977,7 +977,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
             # Check differences and changes
             diff_all = np.abs(bestpar_all-oldpar_all)
             percdiff_all = diff_all.copy()*0
-            percdiff_all[0::3] = diff_all[0::3]/np.maximum(oldpar_all[0::3],0.0001)*100  # height
+            percdiff_all[0::3] = diff_all[0::3]/np.maximum(oldpar_all[0::3],0.0001)*100  # amp
             percdiff_all[1::3] = diff_all[1::3]*100               # x
             percdiff_all[2::3] = diff_all[2::3]*100               # y
             diff = diff_all[gf.freepars]
@@ -1024,10 +1024,17 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
             gf.niter += 1     # increment counter
 
 
-    bad, = np.where((gf.pars[0::3]>1e10) | (gf.pars[1::3]<-1) | (gf.pars[1::3]>3390) | (gf.pars[2::3]<-1) | (gf.pars[2::3]>2710))
-    if len(bad)>0:
-        import pdb; pdb.set_trace()
-            
+    #bad, = np.where((gf.pars[0::3]>1e10) | (gf.pars[1::3]<-1) | (gf.pars[1::3]>3390) | (gf.pars[2::3]<-1) | (gf.pars[2::3]>2710))
+    #if len(bad)>0:
+    #    import pdb; pdb.set_trace()
+
+
+
+    #if np.min(gf.pars[0::3])<0.01:
+    #    print('problem')
+    #    import pdb; pdb.set_trace()
+
+        
     # Check that all starniter are set properly
     #  if we stopped "prematurely" then not all stars were frozen
     #  and didn't have starniter set
@@ -1051,7 +1058,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
         
     # Put in catalog
     # Initialize catalog
-    dt = np.dtype([('id',int),('height',float),('height_error',float),('x',float),
+    dt = np.dtype([('id',int),('amp',float),('amp_error',float),('x',float),
                    ('x_error',float),('y',float),('y_error',float),('sky',float),
                    ('flux',float),('flux_error',float),('mag',float),('mag_error',float),
                    ('rms',float),('chisq',float),('niter',int)])
@@ -1060,15 +1067,15 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
         outcat['id'] = cat['id']
     else:
         outcat['id'] = np.arange(nstars)+1
-    outcat['height'] = pars[0::3]
-    outcat['height_error'] = perror[0::3]
+    outcat['amp'] = pars[0::3]
+    outcat['amp_error'] = perror[0::3]
     outcat['x'] = pars[1::3]
     outcat['x_error'] = perror[1::3]
     outcat['y'] = pars[2::3]
     outcat['y_error'] = perror[2::3]
     outcat['sky'] = gf.starsky
-    outcat['flux'] = outcat['height']*psf.flux()
-    outcat['flux_error'] = outcat['height_error']*psf.flux()    
+    outcat['flux'] = outcat['amp']*psf.flux()
+    outcat['flux_error'] = outcat['amp_error']*psf.flux()    
     outcat['mag'] = -2.5*np.log10(np.maximum(outcat['flux'],1e-10))+25.0
     outcat['mag_error'] = (2.5/np.log(10))*outcat['flux_error']/outcat['flux']
     outcat['niter'] = gf.starniter  # what iteration it converged on
@@ -1081,11 +1088,11 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
         flux = image.data[ylist,xlist].copy()
         err = image.error[ylist,xlist]
         xdata = (xlist,ylist)
-        model1 = psf(xlist,ylist,pars=[outcat['height'][i],outcat['x'][i],outcat['y'][i]])
+        model1 = psf(xlist,ylist,pars=[outcat['amp'][i],outcat['x'][i],outcat['y'][i]])
         chisq = np.sum((flux-outcat['sky'][i]-model1.ravel())**2/err**2)/len(xlist)
         outcat['chisq'][i] = chisq
-        # chi value, RMS of the residuals as a fraction of the height
-        rms = np.sqrt(np.mean(((flux-outcat['sky'][i]-model1.ravel())/outcat['height'][i])**2))
+        # chi value, RMS of the residuals as a fraction of the amp
+        rms = np.sqrt(np.mean(((flux-outcat['sky'][i]-model1.ravel())/outcat['amp'][i])**2))
         outcat['rms'][i] = rms
         
     # Image offsets for absolute X/Y coordinates

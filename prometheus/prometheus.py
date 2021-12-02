@@ -213,8 +213,8 @@ def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fit
         # copy over PSF output columns
         for n in psfout.columns:
             outobj[n] = psfout[n]
-        outobj['psfheight'] = outobj['height'].copy()
-        outobj['height_error'].name = 'psfheight_error'        
+        outobj['psfamp'] = outobj['amp'].copy()
+        outobj['amp_error'].name = 'psfamp_error'        
         outobj['flux'].name = 'psfflux'
         outobj['flux_error'].name = 'psfflux_error'        
         # change mag, magerr to psfmag, psfmag_error

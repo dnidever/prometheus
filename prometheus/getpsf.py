@@ -39,7 +39,7 @@ def starcube(cat,image,npix=51,fillvalue=np.nan):
     ----------
     cat : table
        The catalog of stars to use.  This should have "x" and "y" columns and
-         preferably also "height".
+         preferably also "amp".
     image : CCDData object
        The image to use to generate the stellar images.
     fillvalue : float, optional
@@ -73,17 +73,17 @@ def starcube(cat,image,npix=51,fillvalue=np.nan):
         im = image[bbox.slices]
         flux = image.data[bbox.slices]-image.sky[bbox.slices]
         err = image.error[bbox.slices]
-        if 'height' in cat.columns:
-            height = cat['height'][i]
+        if 'amp' in cat.columns:
+            amp = cat['amp'][i]
         elif 'peak' in cat.columns:
-            height = cat['peak'][i]
+            amp = cat['peak'][i]
         else:
-            height = flux[int(np.round(ycen)),int(np.round(xcen))]
+            amp = flux[int(np.round(ycen)),int(np.round(xcen))]
         xim,yim = np.meshgrid(im.x,im.y)
         xim = xim.astype(float)-xcen
         yim = yim.astype(float)-ycen
         # We need to interpolate this onto the grid
-        f = RectBivariateSpline(yim[:,0],xim[0,:],flux/height)
+        f = RectBivariateSpline(yim[:,0],xim[0,:],flux/amp)
         im2 = np.zeros((npix,npix),float)+np.nan
         xcover = (x>=bbox.ixmin-xcen) & (x<=bbox.ixmax-1-xcen)
         xmin,xmax = dln.minmax(np.where(xcover)[0])
@@ -311,23 +311,23 @@ def subtractnei(image,allcat,psfcat,psf):
         xp1 = int(np.minimum(np.maximum(np.round(x1),0),image.shape[1]-1))
         y1 = allcat['y'][indnei[i]]
         yp1 = int(np.minimum(np.maximum(np.round(y1),0),image.shape[0]-1))
-        if 'height' in allcat.columns:
-            h1 = allcat['height'][indnei[i]]
+        if 'amp' in allcat.columns:
+            h1 = allcat['amp'][indnei[i]]
         elif 'peak' in allcat.columns:
             h1 = allcat['peak'][indnei[i]]
         else:
             h1 = flux[yp1,xp1]
         initpars = [h1,x1,y1] #image.sky[yp1,xp1]]
         bbox = psf.starbbox((initpars[1],initpars[2]),image.shape,psf.radius)
-        # Fit height empirically with central pixels
+        # Fit amp empirically with central pixels
         flux1 = flux[bbox.slices]
         err1 = image[bbox.slices].error
         model1 = psf(pars=initpars,bbox=bbox)
         good = ((flux1/err1>2) & (flux1>0) & (model1/np.max(model1)>0.25))
-        height = np.median(flux1[good]/model1[good]) * initpars[0]
-        pars = [height, x1, y1]
+        amp = np.median(flux1[good]/model1[good]) * initpars[0]
+        pars = [amp, x1, y1]
         #starcat,perror = psf.fit(flux,pars=initpars,radius=fitradius,recenter=False,niter=2)
-        #pars = [starcat['height'][0],starcat['x'][0],starcat['y'][0]]
+        #pars = [starcat['amp'][0],starcat['x'][0],starcat['y'][0]]
         im1 = psf(pars=pars,bbox=bbox)
         resid[bbox.slices].data -= im1
     return resid
@@ -352,14 +352,14 @@ class PSFFitter(object):
                 fitradius = psf.fwhm()
         self.fitradius = fitradius
         self.nfitpix = int(np.ceil(fitradius))  # +/- nfitpix
-        self.starheight = np.zeros(self.nstars,float)
-        if 'height' in cat.colnames:
-            self.starheight[:] = cat['height'].copy()
+        self.staramp = np.zeros(self.nstars,float)
+        if 'amp' in cat.colnames:
+            self.staramp[:] = cat['amp'].copy()
         else:
-            # estimate height from flux and fwhm
+            # estimate amp from flux and fwhm
             # area under 2D Gaussian is 2*pi*A*sigx*sigy
-            height = cat['flux']/(2*np.pi*(cat['fwhm']/2.35)**2)
-            self.starheight[:] = np.maximum(height,0)   # make sure it's positive
+            amp = cat['flux']/(2*np.pi*(cat['fwhm']/2.35)**2)
+            self.staramp[:] = np.maximum(amp,0)   # make sure it's positive
         # Original X/Y values
         self.starxcenorig = np.zeros(self.nstars,float)
         self.starxcenorig[:] = cat['x'].copy()
@@ -447,7 +447,7 @@ class PSFFitter(object):
         pixcnt = 0
         for i in range(self.nstars):
             image = self.imdata[i]
-            height = self.starheight[i]
+            amp = self.staramp[i]
             xcenorig = self.starxcenorig[i]   
             ycenorig = self.starycenorig[i]
             xcen = self.starxcen[i]   
@@ -471,7 +471,7 @@ class PSFFitter(object):
             x0 = xcen - bbox.ixmin
             y0 = ycen - bbox.iymin            
             
-            # Fit height/xcen/ycen if niter=1
+            # Fit amp/xcen/ycen if niter=1
             if refit:
                 #if (self.niter<=1): # or self.niter%3==0):
                 if self.niter>-1:
@@ -479,51 +479,51 @@ class PSFFitter(object):
                     bounds = (np.array([0,np.maximum(x0orig-2,0),np.maximum(y0orig-2,0),-np.inf]),
                               np.array([np.inf,np.minimum(x0orig+2,bbox.shape[1]-1),np.minimum(y0orig+2,bbox.shape[0]-1),np.inf]))
                     # the image still has sky in it, use sky (nosky=False)
-                    pars,perror,model = psf.fit(image,[height,x0,y0],nosky=False,retpararray=True,niter=5,bounds=bounds)
+                    pars,perror,model = psf.fit(image,[amp,x0,y0],nosky=False,retpararray=True,niter=5,bounds=bounds)
                     xcen += (pars[1]-x0)
                     ycen += (pars[2]-y0)
-                    height = pars[0]                    
-                    self.starheight[i] = height
+                    amp = pars[0]                    
+                    self.staramp[i] = amp
                     self.starxcen[i] = xcen
                     self.starycen[i] = ycen
-                    model = psf(x,y,pars=[height,xcen,ycen])
+                    model = psf(x,y,pars=[amp,xcen,ycen])
                     if verbose:
                         print('Star '+str(i)+' Refitting all parameters')
-                        print(str([height,xcen,ycen]))
+                        print(str([amp,xcen,ycen]))
 
-                    #pars2,model2,mpars2 = psf.fit(image,[height,x0,y0],nosky=False,niter=5,allpars=True)
+                    #pars2,model2,mpars2 = psf.fit(image,[amp,x0,y0],nosky=False,niter=5,allpars=True)
                     #import pdb; pdb.set_trace()
                         
-                # Only fit height if niter>1
+                # Only fit amp if niter>1
                 #   do it empirically
                 else:
                     #im1 = psf(pars=[1.0,xcen,ycen],bbox=bbox)
                     #wt = 1/image.error**2
-                    #height = np.median(image.data[mask]/im1[mask])                
+                    #amp = np.median(image.data[mask]/im1[mask])                
                     model1 = psf(x,y,pars=[1.0,xcen,ycen])
                     wt = 1/err**2
-                    height = np.median(flux/model1)
-                    #height = np.median(wt*flux/model1)/np.median(wt)
+                    amp = np.median(flux/model1)
+                    #amp = np.median(wt*flux/model1)/np.median(wt)
 
 
                     #count = 0
                     #percdiff = 1e30
                     #while (count<3 and percdiff>0.1):                  
-                    #    m,jac = psf.jac(np.vstack((x,y)),*[height,xcen,ycen],retmodel=True)
+                    #    m,jac = psf.jac(np.vstack((x,y)),*[amp,xcen,ycen],retmodel=True)
                     #    jac = np.delete(jac,[1,2],axis=1)
                     #    dy = flux-m
                     #    dbeta = lsq.jac_solve(jac,dy,method='cholesky',weight=wt)
-                    #    print(count,height,dbeta)
-                    #    height += dbeta
-                    #    percdiff = np.abs(dbeta)/np.abs(height)*100
+                    #    print(count,amp,dbeta)
+                    #    amp += dbeta
+                    #    percdiff = np.abs(dbeta)/np.abs(amp)*100
                     #    count += 1
                         
-                    #pars2,perror2,model2 = psf.fit(image,[height,x0,y0],nosky=False,retpararray=True,niter=5)
-                    #height = pars2[0]
-                    #model = psf(x,y,pars=[height,xcen,ycen])
+                    #pars2,perror2,model2 = psf.fit(image,[amp,x0,y0],nosky=False,retpararray=True,niter=5)
+                    #amp = pars2[0]
+                    #model = psf(x,y,pars=[amp,xcen,ycen])
                     
-                    self.starheight[i] = height
-                    model = model1*height
+                    self.staramp[i] = amp
+                    model = model1*amp
                     #self.starxcen[i] = pars2[1]+xy[0][0]
                     #self.starycen[i] = pars2[2]+xy[1][0]       
                     #print(count,self.starxcen[i],self.starycen[i])
@@ -531,16 +531,16 @@ class PSFFitter(object):
                     #  causes problems.  bounces around too much
 
                     if verbose:
-                        print('Star '+str(i)+' Refitting height empirically')
-                        print(str(height))
+                        print('Star '+str(i)+' Refitting amp empirically')
+                        print(str(amp))
                         
-                    #if i==1: print(height)
+                    #if i==1: print(amp)
                     #if self.niter==2:
                     #    import pdb; pdb.set_trace()
 
             # No refit of stellar parameters
             else:
-                model = psf(x,y,pars=[height,xcen,ycen])
+                model = psf(x,y,pars=[amp,xcen,ycen])
 
             #if self.niter>1:
             #    import pdb; pdb.set_trace()
@@ -548,11 +548,11 @@ class PSFFitter(object):
             # Relculate reduced chi squared
             chisq = np.sum((flux-model.ravel())**2/err**2)/npix
             self.starchisq[i] = chisq
-            # chi value, RMS of the residuals as a fraction of the height
-            rms = np.sqrt(np.mean(((flux-model.ravel())/self.starheight[i])**2))
+            # chi value, RMS of the residuals as a fraction of the amp
+            rms = np.sqrt(np.mean(((flux-model.ravel())/self.staramp[i])**2))
             self.starrms[i] = rms
             
-            #model = psf(x,y,pars=[height,xcen,ycen])
+            #model = psf(x,y,pars=[amp,xcen,ycen])
             # Zero-out anything beyond the fitting radius
             #im[mask] = 0.0
             #npix = im.size
@@ -585,13 +585,13 @@ class PSFFitter(object):
             allim = np.zeros(self.ntotpix,float)
         pixcnt = 0
 
-        # Need to run model() to calculate height/xcen/ycen for first couple iterations
+        # Need to run model() to calculate amp/xcen/ycen for first couple iterations
         #if self.niter<=1 and refit:
         #    dum = self.model(x,*args,refit=refit)
         dum = self.model(x,*args,refit=True) #,verbose=True)            
             
         for i in range(self.nstars):
-            height = self.starheight[i]
+            amp = self.staramp[i]
             xcen = self.starxcen[i]            
             ycen = self.starycen[i]
             bbox = self.bboxdata[i]
@@ -613,7 +613,7 @@ class PSFFitter(object):
             #import pdb; pdb.set_trace()
             
             # Get the model and derivative
-            allpars = np.concatenate((np.array([height,xcen,ycen]),np.array(args)))
+            allpars = np.concatenate((np.array([amp,xcen,ycen]),np.array(args)))
             m,deriv = psf.jac(xdata,*allpars,allpars=True,retmodel=True)
             #if retmodel:
             #    m,deriv = psf.jac(xdata,*allpars,allpars=True,retmodel=True)
@@ -621,14 +621,14 @@ class PSFFitter(object):
             #    deriv = psf.jac(xdata,*allpars,allpars=True)                
             deriv = np.delete(deriv,[0,1,2],axis=1)  # remove stellar ht/xc/yc columns
 
-            # Solve for the best height, and then scale the derivatives (all scale with height)
+            # Solve for the best amp, and then scale the derivatives (all scale with amp)
             #if self.niter>1 and refit:
-            #    newheight = height*np.median(flux/m)
-            #    self.starheight[i] = newheight
-            #    m *= (newheight/height)
-            #    deriv *= (newheight/height)
+            #    newamp = amp*np.median(flux/m)
+            #    self.staramp[i] = newamp
+            #    m *= (newamp/amp)
+            #    deriv *= (newamp/amp)
 
-            #if i==1: print(height,newheight)
+            #if i==1: print(amp,newamp)
             #import pdb; pdb.set_trace()
 
             npix,dum = deriv.shape
@@ -656,7 +656,7 @@ class PSFFitter(object):
 
         # -make sure
         #  -to take the total flux into account (not varying across image)
-        #  -make sure the height=1 at center
+        #  -make sure the amp=1 at center
         #  -make sure all PSF values are >=0
                              
         # Add the lookup table to the PSF model
@@ -681,11 +681,11 @@ class PSFFitter(object):
 
         for i in star:
             image = self.imdata[i]
-            height = self.starheight[i]
+            amp = self.staramp[i]
             xcen = self.starxcen[i]   
             ycen = self.starycen[i]
             bbox = self.bboxdata[i]
-            model1 = psf(pars=[height,xcen,ycen],bbox=bbox)
+            model1 = psf(pars=[amp,xcen,ycen],bbox=bbox)
             model.append(model1)
         return model
 
@@ -702,7 +702,7 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
     image : CCDData object
        Image to use to fit PSF model to stars.
     cat : table
-       Catalog with initial height/x/y values for the stars to use to fit the PSF.
+       Catalog with initial amp/x/y values for the stars to use to fit the PSF.
     fitradius : float, table
        The fitting radius.  If none is input then the initial PSF FWHM will be used.
     method : str, optional
@@ -727,7 +727,7 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
     perror : numpy array
        Uncertainties in "pars".
     psfcat : table
-       Table of best-fitting height/xcen/ycen values for the PSF stars.
+       Table of best-fitting amp/xcen/ycen values for the PSF stars.
 
     Example
     -------
@@ -740,7 +740,7 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
     print = utils.getprintfunc() # Get print function to be used locally, allows for easy logging   
 
     # Initialize the output catalog best-fitting values for the PSF stars
-    dt = np.dtype([('id',int),('height',float),('x',float),('y',float),('npix',int),('rms',float),
+    dt = np.dtype([('id',int),('amp',float),('x',float),('y',float),('npix',int),('rms',float),
                    ('chisq',float),('ixmin',int),('ixmax',int),('iymin',int),('iymax',int)])
     psfcat = np.zeros(len(cat),dtype=dt)
     if 'id' in cat.colnames:
@@ -759,11 +759,11 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
         epsf1,nbadstar1,rms1 = mkempirical(cube1,order=psf.order,coords=coords,shape=psf._shape)
         initpsf = models.PSFEmpirical(epsf1,imshape=image.shape,order=psf.order)
         pf = PSFFitter(initpsf,image,cat,fitradius=fitradius,verbose=False)
-        # Fit the height, xcen, ycen properly
+        # Fit the amp, xcen, ycen properly
         xdata = np.arange(pf.ntotpix)
         out = pf.model(xdata,[])
         # Put information into the psfcat table
-        psfcat['height'] = pf.starheight
+        psfcat['amp'] = pf.staramp
         psfcat['x'] = pf.starxcen
         psfcat['y'] = pf.starycen
         psfcat['chisq'] = pf.starchisq
@@ -856,14 +856,14 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
     newpsf._params = pars                
 
     # Output best-fitting values for the PSF stars as well
-    dt = np.dtype([('id',int),('height',float),('x',float),('y',float),('npix',int),('rms',float),
+    dt = np.dtype([('id',int),('amp',float),('x',float),('y',float),('npix',int),('rms',float),
                    ('chisq',float),('ixmin',int),('ixmax',int),('iymin',int),('iymax',int)])
     psfcat = np.zeros(len(cat),dtype=dt)
     if 'id' in cat.colnames:
         psfcat['id'] = cat['id']
     else:
         psfcat['id'] = np.arange(len(cat))+1
-    psfcat['height'] = pf.starheight
+    psfcat['amp'] = pf.staramp
     psfcat['x'] = pf.starxcen
     psfcat['y'] = pf.starycen
     psfcat['chisq'] = pf.starchisq
@@ -898,7 +898,7 @@ def getpsf(psf,image,cat,fitradius=None,lookup=False,lorder=0,method='qr',subnei
     image : CCDData object
        Image to use to fit PSF model to stars.
     cat : table
-       Catalog with initial height/x/y values for the stars to use to fit the PSF.
+       Catalog with initial amp/x/y values for the stars to use to fit the PSF.
     fitradius : float, table
        The fitting radius.  If none is input then the initial PSF FWHM will be used.
     lookup : boolean, optional
@@ -936,7 +936,7 @@ def getpsf(psf,image,cat,fitradius=None,lookup=False,lorder=0,method='qr',subnei
     perror : numpy array
        Uncertainties in "pars".
     psfcat : table
-       Table of best-fitting height/xcen/ycen values for the PSF stars.
+       Table of best-fitting amp/xcen/ycen values for the PSF stars.
 
     Example
     -------
@@ -964,7 +964,7 @@ def getpsf(psf,image,cat,fitradius=None,lookup=False,lorder=0,method='qr',subnei
     psfcat = cat.copy()
 
     # Initializing output PSF star catalog
-    dt = np.dtype([('id',int),('height',float),('x',float),('y',float),('npix',int),('rms',float),
+    dt = np.dtype([('id',int),('amp',float),('x',float),('y',float),('npix',int),('rms',float),
                    ('chisq',float),('ixmin',int),('ixmax',int),('iymin',int),('iymax',int),('reject',int)])
     outcat = np.zeros(len(cat),dtype=dt)
     outcat = Table(outcat)
@@ -1076,7 +1076,7 @@ def getpsf(psf,image,cat,fitradius=None,lookup=False,lorder=0,method='qr',subnei
         ind1,ind2 = dln.match(outcat['id'],pcat['id'])
         outcat['reject'] = 1
         outcat['reject'][ind1] = 0
-        outcat['height'][ind1] = pf.starheight[ind2]
+        outcat['amp'][ind1] = pf.staramp[ind2]
         outcat['x'][ind1] = pf.starxcen[ind2]
         outcat['y'][ind1] = pf.starycen[ind2]
         outcat['rms'][ind1] = pf.starrms[ind2]

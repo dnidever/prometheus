@@ -66,7 +66,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     image : CCDData object
        Image to use to fit PSF model to stars.
     cat : table
-       Catalog with initial height/x/y values for the stars to use to fit the PSF.
+       Catalog with initial amp/x/y values for the stars to use to fit the PSF.
        To pre-group the stars, add a "group_id" in the catalog.
     method : str, optional
        Method to use for solving the non-linear least squares problem: "cholesky",
@@ -91,7 +91,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     -------
     out : table
        Table of best-fitting parameters for each star.
-       id, height, height_error, x, x_err, y, y_err, sky
+       id, amp, amp_error, x, x_err, y, y_err, sky
     model : numpy array
        Best-fitting model of the stars and sky background.
 
@@ -136,7 +136,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
         print(str(ngroups)+' star groups')
         
     # Initialize catalog
-    dt = np.dtype([('id',int),('height',float),('height_error',float),('x',float),
+    dt = np.dtype([('id',int),('amp',float),('amp_error',float),('x',float),
                    ('x_error',float),('y',float),('y_error',float),('sky',float),
                    ('flux',float),('flux_error',float),('mag',float),('mag_error',float),
                    ('niter',int),('group_id',int),('ngroup',int),('rms',float),('chisq',float)])
@@ -156,26 +156,30 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
         ind = starindex['index'][starindex['lo'][g]:starindex['hi'][g]+1]
         nind = len(ind)
         inpcat = cat[ind].copy()
-        if 'height' not in inpcat.columns:
-            # Estimate height from flux and fwhm
+        if 'amp' not in inpcat.columns:
+            # Estimate amp from flux and fwhm
             # area under 2D Gaussian is 2*pi*A*sigx*sigy
             if 'fwhm' in inpcat.columns:
-                height = inpcat['flux']/(2*np.pi*(inpcat['fwhm']/2.35)**2)
+                amp = inpcat['flux']/(2*np.pi*(inpcat['fwhm']/2.35)**2)
             else:
-                height = inpcat['flux']/(2*np.pi*(psf.fwhm()/2.35)**2)                
-            starheight = np.maximum(height,0)   # make sure it's positive
-            inpcat['height'] = starheight
+                amp = inpcat['flux']/(2*np.pi*(psf.fwhm()/2.35)**2)                
+            staramp = np.maximum(amp,0)   # make sure it's positive
+            inpcat['amp'] = staramp
         
         if verbose:
             print('-- Group '+str(grp)+'/'+str(len(groups))+' : '+str(nind)+' star(s) --')
         
         # Single Star
         if nind==1:
-            inpcat = [inpcat['height'][0],inpcat['x'][0],inpcat['y'][0]]
+            inpcat = [inpcat['amp'][0],inpcat['x'][0],inpcat['y'][0]]
             out,model = psf.fit(resid,inpcat,niter=3,verbose=verbose,retfullmodel=True,recenter=recenter)
             model.data -= out['sky']   # remove sky
             outmodel.data[model.bbox.slices] += model.data
             outsky.data[model.bbox.slices] = out['sky']
+
+            #if np.abs(inpcat[1]-1488)<2 and np.abs(inpcat[2]-205)<2:
+            #    print('star of interest')
+            #    import pdb; pdb.set_trace()
             
         # Group
         else:
@@ -186,20 +190,20 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
                                          absolute=True)
             outmodel.data[model.bbox.slices] += model.data
             outsky.data[model.bbox.slices] = sky
-
+            
         # Subtract the best model for the group/star
         resid[model.bbox.slices].data -= model.data
         
         # Put in catalog
-        cols = ['height','height_error','x','x_error','y','y_error',
+        cols = ['amp','amp_error','x','x_error','y','y_error',
                 'sky','flux','flux_error','mag','mag_error','niter','rms','chisq']
         for c in cols:
             outcat[c][ind] = out[c]
-        outcat['group_id'] = grp
-        outcat['ngroup'] = nind
+        outcat['group_id'][ind] = grp
+        outcat['ngroup'][ind] = nind
         outcat = Table(outcat)
 
-        bad, = np.where((out['height']>1e10) | (out['x']<-1) | (out['x']>3390) | (out['y']<-1) | (out['y']>2710))
+        bad, = np.where((out['amp']>1e10) | (out['x']<-1) | (out['x']>3390) | (out['y']<-1) | (out['y']>2710))
         if len(bad)>0:
             import pdb; pdb.set_trace()
         

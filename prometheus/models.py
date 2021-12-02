@@ -2093,8 +2093,8 @@ class PSFBase:
             The "bbox" parameter can be used instead of "x" and "y" if a rectangular
             region is desired.
         pars : numpy array, list or catalog
-            Stellar arameters.  If numpy array or list the values should be [height, xcen, ycen, sky].
-            If a catalog is input then it must have height, x, y and sky columns.
+            Stellar arameters.  If numpy array or list the values should be [amp, xcen, ycen, sky].
+            If a catalog is input then it must have amp, x, y and sky columns.
         bbox: list or BoundingBox
             Boundary box giving range in X and Y for a rectangular region to generate the model.
             This can be BoundingBox object or a 2x2 list/tuple [[x0,x1],[y0,y1]].
@@ -2122,14 +2122,15 @@ class PSFBase:
 
         """
 
-        # Nothing input, PSF postage stamp
-        if x is None and y is None and pars is None and bbox is None:
-            pars = [1.0, self.npix//2, self.npix//2]
-            pix = np.arange(self.npix)
+        # No coordinates input, PSF postage stamp
+        if x is None and y is None and bbox is None:
+            if pars is None:
+                pars = [1.0, self.npix//2, self.npix//2]
+            pix = np.arange(self.npix)-self.npix//2
             # Python images are (Y,X)
-            y = pix.reshape(-1,1)+np.zeros(self.npix,int)     # broadcasting is faster
-            x = y.copy().T
-
+            y = (pix+pars[2]).reshape(-1,1)+np.zeros(self.npix,int)                # broadcasting is faster
+            x = (pix+pars[1]).reshape(1,-1)+np.zeros(self.npix,int).reshape(-1,1)  # broadcasting is faster
+            
         # Get coordinates from BBOX
         if x is None and y is None and bbox is not None:
             x,y = self.bbox2xy(bbox)
@@ -2139,11 +2140,11 @@ class PSFBase:
         if pars is None:
             raise ValueError("PARS must be input")
         if type(pars) is Table:
-            for n in ['height','x','y','sky']:
+            for n in ['amp','x','y','sky']:
                 if n not in pars.columns:
-                    raise ValueError('Input catalog must have height, x, y, and sky columns')
+                    raise ValueError('Input catalog must have amp, x, y, and sky columns')
             inpcat = pars
-            pars = [inpcat['height'][0],inpcat['x'][0],inpcat['y'][0],inpcat['sky'][0]]
+            pars = [inpcat['amp'][0],inpcat['x'][0],inpcat['y'][0],inpcat['sky'][0]]
         if len(pars)<3 or len(pars)>4:
             raise ValueError("PARS must have 3 or 4 elements")
         
@@ -2210,9 +2211,9 @@ class PSFBase:
             X and Y values in a [2,N] array.
         args : float
             Model parameter values as separate positional input parameters,
-            [height, xcen, ycen, sky].  If allpars=True, then the model
+            [amp, xcen, ycen, sky].  If allpars=True, then the model
             parameters are added at the end, i.e. 
-            [height, xcen, ycen, sky, model parameters].
+            [amp, xcen, ycen, sky, model parameters].
         allpars : boolean, optional
             PSF model parameters have been input as well (behind the stellar
             parameters).  Default is False.
@@ -2228,7 +2229,7 @@ class PSFBase:
         m = psf.model(xdata,*pars)
 
         """
-        # PARS should be [height,x0,y0,sky]
+        # PARS should be [amp,x0,y0,sky]
         ## curve_fit separates each parameter while
         ## psf expects on pars array
         
@@ -2242,7 +2243,7 @@ class PSFBase:
             return self(xdata[0],xdata[1],pars,**kwargs)
         
         # Stellar + Model parameters
-        #   PARS should be [height,x0,y0,sky, model parameters]
+        #   PARS should be [amp,x0,y0,sky, model parameters]
         else:
             allpars = args
             nmpars = len(self.params)
@@ -2263,9 +2264,9 @@ class PSFBase:
             X and Y values in a [2,N] array.
         args : float
             Model parameter values as separate positional input parameters,
-            [height, xcen, ycen, sky]. If allpars=True, then the model
+            [amp, xcen, ycen, sky]. If allpars=True, then the model
             parameters are added at the end, i.e. 
-            [height, xcen, ycen, sky, model parameters].
+            [amp, xcen, ycen, sky, model parameters].
         retmodel : boolean, optional
             Return the model as well.  Default is retmodel=False.
         allpars : boolean, optional
@@ -2292,7 +2293,7 @@ class PSFBase:
         # TO BE INPUT AS A CATALOG
         # So produce a model for a group of stars?
         
-        # PARS should be [height,x0,y0,sky]        
+        # PARS should be [amp,x0,y0,sky]        
         ## curve_fit separates each parameter while
         ## psf expects on pars array
         pars = np.array(args)
@@ -2324,8 +2325,8 @@ class PSFBase:
         m,deriv = self(xdata[0],xdata[1],pars,mpars=mpars,deriv=True,nderiv=nderiv,**kwargs)            
         deriv = np.array(deriv).T
         # Initialize jacobian matrix
-        #   the parameters are [height,xmean,ymean,sky]
-        #   if allpars, parameters are [height,xmean,ymean,sky,model parameters]
+        #   the parameters are [amp,xmean,ymean,sky]
+        #   if allpars, parameters are [amp,xmean,ymean,sky,model parameters]
         jac = np.zeros((len(xdata[0]),len(args)),float)
         if sky is None:
             jac[:,:] = deriv
@@ -2342,12 +2343,12 @@ class PSFBase:
     
     def modelall(self,xdata,*args,**kwargs):
         """ Convenience function to use with curve_fit() to fit all parameters of a single stellar profile."""
-        # PARS should be [height,x0,y0,sky, model parameters]
+        # PARS should be [amp,x0,y0,sky, model parameters]
         return self.model(xdata,*args,allpars=True,**kwargs)
         
     def jacall(self,xdata,*args,retmodel=False,**kwargs):
         """ Convenience function to use with curve_fit() to fit all parameters of a single stellar profile."""
-        # PARS should be [height,x0,y0,sky, model parameters]        
+        # PARS should be [amp,x0,y0,sky, model parameters]        
         return self.jac(xdata,*args,allpars=True,**kwargs)
 
     
@@ -2362,7 +2363,7 @@ class PSFBase:
         im : CCDData object
             Image to use for fitting.
         pars : numpy array, list or catalog
-            Initial parameters.  If numpy array or list the values should be [height, xcen, ycen].
+            Initial parameters.  If numpy array or list the values should be [amp, xcen, ycen].
             If a catalog is input then it must at least the "x" and "y" columns.
         niter : int, optional
             Number of iterations to perform.  Default is 2.
@@ -2370,7 +2371,7 @@ class PSFBase:
             Fitting radius in pixels.  Default is to use the PSF FWHM.
         allpars : boolean, optional
             Fit PSF model parameters as well.  Default is to only fit the stellar parameters
-            of [height, xcen, ycen, sky].
+            of [amp, xcen, ycen, sky].
         method : str, optional
             Method to use for solving the non-linear least squares problem: "cholesky",
             "qr", "svd", and "curve_fit".  Default is "qr".
@@ -2378,7 +2379,7 @@ class PSFBase:
            Minimum percent change in the parameters to allow until the solution is
            considered converged and the iteration loop is stopped.  Default is 0.5.
         nosky : boolean, optional
-            Do not fit the sky, only [height, xcen, and ycen].  Default is False.
+            Do not fit the sky, only [amp, xcen, and ycen].  Default is False.
         weight : boolean, optional
             Weight the data by 1/error**2.  Default is weight=True.
         absolute : boolean, optional
@@ -2393,14 +2394,14 @@ class PSFBase:
             Allow the centroids to be fit.  Default is True.
         bounds : list, optional
             Input lower and upper bounds/constraints on the fitting parameters (tuple of two
-              lists (e.g., ([height_lo,x_low,y_low],[height_hi,x_hi,y_hi])).
+              lists (e.g., ([amp_lo,x_low,y_low],[amp_hi,x_hi,y_hi])).
         verbose : boolean, optional
             Verbose output to the screen.  Default is False.
 
         Returns
         -------
         outcat : catalog or numpy array
-            Output catalog of best-fit values (id, height, height_error, x, x_error, y, y_error,
+            Output catalog of best-fit values (id, amp, amp_error, x, x_error, y, y_error,
               sky, sky_error, niter).  If retpararray=True, then the parameters and parameter
               uncertainties will be output as numpy arrays.
         perror : numpy array
@@ -2431,23 +2432,23 @@ class PSFBase:
         
         # PARS: initial guesses for Xo and Yo parameters.
         if isinstance(pars,Table):
-            for n in ['x','y','height']:
+            for n in ['x','y','amp']:
                 if n not in pars.columns:
-                    raise ValueError('PARS must have [HEIGHT, X, Y]')
-            cat = {'height':pars['height'][0],'x':pars['x'][0],'y':pars['y'][0]}
+                    raise ValueError('PARS must have [AMP, X, Y]')
+            cat = {'amp':pars['amp'][0],'x':pars['x'][0],'y':pars['y'][0]}
         elif isinstance(pars,np.ndarray):
-            for n in ['x','y','height']:
+            for n in ['x','y','amp']:
                 if n not in pars.dtype.names:
-                    raise ValueError('PARS must have [HEIGHT, X, Y]')            
-            cat = {'height':pars['height'][0],'x':pars['x'][0],'y':pars['y'][0]}
+                    raise ValueError('PARS must have [AMP, X, Y]')            
+            cat = {'amp':pars['amp'][0],'x':pars['x'][0],'y':pars['y'][0]}
         elif isinstance(pars,dict):
             if 'x' in pars.keys()==False or 'y' in pars.keys() is False:
                 raise ValueError('PARS dictionary must have x and y')
             cat = pars
         else:            
             if len(pars)<3:
-                raise ValueError('PARS must have [HEIGHT, X, Y]')
-            cat = {'height':pars[0],'x':pars[1],'y':pars[2]}
+                raise ValueError('PARS must have [AMP, X, Y]')
+            cat = {'amp':pars[0],'x':pars[1],'y':pars[2]}
 
         method = str(method).lower()
 
@@ -2495,24 +2496,24 @@ class PSFBase:
         xdata = np.vstack((X.ravel(), Y.ravel()))        
         sky = np.median(skyim)
         if nosky: sky=0.0
-        if 'height' in cat:
-            height = cat['height']
+        if 'amp' in cat:
+            amp = cat['amp']
         else:
-            height = flux[int(np.round(yc)),int(np.round(xc))]-sky   # python images are (Y,X)
-            height = np.maximum(height,1)  # make sure it's not negative
+            amp = flux[int(np.round(yc)),int(np.round(xc))]-sky   # python images are (Y,X)
+            amp = np.maximum(amp,1)  # make sure it's not negative
             
-        initpar = [height,xc,yc,sky]            
+        initpar = [amp,xc,yc,sky]            
         
         # Fit PSF parameters as well
         if allpars:
-            initpar = np.hstack(([height,xc,yc,sky],self.params.copy()))
+            initpar = np.hstack(([amp,xc,yc,sky],self.params.copy()))
 
         # Remove sky column
         if nosky:
             initpar = np.delete(initpar,3,axis=0)
 
         # Initialize the output catalog
-        dt = np.dtype([('id',int),('height',float),('height_error',float),('x',float),
+        dt = np.dtype([('id',int),('amp',float),('amp_error',float),('x',float),
                        ('x_error',float),('y',float),('y_error',float),('sky',float),
                        ('sky_error',float),('flux',float),('flux_error',float),
                        ('mag',float),('mag_error',float),('niter',int),
@@ -2607,8 +2608,8 @@ class PSFBase:
             bestpar[2] += imy0
             
         # Put values in catalog
-        outcat['height'] = bestpar[0]
-        outcat['height_error'] = perror[0]
+        outcat['amp'] = bestpar[0]
+        outcat['amp_error'] = perror[0]
         outcat['x'] = bestpar[1]
         outcat['x_error'] = perror[1]
         outcat['y'] = bestpar[2]
@@ -2624,7 +2625,7 @@ class PSFBase:
         outcat['nfitpix'] = flux.size
         outcat['chisq'] = np.sum((flux-model.reshape(flux.shape))**2/err**2)/len(flux)
         outcat = Table(outcat)
-        # chi value, RMS of the residuals as a fraction of the height
+        # chi value, RMS of the residuals as a fraction of the amp
         rms = np.sqrt(np.mean(((flux-model.reshape(flux.shape))/bestpar[0])**2))
         outcat['rms'] = rms
         
@@ -2662,7 +2663,7 @@ class PSFBase:
         im : CCDData object
             Image to use for fitting.
         cat : catalog
-            Catalog of stellar parameters.  Columns must include height, x, y and sky.
+            Catalog of stellar parameters.  Columns must include amp, x, y and sky.
         sky : boolean, optional
             Include sky in the model that is subtracted.  Default is False.
         radius : float, optional
@@ -2692,9 +2693,9 @@ class PSFBase:
         else:
             raise ValueError('Only ndarray, astropy Table or dictionaries supported for catalogs')
 
-        for n in ['height','x','y','sky']:
+        for n in ['amp','x','y','sky']:
             if not n in columns:
-                raise ValueError('Catalog must have height, x, y and sky columns')
+                raise ValueError('Catalog must have amp, x, y and sky columns')
             
         ny,nx = im.shape    # python images are (Y,X)
         nstars = np.array(cat).size
@@ -2708,7 +2709,7 @@ class PSFBase:
         else:
             addim = im.data.copy()            
         for i in range(nstars):
-            pars = [cat['height'][i],cat['x'][i],cat['y'][i]]
+            pars = [cat['amp'][i],cat['x'][i],cat['y'][i]]
             if sky:
                 pars.append(cat['sky'][i])
             bbox = self.starbbox((pars[1],pars[2]),im.shape,radius)
@@ -2726,7 +2727,7 @@ class PSFBase:
         im : CCDData object
             Image to use for fitting.
         cat : catalog
-            Catalog of stellar parameters.  Columns must include height, x, y and sky.
+            Catalog of stellar parameters.  Columns must include amp, x, y and sky.
         sky : boolean, optional
             Include sky in the model that is subtracted.  Default is False.
         radius : float, optional
@@ -2756,9 +2757,9 @@ class PSFBase:
         else:
             raise ValueError('Only ndarray, astropy Table or dictionaries supported for catalogs')
 
-        for n in ['height','x','y']:
+        for n in ['amp','x','y']:
             if not n in columns:
-                raise ValueError('Catalog must have height, x, and y columns')
+                raise ValueError('Catalog must have amp, x, and y columns')
         if sky and 'sky' not in columns:
             raise ValueError('Catalog must have sky column')
             
@@ -2774,7 +2775,7 @@ class PSFBase:
         else:
             subim = im.data.copy()            
         for i in range(nstars):
-            pars = [cat['height'][i],cat['x'][i],cat['y'][i]]
+            pars = [cat['amp'][i],cat['x'][i],cat['y'][i]]
             if sky:
                 pars.append(cat['sky'][i])
             bbox = self.starbbox((pars[1],pars[2]),im.shape,radius)
@@ -2792,7 +2793,7 @@ class PSFBase:
         ----------
         cat : table
            The catalog of stars to use.  This should have "x" and "y" columns and
-             preferably also "height".
+             preferably also "amp".
         image : CCDData object
            The image to use to generate the residuals images.
         fillvalue : float, optional
@@ -2828,17 +2829,17 @@ class PSFBase:
             im = image[bbox.slices]
             flux = image.data[bbox.slices]-image.sky[bbox.slices]
             err = image.error[bbox.slices]
-            if 'height' in cat.columns:
-                height = cat['height'][i]
+            if 'amp' in cat.columns:
+                amp = cat['amp'][i]
             elif 'peak' in cat.columns:
-                height = cat['peak'][i]
+                amp = cat['peak'][i]
             else:
-                height = flux[int(np.round(ycen)),int(np.round(xcen))]
+                amp = flux[int(np.round(ycen)),int(np.round(xcen))]
             xim,yim = np.meshgrid(im.x,im.y)
             xim = xim.astype(float)-xcen
             yim = yim.astype(float)-ycen
             # We need to interpolate this onto the grid
-            f = RectBivariateSpline(yim[:,0],xim[0,:],flux/height)
+            f = RectBivariateSpline(yim[:,0],xim[0,:],flux/amp)
             im2 = np.zeros((npix,npix),float)+np.nan
             xcover = (x>=bbox.ixmin-xcen) & (x<=bbox.ixmax-1-xcen)
             xmin,xmax = dln.minmax(np.where(xcover)[0])
@@ -2871,7 +2872,7 @@ class PSFBase:
         pass
 
     def flux(self,pars=None,footprint=False):
-        """ Return the flux/volume of the model given the height.  Must be defined by subclass."""
+        """ Return the flux/volume of the model given the amp.  Must be defined by subclass."""
         pass
 
     # Do we also want the flux within the footprint!
@@ -3334,7 +3335,7 @@ class PSFGaussian(PSFBase):
         return gaussian2d_fwhm(pars)
 
     def flux(self,pars=None,footprint=False):
-        """ Return the flux/volume of the model given the height or parameters."""
+        """ Return the flux/volume of the model given the amp or parameters."""
         if pars is None:
             pars = np.hstack(([1.0, 0.0, 0.0], self.params))
         else:
@@ -3439,7 +3440,7 @@ class PSFMoffat(PSFBase):
         return moffat2d_fwhm(pars)
 
     def flux(self,pars=None,footprint=False):
-        """ Return the flux/volume of the model given the height or parameters."""
+        """ Return the flux/volume of the model given the amp or parameters."""
         if pars is None:
             pars = np.hstack(([1.0, 0.0, 0.0], self.params))
         else:
@@ -3542,7 +3543,7 @@ class PSFPenny(PSFBase):
         return penny2d_fwhm(pars)
 
     def flux(self,pars=None,footprint=False):
-        """ Return the flux/volume of the model given the height or parameters."""
+        """ Return the flux/volume of the model given the amp or parameters."""
         if pars is None:
             pars = np.hstack(([1.0, 0.0, 0.0], self.params))
         else:
@@ -3646,7 +3647,7 @@ class PSFGausspow(PSFBase):
         return gausspow2d_fwhm(pars)
 
     def flux(self,pars=None,footprint=False):
-        """ Return the flux/volume of the model given the height or parameters."""
+        """ Return the flux/volume of the model given the amp or parameters."""
         if pars is None:
             pars = np.hstack(([1.0, 0.0, 0.0], self.params))
         else:
@@ -3803,7 +3804,7 @@ class PSFEmpirical(PSFBase):
             return 0.0
 
     def flux(self,pars=None,footprint=True):
-        """ Return the flux/volume of the model given the height or parameters."""
+        """ Return the flux/volume of the model given the amp or parameters."""
         if pars is None:
             pars = [1.0, 0.0, 0.0]
         else:

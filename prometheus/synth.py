@@ -28,20 +28,20 @@ from . import models
 
 # Fit a PSF model to multiple stars in an image
 
-def makecat(nstars=1000,heightr=[100.0,1e5],xr=[50.0,950.0],yr=[50.0,950.0]):
+def makecat(nstars=1000,ampr=[100.0,1e5],xr=[50.0,950.0],yr=[50.0,950.0]):
     """
     Make synthetic catalog of stars.
     """
-    dt = np.dtype([('id',int),('x',float),('y',float),('height',float)])
+    dt = np.dtype([('id',int),('x',float),('y',float),('amp',float)])
     cat = np.zeros(nstars,dtype=dt)
     for i in range(nstars):
-        height = dln.scale(np.random.rand(1)[0],[0.0,1.0],heightr)
+        amp = dln.scale(np.random.rand(1)[0],[0.0,1.0],ampr)
         xcen = dln.scale(np.random.rand(1)[0],[0.0,1.0],xr)
         ycen = dln.scale(np.random.rand(1)[0],[0.0,1.0],yr)
         cat['id'][i] = i+1
         cat['x'][i] = xcen
         cat['y'][i] = ycen
-        cat['height'][i] = height
+        cat['amp'][i] = amp
     return cat
 
 def makeimage(nstars=1000,nx=1024,ny=1024,psf=None,cat=None,noise=True,backgrnd=1000.0):
@@ -65,11 +65,11 @@ def makeimage(nstars=1000,nx=1024,ny=1024,psf=None,cat=None,noise=True,backgrnd=
     # python images are (Y,X)
     im = np.zeros((ny,nx),float)+backgrnd
     for i in range(nstars):
-        height = cat['height'][i]
+        amp = cat['amp'][i]
         xcen = cat['x'][i]
         ycen = cat['y'][i]
         bbox = psf.starbbox((xcen,ycen),(ny,nx),npsfpix//2)
-        im2 = psf(pars=[height,xcen,ycen],bbox=bbox)
+        im2 = psf(pars=[amp,xcen,ycen],bbox=bbox)
         im[bbox.slices] += im2
     err = np.maximum(np.sqrt(im),1)
     if noise:
