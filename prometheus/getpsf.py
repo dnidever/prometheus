@@ -15,7 +15,7 @@ import warnings
 from astropy.io import fits
 from astropy.table import Table
 import astropy.units as u
-from scipy.optimize import curve_fit, least_squares
+from scipy.optimize import curve_fit, least_squares, line_search
 from scipy.interpolate import interp1d,interp2d
 from scipy.interpolate import RectBivariateSpline
 #from astropy.nddata import CCDData,StdDevUncertainty
@@ -642,6 +642,50 @@ class PSFFitter(object):
         else:
             return allderiv
 
+    def linesearch(self,xdata,bestpar,dbeta,m,jac):
+        # Perform line search along search gradient
+        flux = self.imflatten
+        # Weights
+        wt = 1/self.errflatten**2
+        
+        start_point = bestpar
+        search_gradient = dbeta
+        def obj_func(pp,m=None):
+            """ chisq given the parameters."""
+            if m is None:
+                m = self.model(xdata,*pp)                        
+            chisq = np.sum((flux.ravel()-m.ravel())**2 * wt.ravel())
+            #print('obj_func: pp=',pp)
+            #print('obj_func: chisq=',chisq)
+            return chisq
+        def obj_grad(pp,m=None,jac=None):
+            """ Gradient of chisq wrt the parameters."""
+            if m is None or jac is None:
+                m,jac = self.jac(xdata,*pp,retmodel=True)
+            # d chisq / d parj = np.sum( 2*jac_ij*(m_i-d_i))/sig_i**2)
+            dchisq = np.sum( 2*jac * (m.ravel()-flux.ravel()).reshape(-1,1)
+                             * wt.ravel().reshape(-1,1),axis=0)
+            #print('obj_grad: pp=',pp)
+            #print('obj_grad: dchisq=',dchisq)            
+            return dchisq
+
+        f0 = obj_func(start_point,m=m)
+        # Do our own line search with three points and a quadratic fit.
+        f1 = obj_func(start_point+0.5*search_gradient)
+        f2 = obj_func(start_point+search_gradient)
+        alpha = dln.quadratic_bisector(np.array([0.0,0.5,1.0]),np.array([f0,f1,f2]))
+        alpha = np.minimum(np.maximum(alpha,0.0),1.0)  # 0<alpha<1
+        if ~np.isfinite(alpha):
+            alpha = 1.0
+        # Use scipy.optimize.line_search()
+        #grad0 = obj_grad(start_point,m=m,jac=jac)        
+        #alpha,fc,gc,new_fval,old_fval,new_slope = line_search(obj_func, obj_grad, start_point, search_gradient, grad0,f0,maxiter=3)
+        #if alpha is None:  # did not converge
+        #    alpha = 1.0
+        pars_new = start_point + alpha * search_gradient
+        new_dbeta = alpha * search_gradient
+        return alpha,new_dbeta
+
     def mklookup(self,order=0):
         """ Make an empirical look-up table for the residuals."""
 
@@ -817,13 +861,18 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
             wt = 1/pf.errflatten**2
             # Solve Jacobian
             dbeta = lsq.jac_solve(jac,dy,method=method,weight=wt)
+            
+            # Perform line search
+            alpha,new_dbeta = pf.linesearch(xdata,bestpar,dbeta,m,jac)
+            
             if verbose:
                 print('  pars = '+str(bestpar))
                 print('  dbeta = '+str(dbeta))
-                
+
             # Update the parameters
             oldpar = bestpar.copy()
-            bestpar = psf.newpars(bestpar,dbeta,bounds,maxsteps)
+            #bestpar = psf.newpars(bestpar,dbeta,bounds,maxsteps)
+            bestpar = psf.newpars(bestpar,new_dbeta,bounds,maxsteps)  
             diff = np.abs(bestpar-oldpar)
             denom = np.abs(oldpar.copy())
             denom[denom==0] = 1.0  # deal with zeros

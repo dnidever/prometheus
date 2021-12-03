@@ -1055,12 +1055,12 @@ def penny2d(x, y, pars, deriv=False, nderiv=None):
     a = ((cost2 / xsig2) + (sint2 / ysig2))
     b = ((sin2t / xsig2) - (sin2t / ysig2))    
     c = ((sint2 / xsig2) + (cost2 / ysig2))
-    relamp = pars[6]    
+    relamp = np.minimum(np.maximum(pars[6],0),1.0)  # 0<relamp<1
     # Gaussian component
     g = amp * (1-relamp) * np.exp(-0.5*((a * xdiff ** 2) + (b * xdiff*ydiff) +
                                         (c * ydiff ** 2)))
     # Add Lorentzian/Moffat beta=1.2 wings
-    sigma = pars[7]
+    sigma = np.maximum(pars[7],0)
     rr_gg = (xdiff ** 2 + ydiff ** 2) / sigma ** 2
     beta = 1.2
     l = amp * relamp / (1 + rr_gg)**(beta)
@@ -1167,8 +1167,8 @@ def penny2d_fwhm(pars):
     amp = pars[0]
     xsig = pars[3]
     ysig = pars[4]
-    relamp = pars[6]
-    sigma = pars[7]
+    relamp = np.minimum(np.maximum(pars[6],0),1.0)  # 0<relamp<1
+    sigma = np.maximum(pars[7],0)
     beta = 1.2   # Moffat
 
     if np.sum(~np.isfinite(np.array(pars)))>0:
@@ -1192,7 +1192,7 @@ def penny2d_fwhm(pars):
     f = (1-relamp)*np.exp(-0.5*(x/mnsig)**2) + relamp/(1+(x/sigma)**2)**beta
     hwhm = np.interp(0.5,f[::-1],x[::-1])
     fwhm = 2*hwhm
-    
+        
     return fwhm
 
 
@@ -1226,8 +1226,8 @@ def penny2d_flux(pars):
     amp = pars[0]
     xsig = pars[3]
     ysig = pars[4]
-    relamp = pars[6]
-    sigma = pars[7]
+    relamp = np.minimum(np.maximum(pars[6],0),1.0)  # 0<relamp<1
+    sigma = np.maximum(pars[7],0)
     beta = 1.2   # Moffat
 
     # Gaussian portion
@@ -1320,12 +1320,13 @@ def penny2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
     a = ((cost2 / xsig2) + (sint2 / ysig2))
     b = ((sin2t / xsig2) - (sin2t / ysig2))    
     c = ((sint2 / xsig2) + (cost2 / ysig2))
-    relamp = pars[6]    
+    relamp = np.minimum(np.maximum(pars[6],0),1.0)  # 0<relamp<1
+
     # Gaussian component
     g = amp * (1-relamp) * np.exp(-0.5*((a * xdiff ** 2) + (b * xdiff*ydiff) +
                                         (c * ydiff ** 2)))
     # Add Lorentzian/Moffat beta=1.2 wings
-    sigma = pars[7]
+    sigma = np.maximum(pars[7],0)
     rr_gg = (xdiff ** 2 + ydiff ** 2) / sigma ** 2
     beta = 1.2
     l = amp * relamp / (1 + rr_gg)**(beta)
@@ -2351,30 +2352,45 @@ class PSFBase:
         # PARS should be [amp,x0,y0,sky, model parameters]        
         return self.jac(xdata,*args,allpars=True,**kwargs)
 
-    def linesearch(self,xdata,bestpar,dbeta,flux,wt,allpars=False):
+    def linesearch(self,xdata,bestpar,dbeta,flux,wt,m,jac,allpars=False):
         # Perform line search along search gradient
         start_point = bestpar
         search_gradient = dbeta
-        def obj_func(pp):
+        def obj_func(pp,m=None):
             """ chisq given the parameters."""
-            if allpars:
-                m = self.model(xdata,*pp,allpars=True)
-            else:
-                m = self.model(xdata,*pp)                        
+            if m is None:
+                if allpars:
+                    m = self.model(xdata,*pp,allpars=True)
+                else:
+                    m = self.model(xdata,*pp)                        
             chisq = np.sum((flux.ravel()-m.ravel())**2 * wt.ravel())
             return chisq
-        def obj_grad(pp):
+        def obj_grad(pp,m=None,jac=None):
             """ Gradient of chisq wrt the parameters."""
-            if allpars:
-                m,jac = self.jac(xdata,*pp,allpars=True,retmodel=True)
-            else:
-                m,jac = self.jac(xdata,*pp,retmodel=True)
+            if m is None and jac is None:
+                if allpars:
+                    m,jac = self.jac(xdata,*pp,allpars=True,retmodel=True)
+                else:
+                    m,jac = self.jac(xdata,*pp,retmodel=True)
             # d chisq / d parj = np.sum( 2*jac_ij*(m_i-d_i))/sig_i**2)
             dchisq = np.sum( 2*jac * (m.ravel()-flux.ravel()).reshape(-1,1)
                              * wt.ravel().reshape(-1,1),axis=0)
             return dchisq
 
-        alpha,fc,gc,new_fval,old_fval,new_slope = line_search(obj_func, obj_grad, start_point, search_gradient)
+        f0 = obj_func(start_point,m=m)
+        # Do our own line search with three points and a quadratic fit.
+        f1 = obj_func(start_point+0.5*search_gradient)
+        f2 = obj_func(start_point+search_gradient)
+        alpha = dln.quadratic_bisector(np.array([0.0,0.5,1.0]),np.array([f0,f1,f2]))
+        #print('models alpha=',alpha)
+        if ~np.isfinite(alpha):
+            alpha = 1.0
+        alpha = np.minimum(np.maximum(alpha,0.0),1.0)  # 0<alpha<1
+        # Use scipy.optimize.line_search()
+        #grad0 = obj_grad(start_point,m=m,jac=jac)
+        #alpha,fc,gc,new_fval,old_fval,new_slope = line_search(obj_func, obj_grad, start_point, search_gradient, grad0,f0,maxiter=3)
+        #if alpha is None:  # did not converge
+        #    alpha = 1.0
         pars_new = start_point + alpha * search_gradient
         new_dbeta = alpha * search_gradient
         return alpha,new_dbeta
@@ -2603,7 +2619,7 @@ class PSFBase:
                 chisq = np.sum(dy**2 * wt.ravel())/len(dy)
                 
                 # Perform line search
-                alpha,new_dbeta = self.linesearch(xdata,bestpar,dbeta,flux,wt,allpars=allpars)
+                alpha,new_dbeta = self.linesearch(xdata,bestpar,dbeta,flux,wt,m,jac,allpars=allpars)
                     
                 # Update parameters
                 oldpar = bestpar.copy()

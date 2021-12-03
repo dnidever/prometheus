@@ -16,7 +16,7 @@ import warnings
 from astropy.io import fits
 from astropy.table import Table
 import astropy.units as u
-from scipy.optimize import curve_fit, least_squares
+from scipy.optimize import curve_fit, least_squares, line_search
 from scipy.interpolate import interp1d
 from scipy import sparse
 #from astropy.nddata import CCDData,StdDevUncertainty
@@ -601,6 +601,48 @@ class GroupFitter(object):
         else:
             return jac
 
+    def linesearch(self,xdata,bestpar,dbeta,m,jac):
+        # Perform line search along search gradient
+        # Residuals
+        flux = self.resflatten[self.usepix]-self.skyflatten[self.usepix]
+        # Weights
+        wt = 1/self.errflatten[self.usepix]**2
+
+        start_point = bestpar
+        search_gradient = dbeta
+        def obj_func(pp,m=None):
+            """ chisq given the parameters."""
+            if m is None:
+                m = self.model(xdata,*pp)                        
+            chisq = np.sum((flux.ravel()-m.ravel())**2 * wt.ravel())
+            return chisq
+        def obj_grad(pp,m=None,jac=None):
+            """ Gradient of chisq wrt the parameters."""
+            if m is None and jac is None:
+                m,jac = self.jac(xdata,*pp,retmodel=True)
+            # d chisq / d parj = np.sum( 2*jac_ij*(m_i-d_i))/sig_i**2)
+            dchisq = np.sum( 2*jac * (m.ravel()-flux.ravel()).reshape(-1,1)
+                             * wt.ravel().reshape(-1,1),axis=0)
+            return dchisq
+
+        f0 = obj_func(start_point,m=m)
+        # Do our own line search with three points and a quadratic fit.
+        f1 = obj_func(start_point+0.5*search_gradient)
+        f2 = obj_func(start_point+search_gradient)
+        alpha = dln.quadratic_bisector(np.array([0.0,0.5,1.0]),np.array([f0,f1,f2]))
+        alpha = np.minimum(np.maximum(alpha,0.0),1.0)  # 0<alpha<1
+        if ~np.isfinite(alpha):
+            alpha = 1.0
+        # Use scipy.optimize.line_search()
+        #grad0 = obj_grad(start_point,m=m,jac=jac)        
+        #alpha,fc,gc,new_fval,old_fval,new_slope = line_search(obj_func, obj_grad, start_point, search_gradient, grad0,f0,maxiter=3)
+        #if alpha is None:  # did not converge
+        #    alpha = 1.0
+        pars_new = start_point + alpha * search_gradient
+        new_dbeta = alpha * search_gradient
+        return alpha,new_dbeta
+    
+        
     def ampfit(self,trim=True):
         """ Fit the amps only for the stars."""
 
@@ -969,10 +1011,18 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
                     freepars[count*3:(count+1)*3] = freepars1
                 dbeta_free = dbeta[freepars]
 
+            chisq = np.sum(dy**2 * wt.ravel())/len(dy)
+
+            # Perform line search
+            alpha,new_dbeta_free = gf.linesearch(xdata,bestpar,dbeta_free,m,jac)
+            new_dbeta = np.zeros(len(gf.pars),float)
+            new_dbeta[gf.freepars] = new_dbeta_free
+            
             # Update parameters
             oldpar = bestpar.copy()
             oldpar_all = bestpar_all.copy()
-            bestpar_all = gf.newpars(gf.pars,dbeta,bounds,maxsteps)
+            #bestpar_all = gf.newpars(gf.pars,dbeta,bounds,maxsteps)
+            bestpar_all = gf.newpars(gf.pars,new_dbeta,bounds,maxsteps)            
             bestpar = bestpar_all[gf.freepars]
             # Check differences and changes
             diff_all = np.abs(bestpar_all-oldpar_all)
