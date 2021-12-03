@@ -15,7 +15,7 @@ import warnings
 from astropy.io import fits
 from astropy.table import Table
 import astropy.units as u
-from scipy.optimize import curve_fit, least_squares
+from scipy.optimize import curve_fit, least_squares, line_search
 from scipy.interpolate import interp1d
 from skimage import measure
 from dlnpyutils import utils as dln, bindata, ladfit, coords
@@ -2351,6 +2351,33 @@ class PSFBase:
         # PARS should be [amp,x0,y0,sky, model parameters]        
         return self.jac(xdata,*args,allpars=True,**kwargs)
 
+    def linesearch(self,xdata,bestpar,dbeta,flux,wt,allpars=False):
+        # Perform line search along search gradient
+        start_point = bestpar
+        search_gradient = dbeta
+        def obj_func(pp):
+            """ chisq given the parameters."""
+            if allpars:
+                m = self.model(xdata,*pp,allpars=True)
+            else:
+                m = self.model(xdata,*pp)                        
+            chisq = np.sum((flux.ravel()-m.ravel())**2 * wt.ravel())
+            return chisq
+        def obj_grad(pp):
+            """ Gradient of chisq wrt the parameters."""
+            if allpars:
+                m,jac = self.jac(xdata,*pp,allpars=True,retmodel=True)
+            else:
+                m,jac = self.jac(xdata,*pp,retmodel=True)
+            # d chisq / d parj = np.sum( 2*jac_ij*(m_i-d_i))/sig_i**2)
+            dchisq = np.sum( 2*jac * (m.ravel()-flux.ravel()).reshape(-1,1)
+                             * wt.ravel().reshape(-1,1),axis=0)
+            return dchisq
+
+        alpha,fc,gc,new_fval,old_fval,new_slope = line_search(obj_func, obj_grad, start_point, search_gradient)
+        pars_new = start_point + alpha * search_gradient
+        new_dbeta = alpha * search_gradient
+        return alpha,new_dbeta
     
     def fit(self,im,pars,niter=2,radius=None,allpars=False,method='qr',nosky=False,
             minpercdiff=0.5,absolute=False,retpararray=False,retfullmodel=False,
@@ -2559,6 +2586,10 @@ class PSFBase:
             bestpar = initpar.copy()
             maxpercdiff = 1e10
             maxsteps = self.steps(initpar,bounds,star=True)  # maximum steps
+            if verbose:
+                print('lbounds = ',bounds[0])
+                print('ubounds = ',bounds[1])                
+                print('maxsteps = ',maxsteps)
             while (count<niter and maxpercdiff>minpercdiff):
                 # Use Cholesky, QR or SVD to solve linear system of equations
                 if allpars:
@@ -2569,11 +2600,16 @@ class PSFBase:
                 # Solve Jacobian
                 dbeta = lsq.jac_solve(jac,dy,method=method,weight=wt.ravel())
                 dbeta[~np.isfinite(dbeta)] = 0.0  # deal with NaNs
+                chisq = np.sum(dy**2 * wt.ravel())/len(dy)
                 
+                # Perform line search
+                alpha,new_dbeta = self.linesearch(xdata,bestpar,dbeta,flux,wt,allpars=allpars)
+                    
                 # Update parameters
                 oldpar = bestpar.copy()
                 # limit the steps to the maximum step sizes and boundaries
-                bestpar = self.newpars(bestpar,dbeta,bounds,maxsteps)
+                #bestpar = self.newpars(bestpar,dbeta,bounds,maxsteps)
+                bestpar = self.newpars(bestpar,new_dbeta,bounds,maxsteps)                
                 #bestpar += dbeta
                 # Check differences and changes
                 diff = np.abs(bestpar-oldpar)
@@ -2584,8 +2620,9 @@ class PSFBase:
                 
                 if verbose:
                     print('N = '+str(count))
-                    print('bestpars = '+str(bestpar))
                     print('dbeta = '+str(dbeta))
+                    print('bestpars = '+str(bestpar))
+                    print('chisq = ',chisq)
                 
                 count += 1
 
@@ -2923,7 +2960,7 @@ class PSFBase:
             initsteps = np.zeros(npars,float)
             initsteps[0:3] = [pars[0]*0.5,0.5,0.5]  # amp, x, y
             if npars-nmpars==4 or npars==4:  # with sky
-                initsteps[3] = pars[3]*0.5          # sky
+                initsteps[3] = np.maximum(pars[3]*0.5,50)     # sky
             # we also have model parameters
             if npars>4 or star==False:
                 initsteps[-nmpars:] = self._steps       # model parameters
