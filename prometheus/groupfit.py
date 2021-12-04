@@ -64,10 +64,11 @@ class GroupFitter(object):
                 amp = cat['flux']/(2*np.pi*(psf.fwhm()/2.35)**2)                
             staramp = np.maximum(amp,0)   # make sure it's positive
         # Initialize the parameter array
-        pars = np.zeros(self.nstars*3,float) # amp, xcen, ycen
-        pars[0::3] = staramp
-        pars[1::3] = cat['x']
-        pars[2::3] = cat['y']
+        pars = np.zeros(self.nstars*3+1,float) # amp, xcen, ycen
+        pars[0:-1:3] = staramp
+        pars[1:-1:3] = cat['x']
+        pars[2:-1:3] = cat['y']
+        pars[-1] = 0.0  # sky offset
         self.pars = pars
         # Sky and Niter arrays for the stars
         self.starsky = np.zeros(self.nstars,float)
@@ -75,7 +76,7 @@ class GroupFitter(object):
         self.njaciter = 0  # initialize njaciter
         # Initialize the freezepars and freezestars arrays
         self.freezestars = np.zeros(self.nstars,bool)
-        self.freezepars = np.zeros(self.nstars*3,bool)
+        self.freezepars = np.zeros(self.nstars*3+1,bool)
         self.pixused = None   # initialize pixused
         
         # Get xdata, ydata
@@ -203,17 +204,17 @@ class GroupFitter(object):
             You can also SET a star's parameters a similar way:
             self.starpars[4] = pars
         """
-        return self.pars.reshape(self.nstars,3)
+        return self.pars[0:3*self.nstars].reshape(self.nstars,3)
     
     @property
     def staramp(self):
         """ Return the best-fit amps for all stars."""
-        return self.pars[0::3]
+        return self.pars[0:-1:3]
 
     @staramp.setter
     def staramp(self,val):
         """ Set staramp values."""
-        self.pars[0::3] = val
+        self.pars[0:-1:3] = val
     
     @property
     def starxcen(self):
@@ -324,7 +325,7 @@ class GroupFitter(object):
         
         # Freeze new stars
         oldfreezestars = self.freezestars.copy()
-        self.freezestars = np.sum(self.freezepars.reshape(self.nstars,3),axis=1)==3
+        self.freezestars = np.sum(self.freezepars[0:3*self.nstars].reshape(self.nstars,3),axis=1)==3
         #self.nfreezestars = np.sum(self.freezestars)
         # Subtract model for newly frozen stars
         newfreezestars, = np.where((oldfreezestars==False) & (self.freezestars==True))
@@ -358,7 +359,7 @@ class GroupFitter(object):
     def unfreeze(self):
         """ Unfreeze all parameters and stars."""
         self.freezestars = np.zeros(self.nstars,bool)
-        self.freezepars = np.zeros(self.nstars*3,bool)
+        self.freezepars = np.zeros(self.nstars*3+1,bool)
         self.resflatten = self.imflatten.copy()
 
 
@@ -372,13 +373,15 @@ class GroupFitter(object):
         # Make bounds
         lbounds = np.zeros(npars,float)
         ubounds = np.zeros(npars,float)
-        lbounds[0::3] = 0
+        lbounds[0:-1:3] = 0
         lbounds[1::3] = np.maximum(pars[1::3]-xoff,0)
         lbounds[2::3] = np.maximum(pars[2::3]-xoff,0)
-        ubounds[0::3] = np.inf
+        lbounds[-1] = -np.inf
+        ubounds[0:-1:3] = np.inf
         ubounds[1::3] = np.maximum(pars[1::3]+xoff,nx-1)
         ubounds[2::3] = np.maximum(pars[2::3]+xoff,ny-1)
-            
+        ubounds[-1] = np.inf
+        
         bounds = (lbounds,ubounds)
                  
         return bounds
@@ -412,9 +415,10 @@ class GroupFitter(object):
         """ Return step sizes to use when fitting the stellar parameters."""
         npars = len(pars)
         fsteps = np.zeros(npars,float)
-        fsteps[0::3] = np.maximum(np.abs(pars[0::3])*0.25,1)
+        fsteps[0:-1:3] = np.maximum(np.abs(pars[0:-1:3])*0.25,1)
         fsteps[1::3] = dx        
-        fsteps[2::3] = dx        
+        fsteps[2::3] = dx
+        fsteps[-1] = 10
         return fsteps
         
     def newpars(self,pars,steps,bounds,maxsteps):
@@ -474,8 +478,8 @@ class GroupFitter(object):
         if verbose is None and self.verbose:
             print('model: ',self.niter,args)
 
-        # Args are [amp,xcen,ycen,sky] for all Nstars
-        # so 3*Nstars parameters
+        # Args are [amp,xcen,ycen] for all Nstars + sky offset
+        # so 3*Nstars+1 parameters
 
         psf = self.psf
 
@@ -510,6 +514,8 @@ class GroupFitter(object):
             allim[invindex] += im1
             usepix[invindex] = True
 
+        allim += allpars[-1]  # add sky offset
+            
         self.usepix = usepix
         nusepix = np.sum(usepix)
         
@@ -528,8 +534,8 @@ class GroupFitter(object):
         if verbose is None and self.verbose:
             print('jac: ',self.njaciter,args)
 
-        # Args are [amp,xcen,ycen,sky] for all Nstars
-        # so 3*Nstars parameters
+        # Args are [amp,xcen,ycen] for all Nstars + sky offset
+        # so 3*Nstars+1 parameters
         
         psf = self.psf
 
@@ -579,6 +585,9 @@ class GroupFitter(object):
                 im[invindex] += m
             usepix[invindex] = True
 
+        # Sky gradient
+        jac[:,-1] = 1
+            
         # Remove frozen columns
         if self.nfreezepars>0 and allparams is False:
             jac = np.delete(jac,np.arange(len(self.pars))[self.freezepars],axis=1)
@@ -613,7 +622,7 @@ class GroupFitter(object):
         def obj_func(pp,m=None):
             """ chisq given the parameters."""
             if m is None:
-                m = self.model(xdata,*pp)                        
+                m = self.model(xdata,*pp)
             chisq = np.sum((flux.ravel()-m.ravel())**2 * wt.ravel())
             return chisq
         def obj_grad(pp,m=None,jac=None):
@@ -831,7 +840,7 @@ class GroupFitter(object):
         
     
 def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minpercdiff=0.5,
-        reskyiter=2,nofreeze=False,absolute=False,verbose=False):
+        reskyiter=2,nofreeze=False,skyfit=True,absolute=False,verbose=False):
     """
     Fit PSF to group of stars in an image.
 
@@ -864,6 +873,8 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
          Default is False, everything is relative.
     nofreeze : boolean, optional
        Do not freeze any parameters even if they have converged.  Default is False.
+    skyfit : boolean, optional
+       Fit a constant sky offset with the stellar parameters.  Default is True.
     verbose : boolean, optional
        Verbose output.
 
@@ -913,6 +924,8 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     # Start the Group Fitter
     gf = GroupFitter(psf,image,cat,fitradius=fitradius,verbose=(verbose>=2))
     xdata = np.arange(gf.ntotpix)
+    if skyfit==False:
+        gf.freezepars[-1] = True  # freeze sky value
 
     # Centroids fixed
     if recenter==False:
@@ -923,11 +936,12 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     #--------------------
     
     # Initial estimates
-    initpar = np.zeros(nstars*3,float)
-    initpar[0::3] = gf.staramp
+    initpar = np.zeros(nstars*3+1,float)
+    initpar[0:-1:3] = gf.staramp
     initpar[1::3] = cat['x']
     initpar[2::3] = cat['y']
-        
+    initpar[-1] = 0.0
+    
     # Make bounds
     #  this requires all 3*Nstars parameters to be input
     bounds = gf.mkbounds(initpar,image.shape,xoff=2)    
@@ -936,9 +950,9 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
     #   dealt with separately
     if method=='curve_fit':
         # Perform the fitting
-        bounds = [np.zeros(gf.nstars*3,float)-np.inf,
-                  np.zeros(gf.nstars*3,float)+np.inf]
-        bounds[0][0::3] = 0
+        bounds = [np.zeros(gf.nstars*3+1,float)-np.inf,
+                  np.zeros(gf.nstars*3+1,float)+np.inf]
+        bounds[0][0:-1:3] = 0
         if recenter:
             bounds[0][1::3] = cat['x']-2
             bounds[1][1::3] = cat['x']+2
@@ -965,13 +979,16 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
         bestpar_all = initpar.copy()        
         # centroids fixed, only keep amps
         if recenter==False:
-            initpar = initpar[0::3]
+            initpar = initpar[0::3]  # amps and sky offset
+        # sky offset fixed
+        if skyfit==False:
+            initpar = initpar[0:-1]  # no sky offset
         gf.niter = 0
         maxpercdiff = 1e10
         bestpar = initpar.copy()
         npars = len(bestpar)
         maxsteps = gf.steps(gf.pars,bounds)  # maximum steps, requires all 3*Nstars parameters
-        while (gf.niter<maxiter and maxpercdiff>minpercdiff):
+        while (gf.niter<maxiter and maxpercdiff>minpercdiff and gf.nfreepars>0):
             start0 = time.time()
 
             # Jacobian solvers
@@ -987,15 +1004,16 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
                 dbeta_free = lsq.jac_solve(jac,dy,method=method,weight=wt)
                 dbeta_free[~np.isfinite(dbeta_free)] = 0.0  # deal with NaNs, shouldn't happen
                 dbeta = np.zeros(len(gf.pars),float)
+                #import pdb; pdb.set_trace()
                 dbeta[gf.freepars] = dbeta_free
                                 
             #  htcen, crowdsource method of solving amps/fluxes first
             #      and then centroiding to get x/y
             else:
-                dbeta = np.zeros(3*gf.nfreestars,float)
+                dbeta = np.zeros(3*gf.nfreestars+1,float)
                 # Solve for the amps
                 newht = gf.ampfit()
-                dbeta[0::3] = gf.staramp[gf.freestars] - newht
+                dbeta[0:-1:3] = gf.staramp[gf.freestars] - newht
                 gf.staramp[gf.freestars] = newht  # update the amps
                 # Solve for the positions
                 newx, newy = gf.centroid()
@@ -1012,7 +1030,7 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
                 dbeta_free = dbeta[freepars]
 
             chisq = np.sum(dy**2 * wt.ravel())/len(dy)
-
+            
             # Perform line search
             alpha,new_dbeta_free = gf.linesearch(xdata,bestpar,dbeta_free,m,jac)
             new_dbeta = np.zeros(len(gf.pars),float)
@@ -1027,9 +1045,10 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
             # Check differences and changes
             diff_all = np.abs(bestpar_all-oldpar_all)
             percdiff_all = diff_all.copy()*0
-            percdiff_all[0::3] = diff_all[0::3]/np.maximum(oldpar_all[0::3],0.0001)*100  # amp
+            percdiff_all[0:-1:3] = diff_all[0:-1:3]/np.maximum(oldpar_all[0:-1:3],0.0001)*100  # amp
             percdiff_all[1::3] = diff_all[1::3]*100               # x
             percdiff_all[2::3] = diff_all[2::3]*100               # y
+            percdiff_all[-1] = diff_all[-1]/np.maximum(np.abs(oldpar_all[-1]),1)*100
             diff = diff_all[gf.freepars]
             percdiff = percdiff_all[gf.freepars]
             
@@ -1040,6 +1059,11 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
                 frzpars = percdiff<=minpercdiff
                 freeparsind, = np.where(~gf.freezepars)
                 bestpar = gf.freeze(bestpar,frzpars)
+                # If the only free parameter is the sky offset,
+                #  then freeze it as well
+                if gf.nfreepars==1 and gf.freepars[-1]==True:
+                    gf.freezepars[-1] = True
+                    bestpar = []
                 npar = len(bestpar)
                 if verbose:
                     print('Nfrozen pars = '+str(gf.nfreezepars))
@@ -1070,20 +1094,8 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
 
             if verbose:
                 print('iter dt =  %.2f sec' % (time.time()-start0))
-
+                
             gf.niter += 1     # increment counter
-
-
-    #bad, = np.where((gf.pars[0::3]>1e10) | (gf.pars[1::3]<-1) | (gf.pars[1::3]>3390) | (gf.pars[2::3]<-1) | (gf.pars[2::3]>2710))
-    #if len(bad)>0:
-    #    import pdb; pdb.set_trace()
-
-
-
-    #if np.min(gf.pars[0::3])<0.01:
-    #    print('problem')
-    #    import pdb; pdb.set_trace()
-
         
     # Check that all starniter are set properly
     #  if we stopped "prematurely" then not all stars were frozen
@@ -1117,13 +1129,13 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
         outcat['id'] = cat['id']
     else:
         outcat['id'] = np.arange(nstars)+1
-    outcat['amp'] = pars[0::3]
-    outcat['amp_error'] = perror[0::3]
+    outcat['amp'] = pars[0:-1:3]
+    outcat['amp_error'] = perror[0:-1:3]
     outcat['x'] = pars[1::3]
     outcat['x_error'] = perror[1::3]
     outcat['y'] = pars[2::3]
     outcat['y_error'] = perror[2::3]
-    outcat['sky'] = gf.starsky
+    outcat['sky'] = gf.starsky + pars[-1]
     outcat['flux'] = outcat['amp']*psf.flux()
     outcat['flux_error'] = outcat['amp_error']*psf.flux()    
     outcat['mag'] = -2.5*np.log10(np.maximum(outcat['flux'],1e-10))+25.0
@@ -1154,5 +1166,5 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
 
     if verbose:
         print('dt = %.2f sec' % (time.time()-start))        
-    
+        
     return outcat,model,gf.skyim

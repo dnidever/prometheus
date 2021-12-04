@@ -53,7 +53,7 @@ def cutoutbbox(image,psf,cat):
     
     
 def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minpercdiff=0.5,
-        reskyiter=2,nofreeze=False,verbose=False):
+        reskyiter=2,nofreeze=False,skyfit=True,verbose=False):
     """
     Fit PSF to all stars in an image.
 
@@ -84,6 +84,10 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
        "qr" and "svd".  Default is 0.5.
     reskyiter : int, optional
        After how many iterations to re-calculate the sky background. Default is 2.
+    nofreeze : boolean, optional
+       Do not freeze any parameters even if they have converged.  Default is False.
+    skyfit : boolean, optional
+       Fit a constant sky offset with the stellar parameters.  Default is True.
     verbose : boolean, optional
        Verbose output.
 
@@ -177,17 +181,13 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
             outmodel.data[model.bbox.slices] += model.data
             outsky.data[model.bbox.slices] = out['sky']
 
-            #if np.abs(inpcat[1]-1488)<2 and np.abs(inpcat[2]-205)<2:
-            #    print('star of interest')
-            #    import pdb; pdb.set_trace()
-            
         # Group
         else:
             bbox = cutoutbbox(image,psf,inpcat)
             out,model,sky = groupfit.fit(psf,resid[bbox.slices],inpcat,method=method,fitradius=fitradius,
                                          recenter=recenter,maxiter=maxiter,minpercdiff=minpercdiff,
                                          reskyiter=reskyiter,nofreeze=nofreeze,verbose=verbose,
-                                         absolute=True)
+                                         skyfit=skyfit,absolute=True)
             outmodel.data[model.bbox.slices] += model.data
             outsky.data[model.bbox.slices] = sky
             
@@ -202,10 +202,6 @@ def fit(psf,image,cat,method='qr',fitradius=None,recenter=True,maxiter=10,minper
         outcat['group_id'][ind] = grp
         outcat['ngroup'][ind] = nind
         outcat = Table(outcat)
-
-        bad, = np.where((out['amp']>1e10) | (out['x']<-1) | (out['x']>3390) | (out['y']<-1) | (out['y']>2710))
-        if len(bad)>0:
-            import pdb; pdb.set_trace()
         
     if verbose:
         print('dt = %.2f sec' % (time.time()-start))
