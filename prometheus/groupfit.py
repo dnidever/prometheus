@@ -622,7 +622,7 @@ class GroupFitter(object):
         def obj_func(pp,m=None):
             """ chisq given the parameters."""
             if m is None:
-                m = self.model(xdata,*pp)
+                m = self.model(xdata,*pp,trim=True)
             chisq = np.sum((flux.ravel()-m.ravel())**2 * wt.ravel())
             return chisq
         def obj_grad(pp,m=None,jac=None):

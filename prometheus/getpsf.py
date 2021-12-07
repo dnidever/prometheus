@@ -442,6 +442,13 @@ class PSFFitter(object):
         psf = self.psf.copy()
         if type(psf)!=models.PSFEmpirical:
             psf._params = list(args)
+
+        # Limit the parameters to the boundaries
+        if type(psf)!=models.PSFEmpirical:
+            lbnds,ubnds = psf.bounds
+            for i in range(len(psf.params)):
+                psf._params[i] = np.minimum(np.maximum(args[i],lbnds[i]),ubnds[i])
+                
         # Loop over the stars and generate the model image
         allim = np.zeros(self.ntotpix,float)
         pixcnt = 0
@@ -479,6 +486,9 @@ class PSFFitter(object):
                     bounds = (np.array([0,np.maximum(x0orig-2,0),np.maximum(y0orig-2,0),-np.inf]),
                               np.array([np.inf,np.minimum(x0orig+2,bbox.shape[1]-1),np.minimum(y0orig+2,bbox.shape[0]-1),np.inf]))
                     # the image still has sky in it, use sky (nosky=False)
+                    if np.isfinite(psf.fwhm())==False:
+                        print('nan fwhm')
+                        import pdb; pdb.set_trace()
                     pars,perror,model = psf.fit(image,[amp,x0,y0],nosky=False,retpararray=True,niter=5,bounds=bounds)
                     xcen += (pars[1]-x0)
                     ycen += (pars[2]-y0)
@@ -669,6 +679,7 @@ class PSFFitter(object):
             #print('obj_grad: dchisq=',dchisq)            
             return dchisq
 
+        # Inside model() the parameters are limited to the PSF bounds()
         f0 = obj_func(start_point,m=m)
         # Do our own line search with three points and a quadratic fit.
         f1 = obj_func(start_point+0.5*search_gradient)
@@ -828,12 +839,12 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
             print('Median RMS: '+str(np.median(pf.starrms)))
             print('dt = %.2f sec' % (time.time()-t0))
         return newpsf, None, None, psfcat, pf
-        
+    
     pf = PSFFitter(psf,image,cat,fitradius=fitradius,verbose=False) #verbose)
     xdata = np.arange(pf.ntotpix)
     initpar = psf.params.copy()
     method = str(method).lower()
-
+    
     # Curve_fit
     if method=='curve_fit':    
         # Perform the fitting
@@ -847,7 +858,7 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
         count = 0
         percdiff = 1e10
         bestpar = initpar.copy()
-        
+
         dchisq = -1
         oldchisq = 1e30
         bounds = psf.bounds
@@ -861,7 +872,7 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
             wt = 1/pf.errflatten**2
             # Solve Jacobian
             dbeta = lsq.jac_solve(jac,dy,method=method,weight=wt)
-            
+
             # Perform line search
             alpha,new_dbeta = pf.linesearch(xdata,bestpar,dbeta,m,jac)
             

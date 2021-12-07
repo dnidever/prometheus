@@ -2234,11 +2234,11 @@ class PSFBase:
         ## curve_fit separates each parameter while
         ## psf expects on pars array
         
-        pars = args
+        pars = np.copy(np.array(args))
         if self.verbose: print('model: ',pars)
 
         self.niter += 1
-        
+
         # Just stellar parameters
         if not allpars:
             return self(xdata[0],xdata[1],pars,**kwargs)
@@ -2246,11 +2246,15 @@ class PSFBase:
         # Stellar + Model parameters
         #   PARS should be [amp,x0,y0,sky, model parameters]
         else:
-            allpars = args
+            allpars = np.copy(np.array(args))
             nmpars = len(self.params)
             npars = len(allpars)-nmpars
             pars = allpars[0:npars]
-            mpars = allpars[-nmpars:]        
+            mpars = allpars[-nmpars:]
+            # Constrain the model parameters to the PSF bounds
+            lbnds,ubnds = self.bounds
+            for i in range(len(self.params)):
+                mpars[i] = np.minimum(np.maximum(mpars[i],lbnds[i]),ubnds[i])
             return self(xdata[0],xdata[1],pars,mpars=mpars,**kwargs)
 
 
@@ -2494,7 +2498,7 @@ class PSFBase:
             cat = {'amp':pars[0],'x':pars[1],'y':pars[2]}
 
         method = str(method).lower()
-
+        
         # Input bounds
         if bounds is not None:
             inbounds = copy.deepcopy(bounds)
@@ -3584,7 +3588,7 @@ class PSFPenny(PSFBase):
             raise ValueError('relative amplitude must be >=0 and <=1')
         super().__init__(mpars,npix=npix,binned=binned)
         # Set the bounds
-        self._bounds = (np.array([0.0,0.0,-np.inf,0.00,0.0]),
+        self._bounds = (np.array([0.0,0.0,-np.inf,0.00,0.01]),
                         np.array([np.inf,np.inf,np.inf,1.0,np.inf]))
         # Set step sizes
         self._steps = np.array([0.5,0.5,0.2,0.1,0.5])
