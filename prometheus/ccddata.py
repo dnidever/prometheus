@@ -61,13 +61,80 @@ def getrdnoise(image):
 
 
 class CCDData(CCD):
+    """
+    
+    A container for image data.  This is based on the astropy CCDdata class, but some
+    functionality has been added.
+
+    Parameters
+    ----------
+    data : `numpy.ndarray`-like or `NDData`-like
+        The dataset.
+
+    error : any type, optional
+        Uncertainty in the dataset.  This must be a "reguar" standard deviation
+        uncertainty. Defaults to ``None``.
+
+    mask : any type, optional
+        Mask for the dataset. Masks should follow the ``numpy`` convention that
+        **valid** data points are marked by ``False`` and **invalid** ones with
+        ``True``.
+        Defaults to ``None``.
+
+    wcs : any type, optional
+        World coordinate system
+
+    meta : `dict`-like object, optional
+        Additional meta information about the dataset. If no meta is provided
+        an empty `collections.OrderedDict` is created.
+        Default is ``None``.
+
+    bbox : BBox, optional
+        Bounding Box of the image.
+
+    gain : float, optional
+        Gain of the image (e/ADU).  Default is 1.0. 
+
+    rdnoise : float, optional
+        Readnoise of the image.  Default is 0.0.
+
+    sky : numpy array, optional
+        The sky background array.
+
+    copy : `bool`, optional
+        Indicates whether to save the arguments as copy. ``True`` copies
+        every attribute before saving it while ``False`` tries to save every
+        parameter as reference.
+        Note however that it is not always possible to save the input as
+        reference.
+        Default is ``False``.
+
+    skyfunc : function, optional
+        Function that computes the sky background of the image.
+
+    unit : unit-like, optional
+        Unit for the dataset. Strings that can be converted to a
+        `~astropy.units.Unit` are allowed.
+        Default is ``adu``.
+
+    Methods
+    -------
+    read(fileame)
+        ``Classmethod`` to create an CCDData instance based on a ``FITS`` file.
+    write(filename)
+        Writes the contents of the CCDData instance into a new ``FITS`` file.
 
 
-    def __init__(self, data, *args, error=None, bbox=None, gain=None, rdnoise=None, sky=None,
-                 copy=False, skyfunc=None, unit=None, **kwargs):
+    """
+
+    def __init__(self, data, *args, error=None, mask=None, bbox=None, gain=None, rdnoise=None,
+                 sky=None,copy=False, skyfunc=None, unit=None, **kwargs):
         # Make sure the original version copies all of the input data
         # otherwise bad things will happen when we convert to native byte-order
 
+        # NDData class has these input parameters
+        # data, uncertainty=None, mask=None, wcs=None, meta=None, unit=None, copy=False
+        
         # Pull out error from arguments
         if len(args)>0:
             error = args[0]
@@ -79,10 +146,33 @@ class CCDData(CCD):
         # Make sure we have units
         if unit is None:
             unit = 'adu'
-                
-        # Initialize with the parent...
-        super().__init__(data, *args, copy=copy, unit=unit, **kwargs)
 
+        # Check for non-finite values
+        bad = (~np.isfinite(data))
+        if error is not None:
+            bad = bad | (~np.isfinite(error)) | (error <=0)
+            if np.sum(bad)>0:
+                error[bad] = 1e30
+        if np.sum(bad)>0:
+            data[bad] = 0.0            
+            if mask is None:
+                mask = np.array(data.shape,bool)
+            mask[bad] = True    # masked means bad
+            
+        # Initialize with the parent...
+        super().__init__(data, *args, mask=mask, copy=copy, unit=unit, **kwargs)
+
+        # Do some checks on error, mask and sky
+        if error is not None:
+            if error.shape != data.shape:
+                raise ValueError('data and error arrays have different shapes')
+        if mask is not None:
+            if mask.shape != data.shape:
+                raise ValueError('data and mask arrays have different shapes')
+        if sky is not None:
+            if sky.shape != data.shape:
+                raise ValueError('data and sky arrays have different shapes')            
+        
         # Error
         self._error = error
         # Sky
@@ -512,6 +602,7 @@ class CCDData(CCD):
         # HDU0: Data and header
         hdulist.append(fits.PrimaryHDU(self.data,self.header))
         hdulist[0].header['IMAGTYPE'] = 'Prometheus'
+        hdulist[0].header['BUNIT'] = 'Flux'
         # HDU1: error
         hdulist.append(fits.ImageHDU(self.error))
         hdulist[1].header['BUNIT'] = 'Uncertainty'
@@ -562,33 +653,74 @@ class CCDData(CCD):
 
         hdulist = fits.open(filename)
         nhdu = len(hdulist)
-        # HDU0: Data and header
-        data = hdulist[0].data
-        head = hdulist[0].header
-        # HDU1: error
-        if nhdu>1:
-            error = hdulist[1].data
-            ehead = hdulist[1].header
+        # Checking if there's an image in HDU0 or HDU1
+        if nhdu==1 and hdulist[0].data is None:
+            print('No image in '+filename)
+        if nhdu>1 and hdulist[0].data is None and hdulist[1].data is None:
+            print('No image in first two extensions of '+filename)            
+        # Prometheus file type
+        if hdulist[0].header.get('IMAGTYPE') == 'Prometheus':
+            # HDU0: Data and header
+            data = hdulist[0].data
+            head = hdulist[0].header
+            # HDU1: error
+            if nhdu>1:
+                error = hdulist[1].data
+                ehead = hdulist[1].header
+            else:
+                error = None
+            # HDU2: mask
+            if nhdu>2:
+                mask = hdulist[2].data
+                mhead = hdulist[2].header
+            else:
+                mask = None
+            # HDU3: flags
+            if nhdu>3:
+                flags = hdulist[3].data
+                fhead = hdulist[3].header
+            else:
+                flags = None
+            # HDU4: sky
+            if nhdu>4:
+                sky = hdulist[4].data
+                shead = hdulist[4].header
+            else:
+                sky = None
+        # Other file type
         else:
-            error = None
-        # HDU2: mask
-        if nhdu>2:
-            mask = hdulist[2].data
-            mhead = hdulist[2].header
-        else:
-            mask = None
-        # HDU3: flags
-        if nhdu>3:
-            flags = hdulist[3].data
-            fhead = hdulist[3].header
-        else:
+            datanum = 0
+            if hdulist[0].data is not None: datanum=1
+                
+            # Image in HDU0
+            if hdulist[0].data is not None:
+                # data
+                data = hdulist[0].data
+                head = hdulist[0].header
+                # error
+                if nhdu>1 and hdulist[1].data is not None:
+                    error = hdulist[1].data
+                else:
+                    error = None
+            else:
+                # data
+                data = hdulist[1].data
+                head = hdulist[1].header
+                # error
+                if nhdu>2 and hdulist[2].data is not None:
+                    error = hdulist[2].data
+                else:
+                    error = None
+            # mask
+            mask = np.zeros(data.shape,bool)
+            bad = (~np.isfinite(data))
+            if error is not None:
+                bad = bad | (~np.isfinite(error))
+            mask[bad] = True    # masked means bad
+            # flags, sky
             flags = None
-        # HDU4: sky
-        if nhdu>4:
-            sky = hdulist[4].data
-            shead = hdulist[4].header
-        else:
             sky = None
+            
         hdulist.close()
         # Make WCS, this doesn't capture the PV#_# values
         w = WCS(head)
@@ -600,7 +732,8 @@ class CCDData(CCD):
             unit = 'adu'
             
         # make the ccddata object
-        image = CCDData(data,error,mask=mask,meta=head,flags=flags,sky=sky,wcs=w,unit=unit)
+        image = CCDData(data,error=error,mask=mask,meta=head,
+                        flags=flags,sky=sky,wcs=w,unit=unit)
         
         return image
 

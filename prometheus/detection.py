@@ -67,8 +67,44 @@ def plotobj(image,objects):
 def sepdetect(image,nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,
               deblend_cont=0.000015,kernel=None,maskthresh=0.0,
               segmentation_map=False):
-    """ Detection with sep."""
+    """ 
+    Detection with sep.
 
+    Parameters
+    ----------
+    image : CCDData object
+       Image on which to run sep for detection.
+    nsigma : float, optional
+       Detection level in units of sigma.  Default is 1.5.
+    fwhm : float, optional
+       Initial guess fwhm to use.  Default is 3.0.
+    minarea : int, optional
+       Minimum number of pixels for a detection.  Default is 3.
+    deblend_ntresh : int, optional
+       Deblending number of thresholds.  Default is 32.
+    deblend_cont : float, optional
+       Deblending contrast.  Default is 0.000015.
+    kernel : numpy array, optional
+       Matched filter smoothing kernel.  Default is to construct
+         it using the fwhm value.
+    maskthresh : float, optional
+       Mask threshold.  Default is 0.0.
+    segmentation_map : bool, optional
+       Return segmentation map.  Default is False.
+
+    Returns
+    -------
+    objects : table
+       Table of the detected objects and properties.
+    segmap : numpy array
+       Segmentation map if segmentation_map=True was input.
+
+    Example
+    -------
+
+    objects = sepdetect(image)
+
+    """
     
     # matched filter
     #  by default a 3x3 kernel is used
@@ -123,28 +159,96 @@ def sepdetect(image,nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,
         return objects
     
 def daodetect(image,nsigma=1.5,fwhm=3.0):
-    """ Detection with DAOFinder."""
+    """ 
+    Detection with photutils's DAOFinder.
+
+    Parameters
+    ----------
+    image : CCDData object
+       Image on which to run sep for detection.
+    nsigma : float, optional
+       Detection level in units of sigma.  Default is 1.5.
+    fwhm : float, optional
+       Initial guess fwhm to use.  Default is 3.0.
+ 
+    Returns
+    -------
+    objects : table
+       Table of the detected objects and properties.
+
+    Example
+    -------
+
+    objects = daodetect(image)
+
+    """
 
     threshold = np.median(image.error)*nsigma
     daofind = DAOStarFinder(fwhm=fwhm, threshold=threshold, sky=0.0)  
     objects = daofind(image.data-image.sky, mask=image.mask)
     # homogenize the columns
     objects['xcentroid'].name = 'x'
-    objects['ycentroid'].name = 'y'        
+    objects['ycentroid'].name = 'y'
+    
     return objects
     
 def irafdetect(image,nsigma=1.5,fwhm=3.0):
-    """ Detection with IRAFFinder."""
+    """
+    Detection with photutil's IRAFFinder.
+
+    Parameters
+    ----------
+    image : CCDData object
+       Image on which to run sep for detection.
+    nsigma : float, optional
+       Detection level in units of sigma.  Default is 1.5.
+    fwhm : float, optional
+       Initial guess fwhm to use.  Default is 3.0.
+ 
+    Returns
+    -------
+    objects : table
+       Table of the detected objects and properties.
+
+    Example
+    -------
+
+    objects = irafdetect(image)
+
+    """
     threshold = np.median(image.error)*nsigma        
     iraffind = IRAFStarFinder(fwhm=fwhm, threshold=threshold, sky=0.0)
     objects = iraffind(image.data-image.sky, mask=image.mask)
     # homogenize the columns
     objects['xcentroid'].name = 'x'
-    objects['ycentroid'].name = 'y'        
+    objects['ycentroid'].name = 'y'
+
     return objects
 
 def peaks(image,nsigma=1.5,thresh=None):
-    """ Detect peaks."""
+    """
+    Detect peaks in an image.
+
+    Parameters
+    ----------
+    image : CCDData object
+       Image on which to run sep for detection.
+    nsigma : float, optional
+       Detection level in units of sigma.  Default is 1.5.
+    thresh : float, optional
+       Absolute threshold for detection.
+ 
+    Returns
+    -------
+    objects : table
+       Table of the detected peaks.
+
+    Example
+    -------
+
+    objects = peaks(image)
+
+    """
 
     # Comparison between image_max and im to find the coordinates of local maxima
     data = image.data-image.sky
@@ -168,8 +272,8 @@ def peaks(image,nsigma=1.5,thresh=None):
     objects['nthresh'] = nthresh[gd]
     return objects
     
-def detect(image,method='sep',nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,deblend_cont=0.000015,
-           kernel=None,maskthresh=0.0):
+def detect(image,method='sep',nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,
+           deblend_cont=0.000015,kernel=None,maskthresh=0.0,verbose=False):
     """
     Detection algorithm
 
@@ -195,6 +299,9 @@ def detect(image,method='sep',nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,d
         enhance detection). Default is a 3x3 array.
     maskthresh : float, optional
        Threshold for a pixel to be masked (sep only). Default is 0.0.
+    verbose : boolean, optional
+       Verbose output to the screen.
+
     Returns
     -------
     objects : astropy Table
@@ -214,7 +321,11 @@ def detect(image,method='sep',nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,d
 
     # Detection method
     method = str(method).lower()
-    
+
+    if verbose:
+        print('Detection method = '+method)
+        print('Nsigma = %5.2f' % nsigma)
+        
     # SEP
     if method=='sep':
         return sepdetect(image,nsigma=nsigma,minarea=minarea,fwhm=fwhm,
@@ -234,11 +345,3 @@ def detect(image,method='sep',nsigma=1.5,fwhm=3.0,minarea=3,deblend_nthresh=32,d
         
     else:
         raise ValueError('Only sep, dao or iraf methods supported')
-
-
-    # Maybe add my own detection algorithm here, just peaks?
-    
-    
-    import pdb; pdb.set_trace()
-    
-

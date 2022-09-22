@@ -1979,7 +1979,7 @@ def psfmodel(name,pars=None,**kwargs):
     pars : numpy array
       The model parameters.
     kwargs : dictionary
-      Any other keyword arguments that should be to initialize the PSF model.
+      Any other keyword arguments that should be used to initialize the PSF model.
 
     Returns
     -------

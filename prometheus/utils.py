@@ -112,7 +112,13 @@ def estimatefwhm(objects,verbose=False):
     # Not enough sources, lower thresholds
     if (ngdobjects<10):
         gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.08))
-        ngdobjects = np.sum(gdobjects)            
+        ngdobjects = np.sum(gdobjects)
+    # Not enough sources, lower thresholds
+    if (ngdobjects<10):
+        si = np.argsort(objects['magerr_auto'])
+        halferr = objects['magerr_auto'][si[len(objects)//2]]
+        gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<halferr))
+        ngdobjects = np.sum(gdobjects)                    
     medfwhm = np.median(objects[gdobjects]['fwhm'])
     if verbose:
         print('FWHM = %5.2f pixels (%d sources)' % (medfwhm, ngdobjects))
@@ -150,36 +156,46 @@ def pickpsfstars(objects,fwhm,nstars=100,logger=None,verbose=False):
 
     # Use KD-tree to figure out closest neighbors
     neidist,neiind,neimagdiff = neighbors(objects)
-    
+
     # Select good sources
-    gdobjects1 = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.10))
+    si = np.argsort(objects['magerr_auto'])
+    halferr = objects['magerr_auto'][si[len(objects)//2]]            
+    gdobjects1 = ((objects['mag_auto']< 50) & (objects['magerr_auto']<halferr))
     ngdobjects1 = np.sum(gdobjects1)
     # Bright and faint limit, use 5th and 95th percentile
-    minmag, maxmag = np.sort(objects[gdobjects1]['mag_auto'])[[int(np.round(0.05*ngdobjects1)),int(np.round(0.95*ngdobjects1))]]
+    minmag,maxmag = np.nanpercentile(objects['mag_auto'][gdobjects1],(5,95))
     # Select stars with
     # -good FWHM values
     # -good clas_star values (unless FWHM too large)
     # -good mag range, bright but not too bright
     # -no flags set
-    gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.05) & 
+    gdobjects = ((objects['mag_auto']<50) & (objects['magerr_auto']<0.05) & 
                  (objects['fwhm']>0.5*fwhm) & (objects['fwhm']<1.5*fwhm) &
                  (objects['mag_auto']>(minmag+1.0)) & (objects['mag_auto']<(maxmag-0.5)) &
                  (objects['flags']==0) & (neidist>15.0) & (neimagdiff>1.0))
     ngdobjects = np.sum(gdobjects)
     # No candidate, loosen cuts
-    if ngdobjects<10:
+    if ngdobjects<50:
         if verbose:
             print("Too few PSF stars on first try. Loosening cuts")
-        gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.10) & 
+        gdobjects = ((objects['mag_auto']<50) & (objects['magerr_auto']<0.10) & 
                      (objects['fwhm']>0.2*fwhm) & (objects['fwhm']<1.8*fwhm) &
                      (objects['mag_auto']>(minmag+0.5)) & (objects['mag_auto']<(maxmag-0.5)) &
                      (neidist>10) & (neimagdiff>1.0))
         ngdobjects = np.sum(gdobjects)
     # No candidate, loosen cuts again
-    if ngdobjects<10:
+    if ngdobjects<50:
         if verbose:
             print("Too few PSF stars on second try. Loosening cuts")
-        gdobjects = ((objects['mag_auto']< 50) & (objects['magerr_auto']<0.15) & 
+        gdobjects = ((objects['mag_auto']<50) & (objects['magerr_auto']<0.15) & 
+                     (objects['fwhm']>0.2*fwhm) & (objects['fwhm']<1.8*fwhm) &
+                     (objects['mag_auto']>(minmag+0.5)) & (objects['mag_auto']<(maxmag-0.5)))
+        ngdobjects = np.sum(gdobjects)
+    # No candidate, loosen cuts again
+    if ngdobjects<50:
+        if verbose:
+            print("Too few PSF stars on second try. Loosening cuts")
+        gdobjects = ((objects['mag_auto']<50) & (objects['magerr_auto']<halferr) & 
                      (objects['fwhm']>0.2*fwhm) & (objects['fwhm']<1.8*fwhm) &
                      (objects['mag_auto']>(minmag+0.5)) & (objects['mag_auto']<(maxmag-0.5)))
         ngdobjects = np.sum(gdobjects)
@@ -193,5 +209,5 @@ def pickpsfstars(objects,fwhm,nstars=100,logger=None,verbose=False):
     if ngdobjects>nstars: psfobjects=psfobjects[0:nstars]
     if verbose:
         print(str(len(psfobjects))+" PSF stars found")
-    
+        
     return psfobjects

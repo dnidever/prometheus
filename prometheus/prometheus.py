@@ -25,9 +25,9 @@ except ImportError:
     import builtins # Python 3
     
 # run PSF fitting on an image
-def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fitradius=None,npsfpix=51,
-        binned=False,lookup=False,lorder=0,psftrim=None,recenter=True,reject=False,apcorr=False,
-        timestamp=False,verbose=False):
+def run(image,psfname='gaussian',iterdet=0,ndetsigma=1.5,snrthresh=5,psfsubnei=False,psffitradius=None,
+        fitradius=None,npsfpix=51,binned=False,lookup=False,lorder=0,psftrim=None,recenter=True,
+        reject=False,apcorr=False,timestamp=False,verbose=False):
     """
     Run PSF photometry on an image.
 
@@ -41,6 +41,10 @@ def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fit
     iterdet : boolean, optional
       Number of iterations to use for detection.  Default is iterdet=0, meaning
        detection is only performed once.
+    ndetsigma : float, optional
+      Detection threshold in units of sigma.  Default is 1.5.
+    snrthresh : float, optional
+       Signal-to-Noise threshold for detections.  Default is 5.
     psfsubnei : boolean, optional
       Subtract neighboring stars to PSF stars when generating the PSF.  Default is False.
     psffitradius : float, optional
@@ -107,6 +111,9 @@ def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fit
         image = CCDData.read(filename)
     if isinstance(image,CCDData) is False:
         raise ValueError('Input image must be a filename or CCDData object')
+
+    if verbose:
+        print('Image shape ',image.shape)
     
     residim = image.copy()
     
@@ -121,7 +128,7 @@ def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fit
         #-------------
         if verbose:
             print('Step 1: Detection')
-        objects = detection.detect(residim)
+        objects = detection.detect(residim,nsigma=ndetsigma,verbose=verbose)
         objects['ndetiter'] = niter+1
         if verbose:
             print(str(len(objects))+' objects detected')
@@ -134,11 +141,21 @@ def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fit
         nobjects = len(objects)
         # Bright and faint limit, use 5th and 95th percentile
         if niter==0:
-            minmag, maxmag = np.sort(objects['mag_auto'])[[int(np.round(0.05*nobjects)),int(np.round(0.95*nobjects))]]
+            minmag, maxmag = np.nanpercentile(objects['mag_auto'],(5,95))
             if verbose:
                 print('Min/Max mag: %5.2f, %5.2f' % (minmag,maxmag))
 
+        # Imposing S/N cut
+        gd, = np.where((objects['snr'] >= snrthresh) & np.isfinite(objects['mag_auto']))
+        if len(gd)==0:
+            print('No objects passed S/N cut')
+            return None,None,None,None
+        objects = objects[gd]
+        objects['id'] = np.arange(len(objects))+1  # renumber
+        if verbose:
+            print('%d objects left after S/N=%5.1f cut' % (len(objects),snrthresh))
 
+                
         # 3) Construct the PSF
         #---------------------        
         #  only on first iteration
@@ -152,7 +169,8 @@ def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fit
             # 3b) Pick PSF stars
             #------------------
             psfobj = utils.pickpsfstars(objects,fwhm,verbose=verbose)
-    
+
+            
             # 3c) Construct the PSF iteratively
             #---------------------------------
             # Make the initial PSF slightly elliptical so it's easier to fit the orientation
@@ -164,6 +182,7 @@ def run(image,psfname='gaussian',iterdet=0,psfsubnei=False,psffitradius=None,fit
             psf,psfpars,psfperror,psfcat = getpsf.getpsf(initpsf,image,psfobj,fitradius=psffitradius,
                                                          lookup=lookup,lorder=lorder,subnei=psfsubnei,
                                                          allcat=objects,reject=reject,verbose=(verbose>=2))
+
             # Trim the PSF
             if psftrim is not None:
                 oldnpix = psf.npix

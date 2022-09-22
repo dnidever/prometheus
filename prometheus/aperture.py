@@ -219,6 +219,7 @@ def aperphot(image,objects,aper=[3],gain=None,mag_zeropoint=25.0):
         
     # Elliptical aperture
     if nuse_ellipse>0:
+        #import pdb; pdb.set_trace()
         flux, fluxerr, flag = sep.sum_ellipse(data=data_sub, x=outcat['x'][~use_circle], y=outcat['y'][~use_circle],
                                               a=outcat['a'][~use_circle],b=outcat['b'][~use_circle],
                                               theta=outcat['theta'][~use_circle], r=2.5*kronrad[~use_circle],
@@ -244,7 +245,7 @@ def aperphot(image,objects,aper=[3],gain=None,mag_zeropoint=25.0):
 
     # Add S/N
     outcat['snr'] = 1.087/outcat['magerr_auto']
-        
+    
     return outcat
 
 

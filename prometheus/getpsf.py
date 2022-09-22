@@ -839,6 +839,7 @@ def fitpsf(psf,image,cat,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
             print('Median RMS: '+str(np.median(pf.starrms)))
             print('dt = %.2f sec' % (time.time()-t0))
         return newpsf, None, None, psfcat, pf
+
     
     pf = PSFFitter(psf,image,cat,fitradius=fitradius,verbose=False) #verbose)
     xdata = np.arange(pf.ntotpix)
@@ -1100,7 +1101,7 @@ def getpsf(psf,image,cat,fitradius=None,lookup=False,lorder=0,method='qr',subnei
         #-----------------------------
         newpsf,pars,perror,pcat,pf = fitpsf(curpsf,useimage,psfcat,fitradius=fitrad,method=method,
                                             maxiter=maxiter,minpercdiff=minpercdiff,verbose=verbose)
-
+        
         # Add information into the output catalog
         ind1,ind2 = dln.match(outcat['id'],pcat['id'])
         outcat['reject'] = 1
