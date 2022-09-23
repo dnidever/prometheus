@@ -1818,7 +1818,130 @@ def gausspow2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
             g = g.reshape(shape)
         return g
 
+   
+def sersic2d(x, y, pars, deriv=False, nderiv=None):
+    """
+    Sersic profile and can be elliptical and rotated.
 
+    Parameters
+    ----------
+    x : numpy array
+      Array of X-values of points for which to compute the Penny model.
+    y : numpy array
+      Array of Y-values of points for which to compute the Penny model.
+    pars : numpy array or list
+       Parameter list.
+        pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
+    deriv : boolean, optional
+       Return the derivatives as well.
+    nderiv : int, optional
+       The number of derivatives to return.  The default is None
+        which means that all are returned if deriv=True.
+
+    Returns
+    -------
+    g : numpy array
+      The Penny model for the input x/y values and parameters (same
+        shape as x/y).
+    derivative : list
+      List of derivatives of g relative to the input parameters.
+        This is only returned if deriv=True.
+
+    Example
+    -------
+
+    g = sersic2d(x,y,pars)
+
+    or
+
+    g,derivative = sersic2d(x,y,pars,deriv=True)
+
+    """
+    # pars = [amp,x0,y0,k,n,recc,theta]
+
+    # Sersic radial profile
+    # I(R) = I0 * exp(-k*R**(1/n))
+    # n is the sersic index
+    # most galaxies have indices in the range 1/2 < n < 10
+    # n=4 is the de Vaucouleurs profile
+    # n=1 is the exponential
+    
+    xdiff = x - pars[1]
+    ydiff = y - pars[2]
+    amp = pars[0]
+    kserc = pars[3]
+    nserc = pars[4]
+    recc = pars[5]               # b/a
+    theta = pars[6]    
+    cost2 = np.cos(theta) ** 2
+    sint2 = np.sin(theta) ** 2
+    sin2t = np.sin(2. * theta)
+    xsig2 = 1.0           # major axis
+    ysig2 = recc ** 2     # minor axis
+    a = (cost2 + (sint2 / ysig2))
+    b = (sin2t - (sin2t / ysig2))    
+    c = (sint2 + (cost2 / ysig2))
+
+    # Gaussian component
+    rr = (a * xdiff ** 2) + (b * xdiff * ydiff) + (c * ydiff ** 2)
+    g = amp * np.exp(-kserc*rr**(1/nserc))
+   
+    # Compute derivative as well
+    if deriv is True:
+
+        # How many derivative terms to return
+        if nderiv is not None:
+            if nderiv <=0:
+                nderiv = 7
+        else:
+            nderiv = 7
+        
+        derivative = []
+        if nderiv>=1:
+            dg_dA = g / amp
+            derivative.append(dg_dA)
+        if nderiv>=2:        
+            dg_dx_mean = g * (kserc/nserc)*(rr**(1/n-1))*((2 * a * xdiff) + (b * ydiff))
+            derivative.append(dg_dx_mean)
+        if nderiv>=3:
+            dg_dy_mean = g * (kserc/nserc)*(rr*(1/n-1))*((2 * c * ydiff) + (b * xdiff))
+            derivative.append(dg_dy_mean)
+        if nderiv>=4:
+            dg_dxsig = -g * rr**(1/n)
+            derivative.append(dg_dk)
+        if nderiv>=5:
+            dg_dn = g * (kserc/nserc**3) * (rr**(1/n-1))
+            derivative.append(dg_dn)
+        if nderiv>=6:
+            xdiff2 = xdiff ** 2
+            ydiff2 = ydiff ** 2
+            recc3 = recc**3
+            da_drecc = -cost2 / recc3
+            db_drecc = -sin2t / recc3            
+            dc_drecc = -sint2 / recc3            
+            dg_drecc = g*(kserc/nserc)*(rr**(1/n-1))*2*(da_drecc * xdiff2 +
+                                                        db_drecc * xdiff * ydiff +
+                                                        dc_drecc * ydiff2)
+            derivative.append(dg_drecc)
+        if nderiv>=7:
+            sint = np.sin(theta)
+            cost = np.cos(theta)
+            cos2t = np.cos(2.0*theta)
+            da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
+            db_dtheta = (cos2t / xsig2) - (cos2t / ysig2)            
+            dc_dtheta = -da_dtheta            
+            dg_dtheta =  g*(kserc/nserc)*(rr**(1/n-1))*2*(da_dtheta * xdiff2 +
+                                                          db_dtheta * xdiff * ydiff +
+                                                          dc_dtheta * ydiff2)
+            derivative.append(dg_dtheta)
+            
+        return g,derivative
+            
+    # No derivative
+    else:        
+        return g
+
+    
 def relcoord(x,y,shape):
     """
     Convert absolute X/Y coordinates to relative ones to use
