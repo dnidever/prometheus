@@ -1,5 +1,5 @@
 __all__ = ["models","getpsf","synth","groupfit","leastsquares","allfit",
-           "ccddata","detection","aperture","sky","prometheus","utils"]
+           "ccddata","detection","aperture","sky","prometheus","utils","galfit"]
 __version__ = '1.0.18'
 
 from .ccddata import CCDData

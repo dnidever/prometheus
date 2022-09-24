@@ -20,6 +20,7 @@ from scipy.interpolate import interp1d
 from skimage import measure
 from dlnpyutils import utils as dln, bindata, ladfit, coords
 from scipy.interpolate import RectBivariateSpline
+from scipy.special import gamma, gammaincinv, gammainc
 import copy
 import logging
 import time
@@ -1826,12 +1827,12 @@ def sersic2d(x, y, pars, deriv=False, nderiv=None):
     Parameters
     ----------
     x : numpy array
-      Array of X-values of points for which to compute the Penny model.
+      Array of X-values of points for which to compute the Sersic model.
     y : numpy array
-      Array of Y-values of points for which to compute the Penny model.
+      Array of Y-values of points for which to compute the Sersic model.
     pars : numpy array or list
        Parameter list.
-        pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
+        pars = [amp,x0,y0,k,alpha,recc,theta]
     deriv : boolean, optional
        Return the derivatives as well.
     nderiv : int, optional
@@ -1841,7 +1842,7 @@ def sersic2d(x, y, pars, deriv=False, nderiv=None):
     Returns
     -------
     g : numpy array
-      The Penny model for the input x/y values and parameters (same
+      The Sersic model for the input x/y values and parameters (same
         shape as x/y).
     derivative : list
       List of derivatives of g relative to the input parameters.
@@ -1857,11 +1858,13 @@ def sersic2d(x, y, pars, deriv=False, nderiv=None):
     g,derivative = sersic2d(x,y,pars,deriv=True)
 
     """
-    # pars = [amp,x0,y0,k,n,recc,theta]
+    # pars = [amp,x0,y0,k,alpha,recc,theta]
 
     # Sersic radial profile
     # I(R) = I0 * exp(-k*R**(1/n))
     # n is the sersic index
+    # I'm going to use alpha = 1/n instead
+    # I(R) = I0 * exp(-k*R**alpha)    
     # most galaxies have indices in the range 1/2 < n < 10
     # n=4 is the de Vaucouleurs profile
     # n=1 is the exponential
@@ -1870,7 +1873,7 @@ def sersic2d(x, y, pars, deriv=False, nderiv=None):
     ydiff = y - pars[2]
     amp = pars[0]
     kserc = pars[3]
-    nserc = pars[4]
+    alpha = pars[4]
     recc = pars[5]               # b/a
     theta = pars[6]    
     cost2 = np.cos(theta) ** 2
@@ -1882,9 +1885,8 @@ def sersic2d(x, y, pars, deriv=False, nderiv=None):
     b = (sin2t - (sin2t / ysig2))    
     c = (sint2 + (cost2 / ysig2))
 
-    # Gaussian component
     rr = (a * xdiff ** 2) + (b * xdiff * ydiff) + (c * ydiff ** 2)
-    g = amp * np.exp(-kserc*rr**(1/nserc))
+    g = amp * np.exp(-kserc*rr**alpha)
    
     # Compute derivative as well
     if deriv is True:
@@ -1901,27 +1903,28 @@ def sersic2d(x, y, pars, deriv=False, nderiv=None):
             dg_dA = g / amp
             derivative.append(dg_dA)
         if nderiv>=2:        
-            dg_dx_mean = g * (kserc/nserc)*(rr**(1/n-1))*((2 * a * xdiff) + (b * ydiff))
+            dg_dx_mean = g * (kserc*alpha)*(rr**(alpha-1))*((2 * a * xdiff) + (b * ydiff))
             derivative.append(dg_dx_mean)
         if nderiv>=3:
-            dg_dy_mean = g * (kserc/nserc)*(rr*(1/n-1))*((2 * c * ydiff) + (b * xdiff))
+            dg_dy_mean = g * (kserc*alpha)*(rr**(alpha-1))*((2 * c * ydiff) + (b * xdiff))
             derivative.append(dg_dy_mean)
         if nderiv>=4:
-            dg_dxsig = -g * rr**(1/n)
+            dg_dk = -g * rr**alpha
             derivative.append(dg_dk)
         if nderiv>=5:
-            dg_dn = g * (kserc/nserc**3) * (rr**(1/n-1))
-            derivative.append(dg_dn)
+            dg_dalpha = -g * kserc*np.log(rr) * rr**alpha
+            dg_dalpha[rr==0] = 0
+            derivative.append(dg_dalpha)
         if nderiv>=6:
             xdiff2 = xdiff ** 2
             ydiff2 = ydiff ** 2
             recc3 = recc**3
-            da_drecc = -cost2 / recc3
-            db_drecc = -sin2t / recc3            
-            dc_drecc = -sint2 / recc3            
-            dg_drecc = g*(kserc/nserc)*(rr**(1/n-1))*2*(da_drecc * xdiff2 +
-                                                        db_drecc * xdiff * ydiff +
-                                                        dc_drecc * ydiff2)
+            da_drecc = -2*sint2 / recc3
+            db_drecc =  2*sin2t / recc3            
+            dc_drecc = -2*cost2 / recc3            
+            dg_drecc = -g*(kserc*alpha)*(rr**(alpha-1))*(da_drecc * xdiff2 +
+                                                         db_drecc * xdiff * ydiff +
+                                                         dc_drecc * ydiff2)
             derivative.append(dg_drecc)
         if nderiv>=7:
             sint = np.sin(theta)
@@ -1930,9 +1933,9 @@ def sersic2d(x, y, pars, deriv=False, nderiv=None):
             da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
             db_dtheta = (cos2t / xsig2) - (cos2t / ysig2)            
             dc_dtheta = -da_dtheta            
-            dg_dtheta =  g*(kserc/nserc)*(rr**(1/n-1))*2*(da_dtheta * xdiff2 +
-                                                          db_dtheta * xdiff * ydiff +
-                                                          dc_dtheta * ydiff2)
+            dg_dtheta = -g*(kserc*alpha)*(rr**(alpha-1))*2*(da_dtheta * xdiff2 +
+                                                            db_dtheta * xdiff * ydiff +
+                                                            dc_dtheta * ydiff2)
             derivative.append(dg_dtheta)
             
         return g,derivative
@@ -1941,6 +1944,277 @@ def sersic2d(x, y, pars, deriv=False, nderiv=None):
     else:        
         return g
 
+def sersic2d_fwhm(pars):
+    """
+    Return the FWHM of a 2D Sersic function.
+
+    Parameters
+    ----------
+    pars : numpy array or list
+       Parameter list.
+        pars = [amp,x0,y0,k,alpha,recc,theta]
+
+    Returns
+    -------
+    fwhm : float
+       The full-width at half maximum of the Sersic function.
+    
+    Example
+    -------
+
+    fwhm = sersic2d_fwhm(pars)
+
+    """
+
+    # pars = [amp,x0,y0,k,alpha,recc,theta]
+    # x0,y0 and theta are irrelevant
+
+    amp = pars[0]
+    kserc = pars[3]
+    alpha = pars[4]
+    recc = pars[5]               # b/a
+
+    if np.sum(~np.isfinite(np.array(pars)))>0:
+        raise ValueError('PARS cannot be inf or nan')
+
+    # The mean radius of an ellipse is: (2a+b)/3
+    sig_major = np.max([xsig,xsig*recc])
+    sig_minor = np.min([xsig,xsig*recc])
+    mnsig = (2.0*sig_major+sig_minor)/3.0
+    # Convert sigma to FWHM
+    # FWHM = 2*sqrt(2*ln(2))*sig ~ 2.35482*sig
+    gfwhm = mnsig*2.35482
+
+    # Generate a small profile
+    x = np.arange( gfwhm/2.35/2, gfwhm, 0.5)
+    f = amp * np.exp(-kserc*x**alpha)
+    hwhm = np.interp(0.5,f[::-1],x[::-1])
+    fwhm = 2*hwhm
+    
+    return fwhm
+
+
+def sersic2d_flux(pars):
+    """
+    Return the total Flux of a 2D Sersic function.
+
+    Parameters
+    ----------
+    pars : numpy array or list
+       Parameter list.  pars = [amp,x0,y0,k,alpha,recc,theta]
+
+    Returns
+    -------
+    flux : float
+       Total flux or volumne of the 2D Sersic function.
+    
+    Example
+    -------
+
+    flux = sersic2d_flux(pars)
+
+    """
+
+    # pars = [amp,x0,y0,k,alpha,recc,theta]
+
+    # Volume is 2*pi*A*sigx*sigy
+    # area of 1D moffat function is pi*alpha**2 / (beta-1)
+    # maybe the 2D moffat volume is (xsig*ysig*pi**2/(beta-1))**2
+
+    # x0, y0 and theta are irrelevant
+    
+    amp = pars[0]
+    kserc = pars[3]
+    alpha = pars[4]
+    recc = pars[5]               # b/a
+
+    # https://ned.ipac.caltech.edu/level5/March05/Graham/Graham2.html
+    # integrating over an area out to R gives
+    # I0 * Re**2 * 2*pi*n*(e**bn)/(bn)**2n * gammainc(2n,x)
+
+    # https://gist.github.com/bamford/b657e3a14c9c567afc4598b1fd10a459
+    def b(n):
+        # Normalisation constant
+        return gammaincinv(2*n, 0.5)
+
+    def create_sersic_function(Ie, re, n):
+        # Not required for integrals - provided for reference
+        # This returns a "closure" function, which is fast to call repeatedly with different radii
+        neg_bn = -b(n)
+        reciprocal_n = 1.0/n
+        f = neg_bn/re**reciprocal_n
+        def sersic_wrapper(r):
+            return Ie * exp(f * r ** reciprocal_n - neg_bn)
+        return sersic_wrapper
+    
+    def sersic_lum(Ie, re, n):
+        # total luminosity (integrated to infinity)
+        bn = b(n)
+        g2n = gamma(2*n)
+        return Ie * re**2 * 2*pi*n * exp(bn)/(bn**(2*n)) * g2n
+
+    # Convert Io and k to Ie and Re
+    # Ie = Io * exp(bn)
+    # Re = (bn/k)**n
+    n = 1/alpha
+    bn = b(n)
+    Ie = amp * exp(bn)
+    Re = (bn/kserc)**n
+    
+    lum = sersic_lum(Ie,Re,n)
+    
+    # This worked for beta=2.5, but was too high by ~1.05-1.09 for beta=1.5
+    volume = amp * xsig*ysig*np.pi/(beta-1)
+    
+    return volume
+
+
+def sersic2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
+    """
+    Sersic profile and can be elliptical and rotated, integrated over the pixels.
+
+    Parameters
+    ----------
+    x : numpy array
+      Array of X-values of points for which to compute the Sersic model.
+    y : numpy array
+      Array of Y-values of points for which to compute the Sersic model.
+    pars : numpy array or list
+       Parameter list.
+        pars = [amp,x0,y0,k,alpha,recc,theta]
+    deriv : boolean, optional
+       Return the derivatives as well.
+    nderiv : int, optional
+       The number of derivatives to return.  The default is None
+        which means that all are returned if deriv=True.
+    osamp : int, optional
+       The oversampling of the pixel when doing the integrating.
+          Default is 4.
+
+    Returns
+    -------
+    g : numpy array
+      The Sersic model for the input x/y values and parameters (same
+        shape as x/y).
+    derivative : list
+      List of derivatives of g relative to the input parameters.
+        This is only returned if deriv=True.
+
+    Example
+    -------
+
+    g = sersic2d_integrate(x,y,pars)
+
+    or
+
+    g,derivative = sersic2d_integrate(x,y,pars,deriv=True)
+
+    """
+    # pars = [amp,x0,y0,k,alpha,recc,theta]
+    
+    # Sersic radial profile
+    # I(R) = I0 * exp(-k*R**(1/n))
+    # n is the sersic index
+    # I'm going to use alpha = 1/n instead
+    # I(R) = I0 * exp(-k*R**alpha)    
+    # most galaxies have indices in the range 1/2 < n < 10
+    # n=4 is the de Vaucouleurs profile
+    # n=1 is the exponential
+
+    x = np.atleast_1d(x)
+    y = np.atleast_1d(y)
+    
+    # Deal with the shape, must be 1D to function properly
+    shape = x.shape
+    ndim = x.ndim
+    if ndim>1:
+        x = x.flatten()
+        y = y.flatten()
+
+    osamp2 = float(osamp)**2
+    nx = x.size
+    dx = (np.arange(osamp).astype(float)+1)/osamp-(1/(2*osamp))-0.5
+    dx2 = np.tile(dx,(osamp,1))
+    x2 = np.tile(x,(osamp,osamp,1)) + np.tile(dx2.T,(nx,1,1)).T
+    y2 = np.tile(y,(osamp,osamp,1)) + np.tile(dx2,(nx,1,1)).T   
+    
+    xdiff = x - pars[1]
+    ydiff = y - pars[2]
+    amp = pars[0]
+    kserc = pars[3]
+    alpha = pars[4]
+    recc = pars[5]               # b/a
+    theta = pars[6]    
+    cost2 = np.cos(theta) ** 2
+    sint2 = np.sin(theta) ** 2
+    sin2t = np.sin(2. * theta)
+    xsig2 = 1.0           # major axis
+    ysig2 = recc ** 2     # minor axis
+    a = (cost2 + (sint2 / ysig2))
+    b = (sin2t - (sin2t / ysig2))    
+    c = (sint2 + (cost2 / ysig2))
+
+    # Gaussian component
+    rr = (a * xdiff ** 2) + (b * xdiff * ydiff) + (c * ydiff ** 2)
+    g = amp * np.exp(-kserc*rr**alpha)
+   
+    # Compute derivative as well
+    if deriv is True:
+
+        # How many derivative terms to return
+        if nderiv is not None:
+            if nderiv <=0:
+                nderiv = 7
+        else:
+            nderiv = 7
+        
+        derivative = []
+        if nderiv>=1:
+            dg_dA = g / amp
+            derivative.append(np.sum(np.sum(dg_dA,axis=0),axis=0)/osamp2)
+        if nderiv>=2:        
+            dg_dx_mean = g * (kserc*alpha)*(rr**(alpha-1))*((2 * a * xdiff) + (b * ydiff))
+            derivative.append(np.sum(np.sum(dg_dx_mean,axis=0),axis=0)/osamp2)
+        if nderiv>=3:
+            dg_dy_mean = g * (kserc*alpha)*(rr**(alpha-1))*((2 * c * ydiff) + (b * xdiff))
+            derivative.append(np.sum(np.sum(dg_dy_mean,axis=0),axis=0)/osamp2)
+        if nderiv>=4:
+            dg_dk = -g * rr**alpha
+            derivative.append(np.sum(np.sum(dg_dk,axis=0),axis=0)/osamp2)
+        if nderiv>=5:
+            dg_dalpha = -g * kserc*np.log(rr) * rr**alpha
+            dg_dalpha[rr==0] = 0
+            derivative.append(np.sum(np.sum(dg_dalpha,axis=0),axis=0)/osamp2)
+        if nderiv>=6:
+            xdiff2 = xdiff ** 2
+            ydiff2 = ydiff ** 2
+            recc3 = recc**3
+            da_drecc = -2*sint2 / recc3
+            db_drecc =  2*sin2t / recc3            
+            dc_drecc = -2*cost2 / recc3            
+            dg_drecc = -g*(kserc*alpha)*(rr**(alpha-1))*(da_drecc * xdiff2 +
+                                                         db_drecc * xdiff * ydiff +
+                                                         dc_drecc * ydiff2)
+            derivative.append(np.sum(np.sum(dg_drecc,axis=0),axis=0)/osamp2)
+        if nderiv>=7:
+            sint = np.sin(theta)
+            cost = np.cos(theta)
+            cos2t = np.cos(2.0*theta)
+            da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
+            db_dtheta = (cos2t / xsig2) - (cos2t / ysig2)            
+            dc_dtheta = -da_dtheta            
+            dg_dtheta = -g*(kserc*alpha)*(rr**(alpha-1))*2*(da_dtheta * xdiff2 +
+                                                            db_dtheta * xdiff * ydiff +
+                                                            dc_dtheta * ydiff2)
+            derivative.append(np.sum(np.sum(dg_dtheta,axis=0),axis=0)/osamp2)
+            
+        return g,derivative
+            
+    # No derivative
+    else:        
+        return g
+
+    
     
 def relcoord(x,y,shape):
     """
@@ -3494,6 +3768,7 @@ class PSFGaussian(PSFBase):
     # Initalize the object
     def __init__(self,mpars=None,npix=51,binned=False):
         # MPARS are the model parameters
+        #  mpars = [xsigma, ysigma, theta]
         if mpars is None:
             mpars = np.array([1.0,1.0,0.0])
         if len(mpars)!=3:
@@ -3898,7 +4173,108 @@ class PSFGausspow(PSFBase):
         hdulist.writeto(filename,overwrite=overwrite)
         hdulist.close()
     
+    
+# Sersic class
+class Sersic(PSFBase):
+    """ Sersic function."""
+    # PARS are model parameters
+    
+    # Initalize the object
+    def __init__(self,mpars=None,npix=51,binned=False):
+        # mpars = [k,alpha,recc,theta]
+        if mpars is None:
+            mpars = np.array([1.0,1.0,1.0,0.0])
+        if len(mpars)!=4:
+            old = np.array(mpars).copy()
+            mpars = np.array([1.0,1.0,0.8,0.0])
+            mpars[0:len(old)] = old
+        if mpars[0]<=0:
+            raise ValueError('k must be >0')
+        if mpars[1]<=0:
+            raise ValueError('alpha must be >0')
+        if mpars[2]<0 or mpars[2]>1:
+            raise ValueError('relative amplitude must be >=0 and <=1')
+        super().__init__(mpars,npix=npix,binned=binned)
+        # Set the bounds
+        self._bounds = (np.array([0.0,0.0,0.0,-np.inf]),
+                        np.array([np.inf,np.inf,1.0,np.inf]))
+        # Set step sizes
+        self._steps = np.array([0.5,0.5,0.1,0.2])
         
+    def fwhm(self,pars=None):
+        """ Return the FWHM of the model."""
+        if pars is None:
+            pars = np.hstack(([1.0,1.0,1.0,0.0],self.params))
+        return sersic2d_fwhm(pars)
+
+    def flux(self,pars=None,footprint=False):
+        """ Return the flux/volume of the model given the amp or parameters."""
+        if pars is None:
+            pars = np.hstack(([1.0,1.0,1.0,0.0], self.params))
+        else:
+            pars = np.atleast_1d(pars)
+            if pars.size==1:
+                pars = np.hstack(([pars[0],1.0,1.0,0.0], self.params))
+        if footprint:
+            return self.unitfootflux*pars[0]
+        else:
+            return sersic2d_flux(pars)
+        
+    def evaluate(self,x, y, pars=None, binned=None, deriv=False, nderiv=None):
+        """Two dimensional Sersicy model function"""
+        # pars = [amplitude, x0, y0, k, alpha, recc, theta]
+        if pars is None: pars = self.params
+        if binned is None: binned = self.binned
+        if binned is True:
+            return sersic2d_integrate(x, y, pars, deriv=deriv, nderiv=nderiv)
+        else:
+            return sersic2d(x, y, pars, deriv=deriv, nderiv=nderiv)
+
+    def deriv(self,x, y, pars=None, binned=None, nderiv=None):
+        """Two dimensional Sersic model derivative with respect to parameters"""
+        if pars is None: pars = self.params
+        if binned is None: binned = self.binned
+        if binned is True:
+            g, derivative = sersic2d_integrate(x, y, pars, deriv=True, nderiv=nderiv)
+        else:
+            g, derivative = sersic2d(x, y, pars, deriv=True, nderiv=nderiv)
+        return derivative
+
+    def tohdu(self):
+        """
+        Convert the Sersic object to an HDU so it can be written to a file.
+        This does not include the lookup table.
+
+        Returns
+        -------
+        hdu : fits HDU object
+          The FITS HDU object.
+
+        Example
+        -------
+
+        hdu = psf.tohdu()
+
+        """
+        hdu = fits.PrimaryHDU(self.params)
+        hdu.header['MTYPE'] = 'Sersic'
+        hdu.header['BINNED'] = self.binned
+        hdu.header['NPIX'] = self.npix
+        return hdu
+    
+    def write(self,filename,overwrite=True):
+        """ Write a Sersic object to a file."""
+        if os.path.exists(filename) and overwrite==False:
+            raise ValueError(filename+' already exists and overwrite=False')
+        hdulist = fits.HDUList()
+        hdulist.append(fits.PrimaryHDU(self.params))
+        hdulist[0].header['MTYPE'] = 'Sersic'
+        hdulist[0].header['BINNED'] = self.binned
+        hdulist[0].header['NPIX'] = self.npix
+        hdulist[0].header['HSLOOKUP'] = True
+        hdulist.writeto(filename,overwrite=overwrite)
+        hdulist.close()
+
     
 class PSFEmpirical(PSFBase):
     """ Empirical look-up table PSF, can vary spatially."""
