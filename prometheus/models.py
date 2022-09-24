@@ -2032,6 +2032,8 @@ def sersic2d_flux(pars):
     # integrating over an area out to R gives
     # I0 * Re**2 * 2*pi*n*(e**bn)/(bn)**2n * gammainc(2n,x)
 
+    # Re encloses half of the light
+    
     # https://gist.github.com/bamford/b657e3a14c9c567afc4598b1fd10a459
     def b(n):
         # Normalisation constant
@@ -2051,7 +2053,7 @@ def sersic2d_flux(pars):
         # total luminosity (integrated to infinity)
         bn = b(n)
         g2n = gamma(2*n)
-        return Ie * re**2 * 2*pi*n * exp(bn)/(bn**(2*n)) * g2n
+        return Ie * re**2 * 2*np.pi*n * exp(bn)/(bn**(2*n)) * g2n
 
     # Convert Io and k to Ie and Re
     # Ie = Io * exp(bn)
@@ -3782,6 +3784,8 @@ class PSFGaussian(PSFBase):
                         np.array([np.inf,np.inf,np.inf]))
         # Set step sizes
         self._steps = np.array([0.5,0.5,0.2])
+        # Labels
+        self.labels = ['xsigma','ysigma','theta']
         
     def fwhm(self,pars=None):
         """ Return the FWHM of the model."""
@@ -3887,6 +3891,8 @@ class PSFMoffat(PSFBase):
                         np.array([np.inf,np.inf,np.inf,6.0]))
         # Set step sizes
         self._steps = np.array([0.5,0.5,0.2,0.2])
+        # Labels
+        self.labels = ['xsigma','ysigma','theta','beta']
         
     def fwhm(self,pars=None):
         """ Return the FWHM of the model."""
@@ -3990,6 +3996,8 @@ class PSFPenny(PSFBase):
                         np.array([np.inf,np.inf,np.inf,1.0,np.inf]))
         # Set step sizes
         self._steps = np.array([0.5,0.5,0.2,0.1,0.5])
+        # Labels
+        self.labels = ['xsigma','ysigma','theta','relamp','sigma']
         
     def fwhm(self,pars=None):
         """ Return the FWHM of the model."""
@@ -4094,6 +4102,8 @@ class PSFGausspow(PSFBase):
                         np.array([np.inf,np.inf,np.inf,np.inf,np.inf]))
         # Set step sizes
         self._steps = np.array([0.5,0.5,0.2,0.1,0.1])
+        # Labels
+        self.labels = ['xsigma','ysigma','xysigma','beta4','beta6']
         
     def fwhm(self,pars=None):
         """ Return the FWHM of the model."""
@@ -4200,6 +4210,8 @@ class Sersic(PSFBase):
                         np.array([np.inf,np.inf,1.0,np.inf]))
         # Set step sizes
         self._steps = np.array([0.5,0.5,0.1,0.2])
+        # Labels
+        self.labels = ['k','alpha','recc','theta']
         
     def fwhm(self,pars=None):
         """ Return the FWHM of the model."""
