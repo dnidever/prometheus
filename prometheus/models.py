@@ -2184,10 +2184,12 @@ def sersic2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
             dg_dA = g / amp
             derivative.append(np.sum(np.sum(dg_dA,axis=0),axis=0)/osamp2)
         if nderiv>=2:        
-            dg_dx_mean = g * (kserc*alpha)*(rr**(alpha-1))*((2 * a * xdiff) + (b * ydiff))
+            dg_dx_mean = g * (kserc*alpha)*(rr**(alpha-2))*0.5*((2 * a * xdiff) + (b * ydiff))
+            dg_dx_mean[rr==0] = 0
             derivative.append(np.sum(np.sum(dg_dx_mean,axis=0),axis=0)/osamp2)
         if nderiv>=3:
-            dg_dy_mean = g * (kserc*alpha)*(rr**(alpha-1))*((2 * c * ydiff) + (b * xdiff))
+            dg_dy_mean = g * (kserc*alpha)*(rr**(alpha-2))*0.5*((2 * c * ydiff) + (b * xdiff))
+            dg_dx_mean[rr==0] = 0           
             derivative.append(np.sum(np.sum(dg_dy_mean,axis=0),axis=0)/osamp2)
         if nderiv>=4:
             dg_dk = -g * rr**alpha
@@ -2203,9 +2205,10 @@ def sersic2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
             da_drecc = -2*sint2 / recc3
             db_drecc =  2*sin2t / recc3            
             dc_drecc = -2*cost2 / recc3            
-            dg_drecc = -g*(kserc*alpha)*(rr**(alpha-1))*(da_drecc * xdiff2 +
-                                                         db_drecc * xdiff * ydiff +
-                                                         dc_drecc * ydiff2)
+            dg_drecc = -g*(kserc*alpha)*(rr**(alpha-2))*0.5*(da_drecc * xdiff2 +
+                                                             db_drecc * xdiff * ydiff +
+                                                             dc_drecc * ydiff2)
+            dg_drecc[rr==0] = 0
             derivative.append(np.sum(np.sum(dg_drecc,axis=0),axis=0)/osamp2)
         if nderiv>=7:
             sint = np.sin(theta)
@@ -2214,9 +2217,10 @@ def sersic2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
             da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
             db_dtheta = (cos2t / xsig2) - (cos2t / ysig2)            
             dc_dtheta = -da_dtheta            
-            dg_dtheta = -g*(kserc*alpha)*(rr**(alpha-1))*2*(da_dtheta * xdiff2 +
-                                                            db_dtheta * xdiff * ydiff +
-                                                            dc_dtheta * ydiff2)
+            dg_dtheta = -g*(kserc*alpha)*(rr**(alpha-2))*(da_dtheta * xdiff2 +
+                                                          db_dtheta * xdiff * ydiff +
+                                                          dc_dtheta * ydiff2)
+            dg_dtheta[rr==0] = 0
             derivative.append(np.sum(np.sum(dg_dtheta,axis=0),axis=0)/osamp2)
             
         return g,derivative
