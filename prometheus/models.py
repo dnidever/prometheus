@@ -1885,7 +1885,7 @@ def sersic2d(x, y, pars, deriv=False, nderiv=None):
     b = (sin2t - (sin2t / ysig2))    
     c = (sint2 + (cost2 / ysig2))
 
-    rr = (a * xdiff ** 2) + (b * xdiff * ydiff) + (c * ydiff ** 2)
+    rr = np.sqrt( (a * xdiff ** 2) + (b * xdiff * ydiff) + (c * ydiff ** 2) )
     g = amp * np.exp(-kserc*rr**alpha)
    
     # Compute derivative as well
@@ -1903,10 +1903,12 @@ def sersic2d(x, y, pars, deriv=False, nderiv=None):
             dg_dA = g / amp
             derivative.append(dg_dA)
         if nderiv>=2:        
-            dg_dx_mean = g * (kserc*alpha)*(rr**(alpha-1))*((2 * a * xdiff) + (b * ydiff))
+            dg_dx_mean = g * (kserc*alpha)*(rr**(alpha-2))*0.5*((2 * a * xdiff) + (b * ydiff))
+            dg_dx_mean[rr==0] = 0
             derivative.append(dg_dx_mean)
         if nderiv>=3:
-            dg_dy_mean = g * (kserc*alpha)*(rr**(alpha-1))*((2 * c * ydiff) + (b * xdiff))
+            dg_dy_mean = g * (kserc*alpha)*(rr**(alpha-2))*0.5*((2 * c * ydiff) + (b * xdiff))
+            dg_dx_mean[rr==0] = 0           
             derivative.append(dg_dy_mean)
         if nderiv>=4:
             dg_dk = -g * rr**alpha
@@ -1922,9 +1924,10 @@ def sersic2d(x, y, pars, deriv=False, nderiv=None):
             da_drecc = -2*sint2 / recc3
             db_drecc =  2*sin2t / recc3            
             dc_drecc = -2*cost2 / recc3            
-            dg_drecc = -g*(kserc*alpha)*(rr**(alpha-1))*(da_drecc * xdiff2 +
-                                                         db_drecc * xdiff * ydiff +
-                                                         dc_drecc * ydiff2)
+            dg_drecc = -g*(kserc*alpha)*(rr**(alpha-2))*0.5*(da_drecc * xdiff2 +
+                                                             db_drecc * xdiff * ydiff +
+                                                             dc_drecc * ydiff2)
+            dg_drecc[rr==0] = 0
             derivative.append(dg_drecc)
         if nderiv>=7:
             sint = np.sin(theta)
@@ -1933,10 +1936,13 @@ def sersic2d(x, y, pars, deriv=False, nderiv=None):
             da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
             db_dtheta = (cos2t / xsig2) - (cos2t / ysig2)            
             dc_dtheta = -da_dtheta            
-            dg_dtheta = -g*(kserc*alpha)*(rr**(alpha-1))*2*(da_dtheta * xdiff2 +
-                                                            db_dtheta * xdiff * ydiff +
-                                                            dc_dtheta * ydiff2)
+            dg_dtheta = -g*(kserc*alpha)*(rr**(alpha-2))*(da_dtheta * xdiff2 +
+                                                          db_dtheta * xdiff * ydiff +
+                                                          dc_dtheta * ydiff2)
+            dg_dtheta[rr==0] = 0
             derivative.append(dg_dtheta)
+
+        # special case if alpha=2???
             
         return g,derivative
             
@@ -2037,6 +2043,7 @@ def sersic2d_flux(pars):
     # https://gist.github.com/bamford/b657e3a14c9c567afc4598b1fd10a459
     def b(n):
         # Normalisation constant
+        # bn ~ 2n-1/3 for n>8
         return gammaincinv(2*n, 0.5)
 
     def create_sersic_function(Ie, re, n):
@@ -2046,27 +2053,29 @@ def sersic2d_flux(pars):
         reciprocal_n = 1.0/n
         f = neg_bn/re**reciprocal_n
         def sersic_wrapper(r):
-            return Ie * exp(f * r ** reciprocal_n - neg_bn)
+            return Ie * np.exp(f * r ** reciprocal_n - neg_bn)
         return sersic_wrapper
     
     def sersic_lum(Ie, re, n):
         # total luminosity (integrated to infinity)
         bn = b(n)
         g2n = gamma(2*n)
-        return Ie * re**2 * 2*np.pi*n * exp(bn)/(bn**(2*n)) * g2n
+        return Ie * re**2 * 2*np.pi*n * np.exp(bn)/(bn**(2*n)) * g2n
 
     # Convert Io and k to Ie and Re
-    # Ie = Io * exp(bn)
+    # Ie = Io * exp(-bn)
     # Re = (bn/k)**n
     n = 1/alpha
     bn = b(n)
-    Ie = amp * exp(bn)
+    Ie = amp * np.exp(-bn)
     Re = (bn/kserc)**n
     
-    lum = sersic_lum(Ie,Re,n)
+    volume = sersic_lum(Ie,Re,n)
+
+    # Mulitply by recc (b/a)
+    volume *= recc
     
-    # This worked for beta=2.5, but was too high by ~1.05-1.09 for beta=1.5
-    volume = amp * xsig*ysig*np.pi/(beta-1)
+    # Volume for 2D Gaussian is 2*pi*A*sigx*sigy
     
     return volume
 
@@ -2157,7 +2166,7 @@ def sersic2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
     c = (sint2 + (cost2 / ysig2))
 
     # Gaussian component
-    rr = (a * xdiff ** 2) + (b * xdiff * ydiff) + (c * ydiff ** 2)
+    rr = np.sqrt( (a * xdiff ** 2) + (b * xdiff * ydiff) + (c * ydiff ** 2) )
     g = amp * np.exp(-kserc*rr**alpha)
    
     # Compute derivative as well
