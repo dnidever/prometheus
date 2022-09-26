@@ -1983,19 +1983,27 @@ def sersic2d_fwhm(pars):
     if np.sum(~np.isfinite(np.array(pars)))>0:
         raise ValueError('PARS cannot be inf or nan')
 
+    # Radius of half maximum
+    # I(R) = I0 * exp(-k*R**alpha) 
+    # 0.5*I0 = I0 * exp(-k*R**alpha)
+    # 0.5 = exp(-k*R**alpha)
+    # ln(0.5) = -k*R**alpha
+    # R = (-ln(0.5)/k)**(1/alpha)
+    rhalf = (-np.log(0.5)/kserc)**(1/alpha)
+    
     # The mean radius of an ellipse is: (2a+b)/3
-    sig_major = np.max([xsig,xsig*recc])
-    sig_minor = np.min([xsig,xsig*recc])
+    sig_major = rhalf
+    sig_minor = rhalf*recc
     mnsig = (2.0*sig_major+sig_minor)/3.0
     # Convert sigma to FWHM
     # FWHM = 2*sqrt(2*ln(2))*sig ~ 2.35482*sig
-    gfwhm = mnsig*2.35482
+    fwhm = mnsig*2.35482
 
     # Generate a small profile
-    x = np.arange( gfwhm/2.35/2, gfwhm, 0.5)
-    f = amp * np.exp(-kserc*x**alpha)
-    hwhm = np.interp(0.5,f[::-1],x[::-1])
-    fwhm = 2*hwhm
+    #x = np.arange( gfwhm/2.35/2, gfwhm, 0.5)
+    #f = amp * np.exp(-kserc*x**alpha)
+    #hwhm = np.interp(0.5,f[::-1],x[::-1])
+    #fwhm = 2*hwhm
     
     return fwhm
 
