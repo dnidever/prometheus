@@ -2149,8 +2149,8 @@ def sersic2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
     x2 = np.tile(x,(osamp,osamp,1)) + np.tile(dx2.T,(nx,1,1)).T
     y2 = np.tile(y,(osamp,osamp,1)) + np.tile(dx2,(nx,1,1)).T   
     
-    xdiff = x - pars[1]
-    ydiff = y - pars[2]
+    xdiff = x2 - pars[1]
+    ydiff = y2 - pars[2]
     amp = pars[0]
     kserc = pars[3]
     alpha = pars[4]
@@ -2222,13 +2222,23 @@ def sersic2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
                                                           dc_dtheta * ydiff2)
             dg_dtheta[rr==0] = 0
             derivative.append(np.sum(np.sum(dg_dtheta,axis=0),axis=0)/osamp2)
-            
-        return g,derivative
-            
-    # No derivative
-    else:        
-        return g
 
+        g = np.sum(np.sum(g,axis=0),axis=0)/osamp2
+        
+        # Reshape
+        if ndim>1:
+            g = g.reshape(shape)
+            derivative = [d.reshape(shape) for d in derivative]
+        
+        return g,derivative
+
+    # No derivative
+    else:
+        g = np.sum(np.sum(g,axis=0),axis=0)/osamp2
+        # Reshape
+        if ndim>1:
+            g = g.reshape(shape)
+        return g
     
     
 def relcoord(x,y,shape):
