@@ -15,7 +15,7 @@ import warnings
 from astropy.io import fits
 from astropy.table import Table
 import astropy.units as u
-from scipy.optimize import curve_fit, least_squares, line_search
+from scipy.optimize import curve_fit, least_squares, line_search, root_scalar
 from scipy.interpolate import interp1d
 from skimage import measure
 from dlnpyutils import utils as dln, bindata, ladfit, coords
@@ -2007,6 +2007,47 @@ def sersic2d_fwhm(pars):
     
     return fwhm
 
+# https://gist.github.com/bamford/b657e3a14c9c567afc4598b1fd10a459
+def sersic_b(n):
+    # Normalisation constant
+    # bn ~ 2n-1/3 for n>8
+    return gammaincinv(2*n, 0.5)
+
+def create_sersic_function(Ie, re, n):
+    # Not required for integrals - provided for reference
+    # This returns a "closure" function, which is fast to call repeatedly with different radii
+    neg_bn = -b(n)
+    reciprocal_n = 1.0/n
+    f = neg_bn/re**reciprocal_n
+    def sersic_wrapper(r):
+        return Ie * np.exp(f * r ** reciprocal_n - neg_bn)
+    return sersic_wrapper
+    
+def sersic_lum(Ie, re, n):
+    # total luminosity (integrated to infinity)
+    bn = sersic_b(n)
+    g2n = gamma(2*n)
+    return Ie * re**2 * 2*np.pi*n * np.exp(bn)/(bn**(2*n)) * g2n
+
+def sersic_full2half(I0,kserc,alpha):
+    # Convert Io and k to Ie and Re
+    # Ie = Io * exp(-bn)
+    # Re = (bn/k)**n
+    n = 1/alpha
+    bn = sersic_b(n)
+    Ie = I0 * np.exp(-bn)
+    Re = (bn/kserc)**n
+    return Ie,Re
+
+def sersic_half2full(Ie,Re,alpha):
+    # Convert Ie and Re to Io and k
+    # Ie = Io * exp(-bn)
+    # Re = (bn/k)**n
+    n = 1/alpha
+    bn = sersic_b(n)
+    I0 = Ie * np.exp(bn)
+    kserc = bn/Re**alpha
+    return I0,kserc
 
 def sersic2d_flux(pars):
     """
@@ -2047,37 +2088,9 @@ def sersic2d_flux(pars):
     # I0 * Re**2 * 2*pi*n*(e**bn)/(bn)**2n * gammainc(2n,x)
 
     # Re encloses half of the light
-    
-    # https://gist.github.com/bamford/b657e3a14c9c567afc4598b1fd10a459
-    def b(n):
-        # Normalisation constant
-        # bn ~ 2n-1/3 for n>8
-        return gammaincinv(2*n, 0.5)
-
-    def create_sersic_function(Ie, re, n):
-        # Not required for integrals - provided for reference
-        # This returns a "closure" function, which is fast to call repeatedly with different radii
-        neg_bn = -b(n)
-        reciprocal_n = 1.0/n
-        f = neg_bn/re**reciprocal_n
-        def sersic_wrapper(r):
-            return Ie * np.exp(f * r ** reciprocal_n - neg_bn)
-        return sersic_wrapper
-    
-    def sersic_lum(Ie, re, n):
-        # total luminosity (integrated to infinity)
-        bn = b(n)
-        g2n = gamma(2*n)
-        return Ie * re**2 * 2*np.pi*n * np.exp(bn)/(bn**(2*n)) * g2n
-
     # Convert Io and k to Ie and Re
-    # Ie = Io * exp(-bn)
-    # Re = (bn/k)**n
+    Ie,Re = sersic_full2half(amp,kserc,alpha)
     n = 1/alpha
-    bn = b(n)
-    Ie = amp * np.exp(-bn)
-    Re = (bn/kserc)**n
-    
     volume = sersic_lum(Ie,Re,n)
 
     # Mulitply by recc (b/a)
@@ -2086,6 +2099,76 @@ def sersic2d_flux(pars):
     # Volume for 2D Gaussian is 2*pi*A*sigx*sigy
     
     return volume
+
+
+def sersic2d_estimates(pars):
+    # calculate estimates for the Sersic parameters using
+    # peak, x0, y0, flux, asemi, bsemi, theta
+    # Sersic Parameters are [amp,x0,y0,k,alpha,recc,theta]
+    peak = pars[0]
+    x0 = pars[1]
+    y0 = pars[2]
+    flux = pars[3]
+    asemi = pars[4]
+    bsemi = pars[5]
+    theta = pars[6]
+    recc = bsemi/asemi
+    
+    # Calculate FWHM
+    # The mean radius of an ellipse is: (2a+b)/3
+    mnsig = (2.0*asemi+bsemi)/3.0
+    # Convert sigma to FWHM
+    # FWHM = 2*sqrt(2*ln(2))*sig ~ 2.35482*sig
+    fwhm = mnsig*2.35482
+    rhalf = 0.5*fwhm
+    
+    # Solve half-max radius equation for kserc
+    # I(R) = I0 * exp(-k*R**alpha) 
+    # 0.5*I0 = I0 * exp(-k*R**alpha)
+    # 0.5 = exp(-k*R**alpha)
+    # ln(0.5) = -k*R**alpha
+    # R = (-ln(0.5)/k)**(1/alpha)
+    # rhalf = (-np.log(0.5)/kserc)**(1/alpha)
+    # kserc = -np.log(0.5)/rhalf**alpha
+   
+    # Solve flux equation for kserc
+    # bn = sersic_b(n)
+    # g2n = gamma(2*n)
+    # flux =  recc * Ie * Re**2 * 2*np.pi*n * np.exp(bn)/(bn**(2*n)) * g2n
+    # Re = np.sqrt(flux/(recc * Ie * 2*np.pi*n * np.exp(bn)/(bn**(2*n)) * g2n))
+    # kserc = bn/Re**alpha    
+    # kserc = bn * ((recc * Ie * 2*np.pi*n * np.exp(bn)/(bn**(2*n)) * g2n)/flux)**(alpha/2)
+
+    # Setting the two equal and then putting everything to one side
+    # 0 = np.log(0.5)/rhalf**alpha + bn * ((recc * Ie * 2*np.pi*n * np.exp(bn)/(bn**(2*n)) * g2n)/flux)**(alpha/2)
+    def alphafunc(alpha):
+        # rhalf, recc, flux are defined above
+        n = 1/alpha
+        bn = sersic_b(n)
+        g2n = gamma(2*n)
+        Ie,_ = sersic_full2half(peak,1.0,alpha)
+        return np.log(0.5)/rhalf**alpha + bn * ((recc * Ie * 2*np.pi*n * np.exp(bn)/(bn**(2*n)) * g2n)/flux)**(alpha/2)
+    
+    # Solve for the roots
+    res = root_scalar(alphafunc,x0=1.0,x1=0.5)
+    if res.converged:
+        alpha = res.root
+    else:
+        alphas = np.arange(0.1,2.0,0.05)
+        vals = np.zeros(len(alphas),float)
+        for i in range(len(alphas)):
+            vals[i] = alphafunc(alphas[i])
+        bestind = np.argmin(np.abs(vals))
+        alpha = alphas[bestind]
+                            
+    # Now solve for ksersic
+    # rhalf = (-np.log(0.5)/kserc)**(1/alpha)
+    kserc = -np.log(0.5)/rhalf**alpha
+    
+    # Put all the parameters together
+    spars = [peak,x0,y0,kserc,alpha,recc,theta]
+    
+    return spars
 
 
 def sersic2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
@@ -4262,6 +4345,12 @@ class Sersic(PSFBase):
             return self.unitfootflux*pars[0]
         else:
             return sersic2d_flux(pars)
+
+    def estimates(self,epars):
+        # calculate estimates for the Sersic parameters using
+        # epars = [peak, x0, y0, flux, asemi, bsemi, theta]
+        # Sersic Parameters are [amp,x0,y0,k,alpha,recc,theta]
+        return sersic2d_estimates(epars)
         
     def evaluate(self,x, y, pars=None, binned=None, deriv=False, nderiv=None):
         """Two dimensional Sersicy model function"""
