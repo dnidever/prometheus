@@ -13,6 +13,7 @@ from astropy.io import fits
 from astropy.table import Table
 from argparse import ArgumentParser
 from dlnpyutils import utils as dln
+from datetime import datetime
 import subprocess
 import traceback
 try:
@@ -26,6 +27,8 @@ if __name__ == "__main__":
     parser.add_argument('files', type=str, nargs='+', help='Images FITS files or list.')
     parser.add_argument('-p','--psf', type=str, nargs=1, default='gaussian', help='PSF model type.')
     parser.add_argument('--iterdet', type=int, nargs=1, default=0, help='Number of detection iterations.')
+    parser.add_argument('--ndetsigma', type=float, nargs=1, default=1.5, help='Number of sigma above background for detection.')
+    parser.add_argument('--snrthresh', type=float, nargs=1, default=5, help='Minimum S/N for sources')
     parser.add_argument('--psfsubnei', action='store_true', help='Subtract PSF neighbors.')
     parser.add_argument('--psffitradius', type=str, nargs=1, default=None, help='Fitting radius when constructing PSF.  Default is PSF FWHM.')
     parser.add_argument('--fitradius', type=str, nargs=1, default=None, help='Fitting radius of stars in image.  Default is PSF FWHM.')
@@ -40,18 +43,20 @@ if __name__ == "__main__":
     parser.add_argument('--outfile', type=str, nargs=1, default='', help='Output filename')
     parser.add_argument('-d','--outdir', type=str, nargs=1, default='', help='Output directory')        
     parser.add_argument('-l','--list', action='store_true', help='Input is a list of FITS files')
-    parser.add_argument('--verbose', type=int, default=0, help='Verbose output')
+    parser.add_argument('-v','--verbose', type=int, nargs='?', const=1, default=0, help='Verbose output')
     parser.add_argument('-t','--timestamp', action='store_true', help='Add timestamp to Verbose output')    
     args = parser.parse_args()
-
+    
     t0 = time.time()
     files = args.files
     psftype = dln.first_el(args.psf)
     iterdet = args.iterdet
+    ndetsigma = dln.first_el(args.ndetsigma)
+    snrthresh = dln.first_el(args.snrthresh)
     psfsubnei = args.psfsubnei
     psffitradius = args.psffitradius
     fitradius = args.fitradius    
-    npsfpix = dln.first_el(args.fitradius)
+    npsfpix = dln.first_el(args.npsfpix)
     binned = args.binned
     lookup = args.lookup
     lorder = dln.first_el(args.lorder)
@@ -104,7 +109,7 @@ if __name__ == "__main__":
                     files[rel[i]] = listdir+'/'+files[rel[i]]
     nfiles = len(files)
     
-    if (verbose is True):
+    if (verbose>0):
         if nfiles>1:
             print('--- Running Prometheus on %d images ---' % nfiles)
         else:
@@ -121,15 +126,17 @@ if __name__ == "__main__":
             # Load the image
             image = prometheus.read(f)
     
-            if (verbose is True):
+            if (verbose>0):
                 if (nfiles>1):
                     if (i>0): print('')
                     print('Image %3d:  %s  ' % (i+1,f))
                     
             # Run Prometheus
-            out, model, sky, psf = pm.run(image,psfname=psftype,iterdet=iterdet,psfsubnei=psfsubnei,psffitradius=psffitradius,
-                                          fitradius=fitradius,npsfpix=npsfpix,binned=binned,lookup=lookup,lorder=lorder,
-                                          psftrim=psftrim,recenter=~norecenter,reject=reject,apcorr=apcorr,verbose=verbose)
+            out, model, sky, psf = pm.run(image,psfname=psftype,iterdet=iterdet,ndetsigma=ndetsigma,
+                                          snrthresh=snrthresh,psfsubnei=psfsubnei,psffitradius=psffitradius,
+                                          fitradius=fitradius,npsfpix=npsfpix,binned=binned,lookup=lookup,
+                                          lorder=lorder,psftrim=psftrim,recenter=~norecenter,reject=reject,
+                                          apcorr=apcorr,verbose=verbose)
                 
             # Save the output
             if inpoutfile!='':
@@ -144,6 +151,14 @@ if __name__ == "__main__":
             if os.path.exists(outfile): os.remove(outfile)
             hdulist = fits.HDUList()
             hdulist.append(fits.table_to_hdu(out))  # table
+            hdulist[0].header['COMMENT']='Prometheus version '+str(prometheus.__version__)
+            hdulist[0].header['COMMENT']='Date '+datetime.now().ctime()
+            hdulist[0].header['COMMENT']='File '+f
+            hdulist[0].header['COMMENT']='HDU#0 : Header Only'
+            hdulist[0].header['COMMENT']='HDU#1 : Source catalog'
+            hdulist[0].header['COMMENT']='HDU#2 : Model image'
+            hdulist[0].header['COMMENT']='HDU#3 : Sky model image'
+            hdulist[0].header['COMMENT']='HDU#4 : PSF model'
             hdulist.append(model.tohdu())  # model
             hdulist[1].header['COMMENT'] = 'Prometheus model image'
             hdulist.append(sky.tohdu())    # sky
@@ -154,8 +169,9 @@ if __name__ == "__main__":
             hdulist.close()
 
         except Exception as e:
-            if verbose is True:
+            if verbose>0:
+                traceback.print_exc()                
                 print('Prometheus failed on '+f+' '+str(e))
-                traceback.print_exc()
+
 
 

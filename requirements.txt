@@ -2,6 +2,7 @@ numpy
 matplotlib
 astropy
 scipy
+extension_helpers
 photutils
 sep
 dlnpyutils
