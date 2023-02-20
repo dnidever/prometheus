@@ -1,4 +1,4 @@
-__all__ = ["models","getpsf","synth","groupfit","leastsquares","allfit",
+__all__ = ["models","getpsf","synth","groupfit","leastsquares","allfit","multifit",
            "ccddata","detection","aperture","sky","prometheus","utils","galfit"]
 __version__ = '1.0.19'
 
