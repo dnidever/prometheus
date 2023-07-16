@@ -122,7 +122,8 @@ def starfit(data,reftime=None):
     -------
     pars : numpy array
        Final, best-fit parameters [4 + Nexposures]:  Xref, Yref, mu_x, mu_y (proper motion), and
-        amplitudes for each exposure.
+        amplitudes for each exposure.  Note, these are the CORRECTION terms for the 4 parameters,
+        no the actual values themselves.
     perror: numpy array
        Uncertainties in pars.
 
@@ -200,6 +201,7 @@ def starfit(data,reftime=None):
     # pars = lsq.cholesky_jac_sparse_solve(jac,resid,weight)
 
     # Solve Jacobian
+    #  these are the correction terms, no the final parameters themselves
     pars = lsq.jac_solve(jac,resid,method='qr',weight=weight)
     cov = lsq.jac_covariance(jac,resid,weight)
     perror = np.sqrt(np.diag(cov))
