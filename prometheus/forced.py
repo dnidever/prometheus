@@ -1,6 +1,6 @@
 import os
 import numpy as np
-from dlnpyutils import utils as dln
+from dlnpyutils import utils as dln, robust
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
 from astropy.table import Table
@@ -69,13 +69,14 @@ def forced(images,objtab,fitpm=False,reftime=None,refwcs=None):
     objtab['cenpmra'] = 0.0
     objtab['cenpmdec'] = 0.0
     objtab['nmeas'] = 0
+    objtab['converged'] = False
 
-    coo = SkyCoord(ra=objtab['cenra']*u.deg,dec=objtab['cendec']*u.deg,frame='icrs')
+    coo0 = SkyCoord(ra=objtab['cenra']*u.deg,dec=objtab['cendec']*u.deg,frame='icrs')
     
     # Get information about all of the images
     dt = [('dateobs',str,26),('jd',float),('cenra',float),('cendec',float),
           ('nx',int),('ny',int),('vra',float,4),
-          ('vdec',float,4),('exptime',float),('nmeas',int)]
+          ('vdec',float,4),('exptime',float),('startmeas',int),('nmeas',int)]
     iminfo = Table(np.zeros(nimages,dtype=np.dtype(dt)))
     for i in range(nimages):
         iminfo['dateobs'][i] = images[i].header['DATE-OBS']
@@ -90,7 +91,7 @@ def forced(images,objtab,fitpm=False,reftime=None,refwcs=None):
         vra,vdec = wcs1.wcs_pix2world([0,nx-1,nx-1,0],[0,0,ny-1,ny-1],0)
         iminfo['vra'][i] = vra
         iminfo['vdec'][i] = vdec        
-        isin = coo.contained_by(images[i].wcs,images[i].data)
+        isin = coo0.contained_by(images[i].wcs,images[i].data)
         iminfo['nmeas'][i] = np.sum(isin)
         
     # Get the reference epoch, mean epoch
@@ -103,15 +104,16 @@ def forced(images,objtab,fitpm=False,reftime=None,refwcs=None):
     # many objects won't appear in many images
         
     # Make the measurement table
-    dt = [('objid',int),('objindex',int),('imindex',int),('flux',float),
-          ('fluxerr',float),('dflux',float),('dfluxerr',float),
-          ('dx',float),('dxerr',float),('dy',float),
-          ('dyerr',float),('dra',float),('ddec',float)]
+    dt = [('objid',int),('objindex',int),('imindex',int),('jd',float),
+          ('ra',float),('dec',float),('x',float),('y',float),('flux',float),
+          ('fluxerr',float),('dflux',float),('dfluxerr',float),('dx',float),
+          ('dxerr',float),('dy',float),('dyerr',float),('dra',float),
+          ('ddec',float),('converged',bool)]
     nmeas = np.sum(iminfo['nmeas'])
     meastab = np.zeros(nmeas,dtype=np.dtype(dt))
     meascount = 0
     for i in range(nimages):
-        contained = coo.contained_by(images[i].wcs,images[i].data)
+        contained = coo0.contained_by(images[i].wcs,images[i].data)
         isin, = np.where(contained)
         nisin = len(isin)
         objtab['nmeas'][isin] += 1 
@@ -119,6 +121,7 @@ def forced(images,objtab,fitpm=False,reftime=None,refwcs=None):
             meastab['objid'][meascount:meascount+nisin] = objtab['objid'][isin]
             meastab['objindex'][meascount:meascount+nisin] = isin
             meastab['imindex'][meascount:meascount+nisin] = i
+            meastab['jd'][meascount:meascount+nisin] = iminfo['jd'][i]
             meascount += nisin
 
     # Create object index into measurement table
@@ -139,33 +142,41 @@ def forced(images,objtab,fitpm=False,reftime=None,refwcs=None):
             im = images[i]
             imtime = Time(iminfo['jd'][i],format='jd')
 
+            # Get the objects and measurements that overlap this image
+            contained = coo0.contained_by(images[i].wcs,images[i].data)            
+            objtab1 = objtab[contained]
+            msbeg = iminfo['startmeas'][i]
+            msend = meas_beg + iminfo['nmeas'][i]        
+            meastab1 = meastab[msbeg:msend+1]
+            
             # Calculate x/y position for each object in this image
             # using the current best overall on-the-sky position
             # and proper motion
             # Need to convert celestial values to x/y position in
             # the image using the WCS.
-            coo = SkyCoord(ra=objtab['cenra']*u.deg,dec=objtab['cendec']*u.deg,
-                           pm_ra_cosdec=objtab['cenpmra']*u.mas/u.year,
-                           pm_dec=objtab['cenpmdec']*u.mas/u.year,
+            coo1 = SkyCoord(ra=objtab1['cenra']*u.deg,dec=objtab1['cendec']*u.deg,
+                           pm_ra_cosdec=objtab1['cenpmra']*u.mas/u.year,
+                           pm_dec=objtab1['cenpmdec']*u.mas/u.year,
                            obstime=refepoch,frame='icrs')
             # Use apply_space_motion() method to get coordinates for the
             #  epoch of this image
-            newcoo = coo.apply_space_motion(imtime)
+            newcoo1 = coo1.apply_space_motion(imtime)
+            meastab1['ra'] = newcoo1.ra.deg
+            meastab1['dec'] = newcoo1.dec.deg            
             
             # Now convert to image X/Y coordinates
-            x,y = im.wcs.world_to_pixel(newcoo)
+            x,y = im.wcs.world_to_pixel(newcoo1)
+            meastab1['x'] = x
+            meastab1['y'] = y            
             
             # Fit the fluxes while holding the positions fixed
-            dt = [('id',int),('x',float),('y',float),('amp',float),('group_id',int)]
-            incat = np.zeros(nobj,dtype=np.dtype(dt))
-            incat['id'] = np.arange(nobj)+1
-            incat['x'] = x
-            incat['y'] = y
-            incat['amp'] = fluxes[:,i]
-            #incat['group_id'] = ???
-            out,model = allfit.fit(im.psf,im,incat,method='qr',fitradius=None,recenter=False,
+            out,model = allfit.fit(im.psf,im,meastab1,method='qr',fitradius=None,recenter=False,
                                    maxiter=10,minpercdiff=0.5,reskyiter=2,nofreeze=False,
                                    skyfit=True,verbose=False)
+
+            # Stuff the information back in
+            meastab[msbeg:msend+1] = meastab1
+            
             # allframe operates on the residual map, with the best-fit model subtracted
             
             # allframe derived flux and centroid corrections for each object
@@ -208,7 +219,13 @@ def forced(images,objtab,fitpm=False,reftime=None,refwcs=None):
             measind = objindex[i]
             meas1 = meastab[measind]
             # robust linear fit
+            racoef = robust.linefit(meas1['jd'],meas1['dra'])
+            deccoef = robust.linefit(meas1['jd'],meas1['ddec'])            
             # update object cenra, cendec, cenpmra, cenpmdec
+            objtab['cenra'][i] += racoef[0]
+            objtab['cendec'][i] += deccoef[0]
+            objtab['cenpmra'][i] += racoef[1]  # multiply by cos(dec)???
+            objtab['cenpmdec'][i] += deccoef[1]    
             
 
         # Check for convergence
