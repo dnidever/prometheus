@@ -10,6 +10,7 @@ __version__ = '20210915'  # yyyymmdd
 
 import os
 import sys
+import mmap
 import numpy as np
 import warnings
 from astropy.io import fits
@@ -211,3 +212,22 @@ def pickpsfstars(objects,fwhm,nstars=100,logger=None,verbose=False):
         print(str(len(psfobjects))+" PSF stars found")
         
     return psfobjects
+
+def refresh_mmap(hdulist):
+    """
+    Close and refresh an hdulist's memory map to free up virtual memory
+    """
+
+    MEMMAP_MODES = {'readonly': mmap.ACCESS_COPY,
+                'copyonwrite': mmap.ACCESS_COPY,
+                'update': mmap.ACCESS_WRITE,
+                'append': mmap.ACCESS_COPY,
+                'denywrite': mmap.ACCESS_READ}
+    access_mode = MEMMAP_MODES[hdulist._file.mode]
+    hdulist._file._mmap = mmap.mmap(hdulist._file._file.fileno(), 0,
+                                    access=access_mode,
+                                    offset=0)
+    # Loop over hdus and delete the data in memory
+    for h in hdulist:
+        if hasattr(h,'data'):
+            del h.data
