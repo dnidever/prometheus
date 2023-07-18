@@ -2418,7 +2418,7 @@ def empirical(x, y, pars, data, shape=None, deriv=False, korder=3):
     ldata = []
     if isinstance(data,np.ndarray):
         if data.ndim==2:
-            ldata = [data.copy()]
+            ldata = [np.copy(data)]
         elif data.ndim==3:
             ldata = []
             for i in range(data.shape[2]):
@@ -3277,7 +3277,7 @@ class PSFBase:
         if nocopy:
             addim = im
         else:
-            addim = im.data.copy()            
+            addim = np.copy(im.data)
         for i in range(nstars):
             pars = [cat['amp'][i],cat['x'][i],cat['y'][i]]
             if sky:
@@ -3343,14 +3343,15 @@ class PSFBase:
         if nocopy:
             subim = im
         else:
-            subim = im.data.copy()            
+            subim = np.copy(im.data)
         for i in range(nstars):
             pars = [cat['amp'][i],cat['x'][i],cat['y'][i]]
             if sky:
                 pars.append(cat['sky'][i])
             bbox = self.starbbox((pars[1],pars[2]),im.shape,radius)
             im1 = self(pars=pars,bbox=bbox)
-            subim[bbox.slices] -= im1            
+            subim[bbox.slices] -= im1
+            
         return subim
                     
 
@@ -3813,7 +3814,7 @@ class PSFBase:
             kwargs['korder'] = head.get('KORDER')
         newpsf = psfmodel(psftype,data,**kwargs)
         # Lookup table
-        if head.get('HSLOOKUP'):
+        if head.get('HSLOOKUP') and len(hdulist)>1:
             ludata,luhead = hdulist[1].data,hdulist[1].header
             lukwargs = {}
             yshape = luhead.get('YSHAPE')

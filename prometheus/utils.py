@@ -218,6 +218,9 @@ def refresh_mmap(hdulist):
     Close and refresh an hdulist's memory map to free up virtual memory
     """
 
+    if hasattr(hdulist._file,'_mmap')==False:
+        return
+    
     MEMMAP_MODES = {'readonly': mmap.ACCESS_COPY,
                 'copyonwrite': mmap.ACCESS_COPY,
                 'update': mmap.ACCESS_WRITE,
