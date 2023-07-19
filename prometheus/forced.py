@@ -1,10 +1,12 @@
 import os
 import errno
 import numpy as np
-from dlnpyutils import utils as dln, robust
+from dlnpyutils import utils as dln, robust, coords
 from astropy.coordinates import SkyCoord
+from astropy.io import fits
+from astropy.wcs import WCS
 from astropy.time import Time
-from astropy.table import Table
+from astropy.table import Table,vstack,hstack
 import astropy.units as u
 from . import groupfit,allfit,models,leastsquares as lsq
 from .ccddata import CCDData
@@ -13,6 +15,83 @@ from .ccddata import CCDData
 
 # also see multifit.py
 
+def makemastertab(images,dcr=1.0):
+    """
+    Make master star list from individual image star catalogs.
+
+    Parameters
+    ----------
+    images : list
+       List of dictionaries containing the WCS and catalog
+        information.
+    dcr : float, optional
+       Cross-matching radius in arcsec.  Default is 1.0 arcsec.
+    
+    Returns
+    -------
+    mastertab : table
+       Table of unique sources in the images.
+
+    Example
+    -------
+
+    mastertab = mkmastertab(images)
+
+    """
+
+    nimages = len(images)
+    
+    # Loop over the images
+    for i in range(nimages):
+        tab1 = images[i]['table']
+        tab1['objid'] = -1
+        # First catalog
+        if i==0:
+            tab1['objid'] = np.arange(len(tab1))+1
+            meas = tab1.copy()            
+            obj = tab1.copy()
+            obj['nmeas'] = 1
+        # 2nd and later catalog, need to crossmatch
+        else:
+            # Cross-match
+            ind1,ind2,dist = coords.xmatch(obj['ra'],obj['dec'],
+                                           tab1['ra'],tab1['dec'],dcr,unique=True)
+            # THIS HAS DUPLICATES IN THE IND2 !!!!
+            # need one-to-one matches!!
+            # Some matches
+            if len(ind1)>0:
+                tab1['objid'][ind2] = obj['objid'][ind1]
+                obj['nmeas'][ind1] += 1
+            # Some left, add them to object table
+            if len(ind1) < len(tab1):
+                leftind = np.arange(len(tab1))
+                leftind = np.delete(leftind,ind2)
+                tab1['objid'][leftind] = np.arange(len(leftind))+len(obj)+1
+                meas = vstack((meas,tab1))                
+                newobj = tab1[leftind]
+                newobj['nmeas'] = 1
+                obj = vstack((obj,newobj))
+
+    # Get mean ra, dec and flux from the measurements
+    measindex = dln.create_index(meas['objid'])
+    obj['flux'] = 0.0
+    for i in range(len(measindex['value'])):
+        objid = measindex['value'][i]
+        ind = measindex['index'][measindex['lo'][i]:measindex['hi'][i]+1]
+        nind = len(ind)
+        obj['ra'][objid-1] = np.mean(meas['ra'][ind])
+        obj['dec'][objid-1] = np.mean(meas['dec'][ind])
+        obj['amp'][objid-1] = np.mean(meas['psfamp'][ind])
+        obj['flux'][objid-1] = np.mean(meas['psfflux'][ind])
+        import pdb; pdb.set_trace()
+
+    # Only keep the columns that we want
+    obj = obj[['objid','ra','dec','amp','flux','nmeas']]
+        
+    import pdb; pdb.set_trace()
+
+    return obj
+            
 def solveone(psf,im,cat,method='qr',bounds=None,radius=None,absolute=False):
 
     method = str(method).lower()
@@ -134,14 +213,14 @@ def solve(psf,resid,tab,verbose=False):
     return out,resid
         
 
-def forced(images,mastertab,fitpm=False,reftime=None,refwcs=None,verbose=True):
+def forced(files,mastertab=None,fitpm=False,reftime=None,refwcs=None,verbose=True):
     """
     ALLFRAME-like forced photometry.
 
     Parameters
     ----------
-    images : list
-       List of image filenames or list of CCD objects.
+    files : list
+       List of image filenames.
     mastertab : table
        Master table of objects.
     fitpm : boolean, optional
@@ -180,48 +259,63 @@ def forced(images,mastertab,fitpm=False,reftime=None,refwcs=None,verbose=True):
     # an open HDUList() and it will refresh the mmap and free up the
     # virtual memory.
     
-    nimages = len(images)
-    print('Running forced photometry on {:d} images'.format(nimages))
+    nfiles = len(files)
+    print('Running forced photometry on {:d} images'.format(nfiles))
 
-    # Load files if necessary
-    if isinstance(images[0],str):
-        files = images
-        images = []
-        for i in range(nimages):
-            print('Loading image {:d}  {:s}'.format(i+1,files[i]))
-            if os.path.exists(files[i]):
-                im1 = ccddata.CCDData.read(files[i])
-                # Load PSF model
-                psffile = files[i].replace('.fits','.psf.fits')
-                if os.path.exists(psffile):
-                    psf1 = models.read(psffile)
-                    im1.psf = psf1
-                else:
-                    print('PSF file not found',psffile)
-                    continue
-                # Put the image in the list      
-                images.append(im1)
-            else:
-                print(files[i],' not found')
-        nimages = len(images)
-                
-    # Check that all the images have a PSF model
-    tempimages = images
+
+    # Do NOT load all of the images at once, only the headers and WCS objects
+    # load the PSF and object catalog from the _prometheus.fits file
+    # run prometheus if the _prometheus.fits file does not exist
+    
+    # Load files
     images = []
-    for i in range(len(tempimages)):
-        if hasattr(tempimages[i],'psf'):
-            images.append(tempimages[i])
-        else:
-            print('Image {:d} does not have a PSF model attached'.format(i+1))
-    del tempimages
+    for i in range(nfiles):
+        print('Image {:d}  {:s}'.format(i+1,files[i]))
+        if os.path.exists(files[i])==False:
+            print(files[i],' not found')
+            continue
+        prfile = files[i].replace('.fits','_prometheus.fits')            
+        if os.path.exists(prfile)==False:
+            print(prfile,' not found')
+            continue
+        # Load header
+        head1 = fits.getheader(files[i],0)
+        wcs1 = WCS(head1)
+        # Load soure table and PSF model from prometheus output file
+        tab1 = Table.read(prfile,1)
+        for c in tab1.colnames: tab1[c].name = c.lower()
+        psf1 = models.read(prfile,4)
+        images.append({'file':files[i],'header':head1,'wcs':wcs1,
+                       'table':tab1,'psf':psf1})
+        #im1 = ccddata.CCDData.read(files[i])
     nimages = len(images)
+    if nimages==0:
+        print('No images to process')
+        return
+    
+    ## Check that all the images have a PSF model
+    #tempimages = images
+    #images = []
+    #for i in range(len(tempimages)):
+    #    if hasattr(tempimages[i],'psf'):
+    #        images.append(tempimages[i])
+    #    else:
+    #        print('Image {:d} does not have a PSF model attached'.format(i+1))
+    #del tempimages
+    #nimages = len(images)
     
     # Load the master star table if necessary
-    if isinstance(mastertab,str):
-        if os.path.exists(mastertab)==False:
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), mastertab)
-        mastertab_filename = mastertab
-        mastertab = Table.read(mastertab_filename)
+    if mastertab is not None:
+        if isinstance(mastertab,str):
+            if os.path.exists(mastertab)==False:
+                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), mastertab)
+            mastertab_filename = mastertab
+            mastertab = Table.read(mastertab_filename)
+    # No master star table input, make one from the
+    #  individual catalogs
+    else:
+        mastertab = makemastertab(images)
+        
     # Make sure we have the necessary columns
     for c in mastertab.colnames: mastertab[c].name = c.lower()
     if 'ra' not in mastertab.colnames or 'dec' not in mastertab.colnames:
@@ -362,6 +456,10 @@ def forced(images,mastertab,fitpm=False,reftime=None,refwcs=None,verbose=True):
             # Fit the fluxes while holding the positions fixed            
             out,resid = solve(im.psf,resid,meastab1,verbose=verbose)
 
+
+            # USE SMALLER FITTING RADIUS!!!!
+            
+            
             # Save the residual file
             np.save(residfile,resid.data)
 

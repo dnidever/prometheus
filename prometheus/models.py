@@ -3789,12 +3789,12 @@ class PSFBase:
         return (self.lookup is not None)
     
     @classmethod
-    def read(cls,filename):
+    def read(cls,filename,exten=0):
         """ Load a PSF file."""
         if os.path.exists(filename)==False:
             raise ValueError(filename+' NOT FOUND')
         hdulist = fits.open(filename)
-        data,head = hdulist[0].data,hdulist[0].header
+        data,head = hdulist[exten].data,hdulist[exten].header
         psftype = head.get('PSFTYPE')
         if psftype is None:
             raise ValueError('No PSFTYPE found in header')
@@ -3815,7 +3815,7 @@ class PSFBase:
         newpsf = psfmodel(psftype,data,**kwargs)
         # Lookup table
         if head.get('HSLOOKUP') and len(hdulist)>1:
-            ludata,luhead = hdulist[1].data,hdulist[1].header
+            ludata,luhead = hdulist[exten+1].data,hdulist[exten+1].header
             lukwargs = {}
             yshape = luhead.get('YSHAPE')
             xshape = luhead.get('XSHAPE')
@@ -3955,12 +3955,17 @@ class PSFGaussian(PSFBase):
         hdu = psf.tohdu()
 
         """
-        hdu = fits.PrimaryHDU(self.params)
-        hdu.header['PSFTYPE'] = 'Gaussian'
-        hdu.header['BINNED'] = self.binned
-        hdu.header['NPIX'] = self.npix
-        # This does not include the lookup table                
-        return hdu
+        hdulist = fits.HDUList()
+        hdulist.append(fits.ImageHDU(self.params))
+        hdulist[0].header['PSFTYPE'] = 'Gaussian'
+        hdulist[0].header['BINNED'] = self.binned
+        hdulist[0].header['NPIX'] = self.npix
+        hdulist[0].header['HSLOOKUP'] = self.haslookup
+        if self.haslookup:
+            luhdu = self.lookup.tohdu()
+            hdulist.append(luhdu)
+            hdulist[1].header['LOOKUP'] = 1
+        return hdulist
     
     def write(self,filename,overwrite=True):
         """ Write a PSF to a file."""
@@ -3971,7 +3976,7 @@ class PSFGaussian(PSFBase):
         hdulist[0].header['PSFTYPE'] = 'Gaussian'
         hdulist[0].header['BINNED'] = self.binned
         hdulist[0].header['NPIX'] = self.npix
-        hdulist[0].header['HSLOOKUP'] = True
+        hdulist[0].header['HSLOOKUP'] = self.haslookup
         if self.haslookup:
             luhdu = self.lookup.tohdu()
             hdulist.append(luhdu)
@@ -4062,13 +4067,18 @@ class PSFMoffat(PSFBase):
         hdu = psf.tohdu()
 
         """
-        hdu = fits.PrimaryHDU(self.params)
-        hdu.header['PSFTYPE'] = 'Moffat'
-        hdu.header['BINNED'] = self.binned
-        hdu.header['NPIX'] = self.npix
-        # This does not include the lookup table        
-        return hdu
-    
+        hdulist = fits.HDUList()
+        hdulist.append(fits.ImageHDU(self.params))
+        hdulist[0].header['PSFTYPE'] = 'Moffat'
+        hdulist[0].header['BINNED'] = self.binned
+        hdulist[0].header['NPIX'] = self.npix
+        hdulist[0].header['HSLOOKUP'] = self.haslookup
+        if self.haslookup:
+            luhdu = self.lookup.tohdu()
+            hdulist.append(luhdu)
+            hdulist[1].header['LOOKUP'] = 1
+        return hdulist
+
     def write(self,filename,overwrite=True):
         """ Write a PSF to a file."""
         if os.path.exists(filename) and overwrite==False:
@@ -4078,7 +4088,7 @@ class PSFMoffat(PSFBase):
         hdulist[0].header['PSFTYPE'] = 'Moffat'
         hdulist[0].header['BINNED'] = self.binned
         hdulist[0].header['NPIX'] = self.npix
-        hdulist[0].header['HSLOOKUP'] = True
+        hdulist[0].header['HSLOOKUP'] = self.haslookup
         if self.haslookup:
             luhdu = self.lookup.tohdu()
             hdulist.append(luhdu)
@@ -4169,13 +4179,18 @@ class PSFPenny(PSFBase):
         hdu = psf.tohdu()
 
         """
-        hdu = fits.PrimaryHDU(self.params)
-        hdu.header['PSFTYPE'] = 'Penny'
-        hdu.header['BINNED'] = self.binned
-        hdu.header['NPIX'] = self.npix
-        # This does not include the lookup table        
-        return hdu
-    
+        hdulist = fits.HDUList()
+        hdulist.append(fits.ImageHDU(self.params))
+        hdulist[0].header['PSFTYPE'] = 'Penny'
+        hdulist[0].header['BINNED'] = self.binned
+        hdulist[0].header['NPIX'] = self.npix
+        hdulist[0].header['HSLOOKUP'] = self.haslookup
+        if self.haslookup:
+            luhdu = self.lookup.tohdu()
+            hdulist.append(luhdu)
+            hdulist[1].header['LOOKUP'] = 1
+        return hdulist
+
     def write(self,filename,overwrite=True):
         """ Write a PSF to a file."""
         if os.path.exists(filename) and overwrite==False:
@@ -4185,7 +4200,7 @@ class PSFPenny(PSFBase):
         hdulist[0].header['PSFTYPE'] = 'Penny'
         hdulist[0].header['BINNED'] = self.binned
         hdulist[0].header['NPIX'] = self.npix
-        hdulist[0].header['HSLOOKUP'] = True
+        hdulist[0].header['HSLOOKUP'] = self.haslookup
         if self.haslookup:
             luhdu = self.lookup.tohdu()
             hdulist.append(luhdu)
@@ -4274,12 +4289,17 @@ class PSFGausspow(PSFBase):
         hdu = psf.tohdu()
 
         """
-        hdu = fits.PrimaryHDU(self.params)
-        hdu.header['PSFTYPE'] = 'Gausspow'
-        hdu.header['BINNED'] = self.binned
-        hdu.header['NPIX'] = self.npix
-        # This does not include the lookup table
-        return hdu
+        hdulist = fits.HDUList()
+        hdulist.append(fits.ImageHDU(self.params))
+        hdulist[0].header['PSFTYPE'] = 'Gausspow'
+        hdulist[0].header['BINNED'] = self.binned
+        hdulist[0].header['NPIX'] = self.npix
+        hdulist[0].header['HSLOOKUP'] = self.haslookiup
+        if self.haslookup:
+            luhdu = self.lookup.tohdu()
+            hdulist.append(luhdu)
+            hdulist[1].header['LOOKUP'] = 1
+        return hdulist
     
     def write(self,filename,overwrite=True):
         """ Write a PSF to a file."""
@@ -4290,7 +4310,7 @@ class PSFGausspow(PSFBase):
         hdulist[0].header['PSFTYPE'] = 'Gausspow'
         hdulist[0].header['BINNED'] = self.binned
         hdulist[0].header['NPIX'] = self.npix
-        hdulist[0].header['HSLOOKUP'] = True
+        hdulist[0].header['HSLOOKUP'] = self.haslookup
         if self.haslookup:
             luhdu = self.lookup.tohdu()
             hdulist.append(luhdu)

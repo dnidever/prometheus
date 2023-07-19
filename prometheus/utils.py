@@ -17,10 +17,12 @@ from astropy.io import fits
 from astropy.table import Table
 import logging
 import time
+from datetime import datetime
 from scipy.spatial import cKDTree
 from dlnpyutils import utils as dln,ladfit
 from . import detection, models, getpsf, allfit, leastsquares as lsq
 from .ccddata import CCDData
+from . import __version__ as version
 
 try:
     import __builtin__ as builtins # Python 2
@@ -234,3 +236,63 @@ def refresh_mmap(hdulist):
     for h in hdulist:
         if hasattr(h,'data'):
             del h.data
+
+def saveoutput(filename,outfile,out,model,sky,psf):
+    """
+    Save Prometheus output to a file.
+
+    Parameters
+    ----------
+    filename : str
+       Filename of the original image file.
+    outfile : str
+       Filename for the output.
+    cat : table
+       The output table of best-fit PSF values for all of the sources.
+    model : CCDData object
+       The best-fitting model for the stars (without sky).
+    sky : CCDData object
+       The background sky image used for the image.
+    psf : PSF object
+       The best-fitting PSF model.
+    
+    Returns
+    -------
+    The output is saved to a FITS file.
+
+    Example
+    -------
+
+    saveoutput(filename,outfile,out,model,sky,psf)
+
+    """
+    
+    if os.path.exists(outfile): os.remove(outfile)
+    hdulist = fits.HDUList()
+    hdulist.append(fits.table_to_hdu(out))  # table    
+    hdulist[0].header['COMMENT']='Prometheus version '+str(version)
+    hdulist[0].header['COMMENT']='Date '+datetime.now().ctime()
+    hdulist[0].header['COMMENT']='File '+filename
+    hdulist[0].header['COMMENT']='HDU#0 : Header Only'
+    hdulist[0].header['COMMENT']='HDU#1 : Source catalog'
+    hdulist[0].header['COMMENT']='HDU#2 : Model image'
+    hdulist[0].header['COMMENT']='HDU#3 : Sky model image'
+    hdulist[0].header['COMMENT']='HDU#4 : PSF model'
+    hdulist[1].header['COMMENT'] = 'Prometheus source catalog'
+    hdulist.append(model.tohdu())  # model
+    hdulist[2].header['COMMENT'] = 'Prometheus model image'
+    hdulist.append(sky.tohdu())    # sky
+    hdulist[3].header['COMMENT'] = 'Prometheus sky image'
+    psfhdu = psf.tohdu()
+    # psf, could be 2 HDUs
+    if isinstance(psfhdu,fits.HDUList):
+        for h in psfhdu:
+            hdulist.append(h)
+        hdulist[4].header['COMMENT'] = 'Prometheus PSF model'
+        hdulist[5].header['COMMENT'] = 'Prometheus PSF model lookup table'        
+    else:
+        hdulist.append(psfhdu)     # psf
+        hdulist[4].header['COMMENT'] = 'Prometheus PSF model'
+    hdulist.writeto(outfile,overwrite=True)
+    hdulist.close()
+    
