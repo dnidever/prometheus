@@ -101,7 +101,8 @@ def makemastertab(images,dcr=1.0,mindet=2):
 
     nimages = len(images)
 
-    objdt = [('objid',int),('ra',float),('dec',float),('amp',float),('flux',float),('nmeas',int)]
+    objdt = [('objid',int),('ra',float),('dec',float),('amp',float),
+             ('flux',float),('nmeas',int)]
     
     # Loop over the images
     for i in range(nimages):
@@ -204,6 +205,7 @@ def initialize_catalogs(iminfo,mastertab):
     objtab['cenpmdec'] = 0.0
     objtab['nmeas'] = 0
     objtab['converged'] = False
+    objtab['chisq'] = np.nan
     
     # Initial master list coordinates
     coo0 = SkyCoord(ra=objtab['cenra']*u.deg,dec=objtab['cendec']*u.deg,frame='icrs')
@@ -220,9 +222,9 @@ def initialize_catalogs(iminfo,mastertab):
     # Initialize the measurement table
     dt = [('objid',int),('objindex',int),('imindex',int),('jd',float),
           ('ra',float),('dec',float),('x',float),('y',float),('amp',float),
-          ('flux',float),('fluxerr',float),('dflux',float),('dfluxerr',float),
-          ('dx',float),('dxerr',float),('dy',float),('dyerr',float),('dra',float),
-          ('ddec',float),('sky',float),('converged',bool)]
+          ('flux',float),('fluxerr',float),('damp',float),('dx',float),
+          ('dxerr',float),('dy',float),('dyerr',float),('dra',float),
+          ('ddec',float),('sky',float),('chisq',float),('converged',bool)]
     nmeas = np.sum([f['nmeas'] for f in iminfo])
     #nmeas = np.sum(iminfo['nmeas'])
     meastab = Table(np.zeros(nmeas,dtype=np.dtype(dt)))
@@ -249,8 +251,51 @@ def initialize_catalogs(iminfo,mastertab):
     return objtab,meastab,objindex,iminfo
 
 
-def solveone(psf,im,cat,method='qr',bounds=None,fitradius=None,absolute=False):
+def solveone(psf,im,cat,method='qr',bounds=None,fitradius=None,
+             recenter=True,absolute=False,verbose=False):
+    """
+    Fit the flux and offsets in coordinates for one source.
+    
+    Parameters
+    ----------
+    psf : PSF object
+       The PSF object for the image.
+    im : CCDData object
+       Image to use for fitting.
+    cat : table
+       Initial parameters.  Should at minimum have 'x' and 'y'.
+    method : str, optional
+       Method to use for solving the non-linear least squares problem: "cholesky",
+         "qr", "svd", and "curve_fit".  Default is "qr".
+    bounds : list, optional
+       Input lower and upper bounds/constraints on the fitting parameters (tuple of two
+         lists (e.g., ([amp_lo,x_low,y_low],[amp_hi,x_hi,y_hi])).
+    fitradius : float, optional
+       Fitting radius in pixels.  Default is to use the PSF FWHM.
+    recenter : boolean, optional
+       Allow the centroids to be fit.  Default is True.
+    absolute : boolean, optional
+       Input and output coordinates are in "absolute" values using the image bounding box.
+         Default is False, everything is relative.
+    verbose : boolean, optional
+       Verbose output to the screen.  Default is False.
 
+    Returns
+    -------
+    newamp : float
+       New amplitude.
+    dx : float
+       The offset in x coordinate.
+    dy : float
+       The offset in y coordinate.
+
+    Example
+    -------
+    
+    newamp,dx,dy = solveone(psf,im,pars)
+
+    """
+    
     method = str(method).lower()
   
     # Image offset for absolute X/Y coordinates
@@ -258,8 +303,8 @@ def solveone(psf,im,cat,method='qr',bounds=None,fitradius=None,absolute=False):
         imx0 = im.bbox.xrange[0]
         imy0 = im.bbox.yrange[0]
 
-    xc = cat['x']
-    yc = cat['y']
+    xc = cat['x'][0]
+    yc = cat['y'][0]
     if absolute:  # offset
         xc -= imx0
         yc -= imy0
@@ -287,7 +332,8 @@ def solveone(psf,im,cat,method='qr',bounds=None,fitradius=None,absolute=False):
         bounds[0][1] -= bbox.ixmin  # lower
         bounds[0][2] -= bbox.iymin
         bounds[1][1] -= bbox.ixmin  # upper
-        bounds[1][2] -= bbox.iymin            
+        bounds[1][2] -= bbox.iymin
+        
     xdata = np.vstack((X.ravel(), Y.ravel()))        
     #sky = np.median(skyim)
     sky = 0.0
@@ -299,24 +345,54 @@ def solveone(psf,im,cat,method='qr',bounds=None,fitradius=None,absolute=False):
         amp = 1.0
         
     initpar = [amp,xc,yc,sky]
- 
+    
+    # Make bounds
+    if bounds is None:
+        bounds = psf.mkbounds(initpar,flux.shape)
+    # Not fitting centroids
+    if recenter==False:
+        bounds[0][1] = initpar[1]-1e-7
+        bounds[0][2] = initpar[2]-1e-7
+        bounds[1][1] = initpar[1]+1e-7
+        bounds[1][2] = initpar[2]+1e-7
+    # Never fitting sky
+    bounds[0][3] = -1e-7
+    bounds[1][3] = 1e-7    
+    
+    maxsteps = psf.steps(initpar,bounds,star=True)  # maximum steps
+    
     # Use Cholesky, QR or SVD to solve linear system of equations
     m,jac = psf.jac(xdata,*initpar,retmodel=True)
     dy = flux.ravel()-m.ravel()
     # Solve Jacobian
     dbeta = lsq.jac_solve(jac,dy,method=method,weight=wt.ravel())
     dbeta[~np.isfinite(dbeta)] = 0.0  # deal with NaNs
-    chisq = np.sum(dy**2 * wt.ravel())/len(dy)
-
+    
+    # Perform line search
+    alpha,new_dbeta = psf.linesearch(xdata,initpar,dbeta,flux,wt,m,jac) #,allpars=allpars)
+                    
+    # Update parameters
+    oldpar = initpar.copy()
+    # limit the steps to the maximum step sizes and boundaries
+    newpar = psf.newpars(initpar,new_dbeta,bounds,maxsteps)                
+    if recenter==False:
+        # Allow the flux to fully vary
+        newpar = [np.maximum(new_dbeta[0],0),initpar[1],initpar[2],0.0]
+    
     # Output values
-    newamp = np.maximum(amp+dbeta[0], 0)  # amp cannot be negative
-    dx = dbeta[1]
-    dy = dbeta[2]
+    newamp = np.maximum(newpar[0], 0)  # amp cannot be negative
+    dx = newpar[1]-initpar[1]
+    dy = newpar[2]-initpar[2]
 
-    return newamp,dx,dy
+    # Model with only the new flux
+    newm = psf.model(xdata,*[newamp,initpar[1],initpar[2],0.0])
+    newdy = flux.ravel()-newm.ravel()
+    chisq = np.sum(newdy**2 * wt.ravel())/len(newdy)
+    
+    return newamp,dx,dy,chisq
 
 
-def solve(psf,resid,tab,fitradius=None,verbose=False):
+def solve(psf,resid,tab,fitradius=None,recenter=True,verbose=False):
     """
     Solve for the flux and find corrections for x and y.
 
@@ -330,6 +406,8 @@ def solve(psf,resid,tab,fitradius=None,verbose=False):
        Table of stars ot fit.
     fitradius : float, optional
        The fitting radius in pixels.  The default is 0.5*psf.fwhm().
+    recenter : boolean, optional
+       Allow the centroids to be fit.  Default is True.
     verbose : bool, optional
        Verbose output to the screen.  Default is False.
 
@@ -360,14 +438,15 @@ def solve(psf,resid,tab,fitradius=None,verbose=False):
             _ = psf.add(resid.data,tab[i:i+1],nocopy=True)
 
         # Solve single flux
-        newamp,dx,dy = solveone(psf,resid,tab[i:i+1],fitradius=fitradius)
+        newamp,dx,dy,chisq = solveone(psf,resid,tab[i:i+1],fitradius=fitradius,recenter=recenter)
 
         # the dx/dy numbers are CRAZY LARGE!!!
         
         # Save the results
         out['amp'][i] = newamp
         out['dx'][i] = dx
-        out['dy'][i] = dy 
+        out['dy'][i] = dy
+        out['chisq'][i] = chisq
         
         # Immediately subtract the new model
         #  npcopy=True will change in place
@@ -378,7 +457,7 @@ def solve(psf,resid,tab,fitradius=None,verbose=False):
     return out,resid
 
 
-def update_object(objtab,meastab,objindex,fitpm=False):
+def update_object(objtab,meastab,objindex,refepoch,fitpm=False):
     """
     Determine the mean coordinates and proper motions of objects:
 
@@ -392,6 +471,8 @@ def update_object(objtab,meastab,objindex,fitpm=False):
         sources in the images.
     objindex : list
        List of measurement indices for each object.
+    refepoch : Time object
+       The reference time to use.  Should be an astropy Time object.
     fitpm : boolean, optional
        Fit proper motions as well as central positions.
          Default is False.
@@ -418,6 +499,7 @@ def update_object(objtab,meastab,objindex,fitpm=False):
         jd = meas1['jd']-jd0
         ra = meas1['ra']+meas1['dra']     # both in degrees
         dec = meas1['dec']+meas1['ddec']
+        objtab['chisq'][i] = np.mean(meas1['chisq'])
         # Fit proper motions
         if fitpm:
             # Perform linear fit
@@ -568,8 +650,66 @@ def average_photometry(objtab,meastab,objindex,iminfo):
 
     return objtab
 
+def check_convergence(objtab,meastab,objindex,last_obj,fitpm=True):
+    """
+    Check for convergence of individual stars or all stars.
 
-def forced(files,mastertab=None,fitpm=False,refepoch=None,refwcs=None,verbose=True):
+    Parameters
+    ----------
+    objtab : table
+       Catalog of unique objects.
+    meastab : table
+       Catalog of individual measurements.  This should contain the
+        final fluxes and "mag" from make_magnitudes().
+    objindex : list
+       List of measurement indices for each object.
+    last_obj : table
+       Object values from the last iteration.
+    fitpm : boolean, optional
+       Fit proper motions as well as central positions.
+         Default is True.
+
+    Results
+    -------
+    objtab : table
+       Catalog of unique objects.
+    meastab : table
+       Catalog of individual measurements.  This should contain the
+        final fluxes and "mag" from make_magnitudes().
+    flag : int
+       Flag indicating the convergence.
+
+    Example
+    -------
+
+    objtab,meastab,flag = check_convergence(objtab,meastab,objindex)
+
+    """
+
+    # Object loop
+    nobj = len(objtab)
+    for i in range(nobj):
+        measind = objindex[i]
+        meas1 = meastab[measind]
+
+        # Check of object cenra/cendec/cenpmra/cenpmdec changed
+        #  or the measurement dx/dy values
+        dra = objtab['cenra'][i]-last_obj['cenra'][i]
+        ddec = objtab['cendec'][i]-last_obj['cendec'][i]
+        if fitpm:
+            dpmra = objtab['cenpmra'][i]-last_obj['cenpmra'][i]
+            dpmdec = objtab['cenpmdec'][i]-last_obj['cenpmdec'][i]
+
+        # Measurement differences
+        dx = meas1['dx']
+        dy = meas1['dy']
+
+        # Check differences in chisq values
+            
+    import pdb; pdb.set_trace()
+
+
+def forced(files,mastertab=None,fitpm=True,refepoch=None,refwcs=None,verbose=True):
     """
     ALLFRAME-like forced photometry.
 
@@ -581,7 +721,7 @@ def forced(files,mastertab=None,fitpm=False,refepoch=None,refwcs=None,verbose=Tr
        Master table of objects.
     fitpm : boolean, optional
        Fit proper motions as well as central positions.
-         Default is False.
+         Default is True.
     refepoch : Time object, optional
        The reference time to use.  Should be an astropy Time object.
          By default, the mean JD of all images is used.
@@ -672,14 +812,26 @@ def forced(files,mastertab=None,fitpm=False,refepoch=None,refwcs=None,verbose=Tr
         
     # Iterate until convergence has been reached
     count = 0
-    flag = True
-    while (flag):
+    flag = 0
+    #lastvalues = np.zeros(len(meastab),dtype=np.dtype([('flux',float),('dx',float),('dy',float)]))
+    while (flag==0):
 
         print('----- Iteration {:d} -----'.format(count+1))
 
         if count % 5 == 0:
             print('Recomputing and subtracting the sky')
-        
+
+        # Only fit amplitude on first iteration
+        if count==0:
+            recenter = False
+        else:
+            recenter = True
+
+        ldt = [('cenra',float),('cendec',float),('cenpmra',float),
+               ('cenpmdec',float),('chisq',float)]
+        last_obj = np.zeros(len(objtab),dtype=np.dtype(ldt))
+                                                        
+            
         # Loop over the images:
         for i in range(nimages):
             wcs = iminfo[i]['wcs']
@@ -730,10 +882,13 @@ def forced(files,mastertab=None,fitpm=False,refepoch=None,refwcs=None,verbose=Tr
                 if hasattr(resid,'_sky'):
                     resid._sky = None  # force it to be recomputed
                 resid.data -= resid.sky
-
+                
             # Fit the fluxes while holding the positions fixed            
-            out,resid = solve(psf,resid,meastab1,verbose=verbose)
+            out,resid = solve(psf,resid,meastab1,recenter=recenter,verbose=verbose)
 
+            # I THINK THIS IS SLOW BECAUSE IT IS DOING ONE STAR AT A TIME AND
+            # USING A LOOP IN PYTHON.  Try to jaxify it!
+            
             # Convert dx/dy to dra/ddec
             coo2 = wcs.pixel_to_world(meastab1['x']+out['dx'],meastab1['y']+out['dy'])
             dra = coo2.ra.deg - meastab1['ra']
@@ -750,6 +905,7 @@ def forced(files,mastertab=None,fitpm=False,refepoch=None,refwcs=None,verbose=Tr
             #import pdb; pdb.set_trace()
             
             # Stuff the information back in
+            meastab['damp'][msbeg:msend] = out['amp']-meastab['amp'][msbeg:msend]
             meastab['amp'][msbeg:msend] = out['amp']
             meastab['ra'][msbeg:msend] = out['ra']
             meastab['dec'][msbeg:msend] = out['dec']
@@ -757,7 +913,6 @@ def forced(files,mastertab=None,fitpm=False,refepoch=None,refwcs=None,verbose=Tr
             meastab['dy'][msbeg:msend] = out['dy']
             meastab['dra'][msbeg:msend] = out['dra']
             meastab['ddec'][msbeg:msend] = out['ddec']            
-
             
             # allframe operates on the residual map, with the best-fit model subtracted
             
@@ -799,8 +954,20 @@ def forced(files,mastertab=None,fitpm=False,refepoch=None,refwcs=None,verbose=Tr
 
         # Update the central coordinates and proper motions
         print('Updating object coordinates and proper motions')
-        objtab = update_object(objtab,meastab,objindex,fitpm=fitpm)
+        objtab = update_object(objtab,meastab,objindex,refepoch,fitpm=fitpm)
 
+        # Check for convergence
+        #   individual stars can converge
+        if count > 0:
+            objtab,meastab,flag = check_convergence(objtab,meastab,objindex,last_obj,fitpm=fitpm)
+
+        # Save object values 
+        last_obj['cenra'] = objtab['cenra']
+        last_obj['cendec'] = objtab['cendec']
+        last_obj['cenpmra'] = objtab['cenpmra']
+        last_obj['cenpmdec'] = objtab['cenpmdec']
+        last_obj['chisq'] = objtab['chisq']        
+        
         # Check for convergence
         count += 1
             
