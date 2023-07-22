@@ -15,6 +15,63 @@ from .ccddata import CCDData
 
 # also see multifit.py
 
+def getimageinfo(files):
+    """
+    Gather information about the images.
+
+    Parameters
+    ----------
+    files : list
+       List of image FITS files.  There should be associated _prometheus.fits
+        that include the PSF and source catalog.
+
+    Returns
+    -------
+    iminfo : table
+       List of dictionaries with information on the FITS files including the
+        header, WCS, PSF, source catalog, but not the image itself.
+
+    Example
+    -------
+
+    iminfo = getimageinfo(files)
+
+    """
+
+    # Load images headers and WCS
+    iminfo = []
+    nfiles = len(files)
+    for i in range(nfiles):
+        print('Image {:d}  {:s}'.format(i+1,files[i]))
+        if os.path.exists(files[i])==False:
+            print(files[i],' not found')
+            continue
+        prfile = files[i].replace('.fits','_prometheus.fits')            
+        if os.path.exists(prfile)==False:
+            print(prfile,' not found')
+            continue
+        # Load header
+        head1 = fits.getheader(files[i],0)
+        wcs1 = WCS(head1)
+        # Load soure table and PSF model from prometheus output file
+        tab1 = Table.read(prfile,1)
+        for c in tab1.colnames: tab1[c].name = c.lower()
+        psf1 = models.read(prfile,4)
+        dateobs = head1['DATE-OBS']
+        jd = Time(dateobs).jd
+        exptime = head1.get('exptime')
+        filt = head1.get('filter')
+        nx = head1['NAXIS1']
+        ny = head1['NAXIS2']        
+        cencoo = wcs1.pixel_to_world(nx//2,ny//2)
+        vra,vdec = wcs1.wcs_pix2world([0,nx-1,nx-1,0],[0,0,ny-1,ny-1],0)        
+        iminfo.append({'file':files[i],'residfile':files[i].replace('.fits','_resid.npy'),
+                       'header':head1,'dateobs':dateobs,'jd':jd,'exptime':exptime,'filter':filt,
+                       'nx':nx,'ny':ny,'wcs':wcs1,'cenra':cencoo.ra.deg,'cendec':cencoo.dec.deg,
+                       'vra':vra,'vdec':vdec,'table':tab1,'psf':psf1,'startmeas':-1,'nmeas':-1})
+
+    return iminfo
+    
 def makemastertab(images,dcr=1.0,mindet=2):
     """
     Make master star list from individual image star catalogs.
@@ -100,7 +157,98 @@ def makemastertab(images,dcr=1.0,mindet=2):
         obj = obj[gdobj]
 
     return obj
-            
+
+def initialize_catalogs(iminfo,mastertab):
+    """
+    Initialize the object and measurement array.
+
+    Parameters
+    ----------
+    iminfo : list
+       List of information on the image files.
+    mastertab : table
+       Master list of sources.
+
+    Returns
+    -------
+    objtab : table
+       Catalog of unique objects.
+    meastab : table
+       Catalog of individual measurements.
+    objindex : list
+       List of measurement indices for each object.
+    iminfo : table
+       List of information on the image files.  Now
+        overlap information has been added.
+
+    Example
+    -------
+
+    objtab,meastab,objindex,iminfo = initialize_catalogs(iminfo,mastertab)
+
+    """
+
+    nimages = len(iminfo)
+    
+    nobj = len(mastertab)
+    objtab = mastertab.copy()
+    objtab['ra'].unit = None   # don't want any units
+    objtab['dec'].unit = None    
+    objtab['objid'] = 0
+    objtab['objid'] = np.arange(nobj)+1
+    objtab['cenra0'] = objtab['ra'].copy()  # initial coordinates
+    objtab['cendec0'] = objtab['dec'].copy()
+    objtab['cenra'] = objtab['ra'].copy()
+    objtab['cendec'] = objtab['dec'].copy()    
+    objtab['cenpmra'] = 0.0
+    objtab['cenpmdec'] = 0.0
+    objtab['nmeas'] = 0
+    objtab['converged'] = False
+    
+    # Initial master list coordinates
+    coo0 = SkyCoord(ra=objtab['cenra']*u.deg,dec=objtab['cendec']*u.deg,frame='icrs')
+    
+    # Get overlap and measurement indices for the images
+    meascount = 0
+    for i in range(nimages):
+        isin = coo0.contained_by(iminfo[i]['wcs'])
+        iminfo[i]['startmeas'] = meascount
+        iminfo[i]['nmeas'] = np.sum(isin)
+        meascount += iminfo[i]['nmeas']
+        print('Image {:d} - {:d} stars overlap'.format(i+1,np.sum(isin)))
+        
+    # Initialize the measurement table
+    dt = [('objid',int),('objindex',int),('imindex',int),('jd',float),
+          ('ra',float),('dec',float),('x',float),('y',float),('amp',float),
+          ('flux',float),('fluxerr',float),('dflux',float),('dfluxerr',float),
+          ('dx',float),('dxerr',float),('dy',float),('dyerr',float),('dra',float),
+          ('ddec',float),('sky',float),('converged',bool)]
+    nmeas = np.sum([f['nmeas'] for f in iminfo])
+    #nmeas = np.sum(iminfo['nmeas'])
+    meastab = Table(np.zeros(nmeas,dtype=np.dtype(dt)))
+    meascount = 0
+    for i in range(nimages):
+        contained = coo0.contained_by(iminfo[i]['wcs'])
+        isin, = np.where(contained)
+        nisin = len(isin)
+        objtab['nmeas'][isin] += 1 
+        if nisin > 0:
+            meastab['objid'][meascount:meascount+nisin] = objtab['objid'][isin]
+            meastab['objindex'][meascount:meascount+nisin] = isin
+            meastab['imindex'][meascount:meascount+nisin] = i
+            meastab['jd'][meascount:meascount+nisin] = iminfo[i]['jd']
+            meascount += nisin
+
+    # Create object index into measurement table
+    oindex = dln.create_index(meastab['objindex'])
+    objindex = nobj*[[]]  # initialize index with empty list for each object
+    for i in range(len(oindex['value'])):
+        ind = oindex['index'][oindex['lo'][i]:oindex['hi'][i]+1]
+        objindex[oindex['value'][i]] = ind    # value is the index in objtab
+
+    return objtab,meastab,objindex,iminfo
+
+
 def solveone(psf,im,cat,method='qr',bounds=None,fitradius=None,absolute=False):
 
     method = str(method).lower()
@@ -228,9 +376,200 @@ def solve(psf,resid,tab,fitradius=None,verbose=False):
         #print(i,newamp,dx,dy)
         
     return out,resid
-        
 
-def forced(files,mastertab=None,fitpm=False,reftime=None,refwcs=None,verbose=True):
+
+def update_object(objtab,meastab,objindex,fitpm=False):
+    """
+    Determine the mean coordinates and proper motions of objects:
+
+    Parameters
+    ----------
+    objtab : table
+       Catalog of unique objects.
+    meastab : table
+       Catalog of individual measurements.  This should contain the
+        updated ra/dec and dra/ddec from the last round of fitting
+        sources in the images.
+    objindex : list
+       List of measurement indices for each object.
+    fitpm : boolean, optional
+       Fit proper motions as well as central positions.
+         Default is False.
+
+    Returns
+    -------
+    objtab : table
+       Catalog of unique objects with cenra/cendec and pmra/pmdec updated.
+
+    Example
+    -------
+
+    objtab = update_object(objtab,meastab,objindex)
+
+    """
+
+    # Loop over object and calculate coordinate and proper motion corrections
+    nobj = len(objtab)
+    for i in range(nobj):
+        cosdec = np.cos(np.deg2rad(objtab['cendec'][i]))
+        measind = objindex[i]
+        meas1 = meastab[measind]
+        jd0 = np.min(meas1['jd'])
+        jd = meas1['jd']-jd0
+        ra = meas1['ra']+meas1['dra']     # both in degrees
+        dec = meas1['dec']+meas1['ddec']
+        # Fit proper motions
+        if fitpm:
+            # Perform linear fit
+            # USE ROBUSTED WEIGHTED LINEAR FIT
+            racoef = robust.linefit(jd,ra)
+            deccoef = robust.linefit(jd,dec)
+            # Get coordinate at the reference epoch
+            refra = np.polyval(racoef,refepoch.jd-jd0)
+            refdec = np.polyval(deccoef,refepoch.jd-jd0)
+            # Calculate new proper motion
+            pmra = racoef[0] * (3600*1e3)*365.2425      # convert slope from deg/day to mas/yr
+            pmra *= cosdec                              # multiply by cos(dec) for true angle
+            pmdec = deccoef[0] * (3600*1e3)*365.2425
+            # update object cenra, cendec, cenpmra, cenpmdec
+            objtab['cenra'][i] = refra
+            objtab['cendec'][i] = refdec
+            objtab['cenpmra'][i] = pmra
+            objtab['cenpmdec'][i] = pmdec
+        # Only fit central coordinates
+        else:
+            # USE ROBUST WEIGHTED MEAN
+            refra = np.mean(ra)
+            refdec = np.mean(dec)
+            objtab['cenra'][i] = refra
+            objtab['cendec'][i] = refdec            
+
+    return objtab
+
+
+def make_magnitudes(meastab,iminfo,zeropoint=25.0):
+    """
+    Create measurement magnitudes corrected for exposure time.
+
+    Parameters
+    ----------
+    meastab : table
+       Catalog of individual measurements.  This should contain the
+        final fluxes.
+    iminfo : list
+       List of structures with information on the images including
+         exposure times and filter names.
+    zeropoint : float, optional
+       The zero-point to add to the magnitudes.  Default is 25.0.
+
+    Returns
+    -------
+    meastab : table
+       Catalog of individual measurements.  This will contain a new
+        "mag" and "mag_error" magnitude columns.
+
+    Example
+    -------
+
+    meastab = make_magnitudes(meastab,iminfo)
+    
+    """
+
+    # Add the new "mag" column
+    meastab['mag'] = 0.0
+    meastab['mag_error'] = 0.0    
+    
+    # Loop over the images
+    nimages = len(iminfo)
+    for i in range(nimages):
+        exptime = iminfo[i]['exptime']
+        msbeg = iminfo[i]['startmeas']
+        msend = msbeg + iminfo[i]['nmeas']
+        flux = meastab[msbeg:msend]['flux']
+        mag = -2.5*np.log10(np.maximum(flux,1e-10))+zeropoint
+        mag = +2.5*np.log10(exptime)
+        flux_error = meastab[msbeg:msend]['flux_error']
+        mag_error = (2.5/np.log(10))*(flux_error/flux)
+        meastab[msbeg:msend]['mag'] = mag
+        meastab[msbeg:msend]['mag_error'] = mag_error        
+
+    return meastab
+
+        
+def average_photometry(objtab,meastab,objindex,iminfo):
+    """
+    Average photometry in each filter for unique objects
+
+    Parameters
+    ----------
+    objtab : table
+       Catalog of unique objects.
+    meastab : table
+       Catalog of individual measurements.  This should contain the
+        final fluxes and "mag" from make_magnitudes().
+    objindex : list
+       List of measurement indices for each object.
+    iminfo : list
+       List of structures with information on the images including
+         exposure times and filter names.
+
+    Returns
+    -------
+    objtab : table
+       Catalog of unique objects with photometry updated.
+
+    Example
+    -------
+
+    objtab = average_photometry(objtab,meastab,objindex)
+
+    """
+
+    # Get unique filters
+    imfilters = [f['filter'] for f in iminfo]
+    ufilters = np.unique(imfilters)
+    nufilt = len(ufilters)
+    
+    # Add average photometry columns to the object table
+    for f in ufilters:
+        objtab['mag_'+f] = np.nan
+        objtab['mag_error_'+f] = np.nan        
+        objtab['ndet_'+f] = 0
+
+    # Image loop
+    nobj = len(objtab)
+    totalwt = np.zeros((nobj,nufilt),float)
+    totalfluxwt = np.zeros((nobj,nufilt),float)    
+    ndet = np.zeros((nobj,nufilt),int)
+    nimages = len(iminfo)
+    for i in range(nimages):
+        filt = iminfo[i]['filter']
+        ufiltind = np.where(ufilters==filt)[0][0]
+        # Get the measurements for this image
+        msbeg = iminfo[i]['startmeas']
+        msend = msbeg + iminfo[i]['nmeas']
+        meas1 = meastab[msbeg:msend]
+        # Add up the flux for this filter for all coverage objects
+        #   meastab has "objid" which we can use as an index into objtab and totalwt/totalfluxwt/ndet
+        totalwt[meas1['objid']-1,ufiltind] += 1.0/meas1['mag_error']**2
+        totalfluxwt[meas1['objid']-1,ufiltind] += 2.5118864**meas1['mag'] * (1.0/meas1['mag_error']**2)
+        ndet[meas1['objid']-1,ufiltind] += 1
+
+    # Now average the photometry in each unique filter
+    for i,f in enumerate(ufilters):
+        ind, = np.where(ndet[:,i] > 0)
+        objtab['ndet_'+f] = ndet[:,i]
+        if len(ind)>0:
+            newflux = totalfluxwt[ind,i]/totalwt[ind,i]
+            newmag = 2.5*np.log10(newflux) 
+            newerr = np.sqrt(1.0/totalwt[ind,i])
+            objtab['mag_'+f][ind] = newmag
+            objtab['mag_error_'+f][ind] = newerr
+
+    return objtab
+
+
+def forced(files,mastertab=None,fitpm=False,refepoch=None,refwcs=None,verbose=True):
     """
     ALLFRAME-like forced photometry.
 
@@ -243,9 +582,9 @@ def forced(files,mastertab=None,fitpm=False,reftime=None,refwcs=None,verbose=Tru
     fitpm : boolean, optional
        Fit proper motions as well as central positions.
          Default is False.
-    reftime : Time object, optional
-       The reference time to use.  By default, the mean
-         JD of all images is used.
+    refepoch : Time object, optional
+       The reference time to use.  Should be an astropy Time object.
+         By default, the mean JD of all images is used.
 
     Returns
     -------
@@ -286,27 +625,8 @@ def forced(files,mastertab=None,fitpm=False,reftime=None,refwcs=None,verbose=Tru
     
     # Load images headers and WCS
     print('Loading image headers, WCS, and catalogs')
-    images = []
-    for i in range(nfiles):
-        print('Image {:d}  {:s}'.format(i+1,files[i]))
-        if os.path.exists(files[i])==False:
-            print(files[i],' not found')
-            continue
-        prfile = files[i].replace('.fits','_prometheus.fits')            
-        if os.path.exists(prfile)==False:
-            print(prfile,' not found')
-            continue
-        # Load header
-        head1 = fits.getheader(files[i],0)
-        wcs1 = WCS(head1)
-        # Load soure table and PSF model from prometheus output file
-        tab1 = Table.read(prfile,1)
-        for c in tab1.colnames: tab1[c].name = c.lower()
-        psf1 = models.read(prfile,4)
-        images.append({'file':files[i],'header':head1,'wcs':wcs1,
-                       'table':tab1,'psf':psf1})
-        #im1 = ccddata.CCDData.read(files[i])
-    nimages = len(images)
+    iminfo = getimageinfo(files)
+    nimages = len(iminfo)
     if nimages==0:
         print('No images to process')
         return
@@ -322,93 +642,34 @@ def forced(files,mastertab=None,fitpm=False,reftime=None,refwcs=None,verbose=Tru
     #  individual catalogs
     else:
         print('Creating master list')
-        mastertab = makemastertab(images)
+        mastertab = makemastertab(iminfo)
+    nobj = len(mastertab)
+    print('Master list has {:d} stars'.format(nobj))
         
     # Make sure we have the necessary columns
     for c in mastertab.colnames: mastertab[c].name = c.lower()
     if 'ra' not in mastertab.colnames or 'dec' not in mastertab.colnames:
         raise ValueError('ra and dec columns must exist in mastertab')
-    
+
     # Initialize the array of positions and proper motions
-    nobj = len(mastertab)
-    print('Master list has {:d} stars'.format(nobj))
-    objtab = mastertab.copy()
-    objtab['objid'] = 0
-    objtab['objid'] = np.arange(nobj)+1
-    objtab['cenra'] = objtab['ra'].copy()
-    objtab['cendec'] = objtab['dec'].copy()
-    objtab['cenpmra'] = 0.0
-    objtab['cenpmdec'] = 0.0
-    objtab['nmeas'] = 0
-    objtab['converged'] = False
+    objtab,meastab,objindex,iminfo = initialize_catalogs(iminfo,mastertab)
     
     # Initial master list coordinates
     coo0 = SkyCoord(ra=objtab['cenra']*u.deg,dec=objtab['cendec']*u.deg,frame='icrs')
-    
-    # Get information about all of the images
-    dt = [('file',str,200),('residfile',str,200),('dateobs',str,26),('jd',float),
-          ('cenra',float),('cendec',float),('nx',int),('ny',int),('vra',float,4),
-          ('vdec',float,4),('exptime',float),('startmeas',int),('nmeas',int)]
-    iminfo = Table(np.zeros(nimages,dtype=np.dtype(dt)))
-    meascount = 0
-    for i in range(nimages):
-        iminfo['file'][i] = images[i]['file']
-        iminfo['residfile'][i] = images[i]['file'].replace('.fits','_resid.npy')
-        iminfo['dateobs'][i] = images[i]['header']['DATE-OBS']
-        iminfo['jd'][i] = Time(iminfo['dateobs'][i]).jd
-        nx = images[i]['header']['NAXIS1']
-        ny = images[i]['header']['NAXIS2']
-        iminfo['nx'][i] = nx
-        iminfo['ny'][i] = ny
-        cencoo = images[i]['wcs'].pixel_to_world(nx//2,ny//2)
-        iminfo['cenra'][i] = cencoo.ra.deg
-        iminfo['cendec'][i] = cencoo.dec.deg
-        vra,vdec = images[i]['wcs'].wcs_pix2world([0,nx-1,nx-1,0],[0,0,ny-1,ny-1],0)
-        iminfo['vra'][i] = vra
-        iminfo['vdec'][i] = vdec
-        isin = coo0.contained_by(images[i]['wcs'])
-        iminfo['startmeas'][i] = meascount
-        iminfo['nmeas'][i] = np.sum(isin)
-        meascount += iminfo['nmeas'][i]
-        print('Image {:d} - {:d} stars overlap'.format(i+1,np.sum(isin)))
-        
-    # Get the reference epoch, mean epoch
-    refepoch = Time(np.mean(iminfo['jd']),format='jd')
-    
-
-    # Initialize the measurement table
-    dt = [('objid',int),('objindex',int),('imindex',int),('jd',float),
-          ('ra',float),('dec',float),('x',float),('y',float),('amp',float),
-          ('flux',float),('fluxerr',float),('dflux',float),('dfluxerr',float),
-          ('dx',float),('dxerr',float),('dy',float),('dyerr',float),('dra',float),
-          ('ddec',float),('sky',float),('converged',bool)]
-    nmeas = np.sum(iminfo['nmeas'])
-    meastab = np.zeros(nmeas,dtype=np.dtype(dt))
-    meascount = 0
-    for i in range(nimages):
-        contained = coo0.contained_by(images[i]['wcs'])
-        isin, = np.where(contained)
-        nisin = len(isin)
-        objtab['nmeas'][isin] += 1 
-        if nisin > 0:
-            meastab['objid'][meascount:meascount+nisin] = objtab['objid'][isin]
-            meastab['objindex'][meascount:meascount+nisin] = isin
-            meastab['imindex'][meascount:meascount+nisin] = i
-            meastab['jd'][meascount:meascount+nisin] = iminfo['jd'][i]
-            meascount += nisin
 
     # Some stars have zero measurements
     zeromeas, = np.where(objtab['nmeas']==0)
     if len(zeromeas)>0:
         print('{:d} objects have zero measurements'.format(len(zeromeas)))
-            
-    # Create object index into measurement table
-    oindex = dln.create_index(meastab['objindex'])
-    objindex = nobj*[[]]  # initialize index with empty list for each object
-    for i in range(len(oindex['value'])):
-        ind = oindex['index'][oindex['lo'][i]:oindex['hi'][i]+1]
-        objindex[oindex['value'][i]] = ind    # value is the index in objtab
-    
+
+    # Reference epoch
+    if refepoch is not None:
+        if isinstance(refepoch,Time)==False:
+            raise ValueError('refepoch must be an astropy Time object')
+    else:
+        # Default reference epoch is mean JD
+        refepoch = Time(np.mean([f['jd'] for f in iminfo]),format='jd')
+        
     # Iterate until convergence has been reached
     count = 0
     flag = True
@@ -421,18 +682,18 @@ def forced(files,mastertab=None,fitpm=False,reftime=None,refwcs=None,verbose=Tru
         
         # Loop over the images:
         for i in range(nimages):
-            wcs = images[i]['wcs']
-            psf = images[i]['psf']
-            residfile = iminfo['residfile'][i]
-            imtime = Time(iminfo['jd'][i],format='jd')
+            wcs = iminfo[i]['wcs']
+            psf = iminfo[i]['psf']
+            residfile = iminfo[i]['residfile']
+            imtime = Time(iminfo[i]['jd'],format='jd')
             
             # Get the objects and measurements that overlap this image
-            contained = coo0.contained_by(images[i]['wcs'])
+            contained = coo0.contained_by(iminfo[i]['wcs'])
             objtab1 = objtab[contained]
-            msbeg = iminfo['startmeas'][i]
-            msend = msbeg + iminfo['nmeas'][i]        
+            msbeg = iminfo[i]['startmeas']
+            msend = msbeg + iminfo[i]['nmeas']
             meastab1 = meastab[msbeg:msend]
-            print('Image {:d}  {:d} stars'.format(i+1,iminfo['nmeas'][i]))
+            print('Image {:d}  {:d} stars'.format(i+1,iminfo[i]['nmeas']))
             
             # Calculate x/y position for each object in this image
             # using the current best overall on-the-sky position
@@ -457,7 +718,7 @@ def forced(files,mastertab=None,fitpm=False,reftime=None,refwcs=None,verbose=Tru
 
             # Initialize or load the residual image
             if count==0:
-                im = CCDData.read(iminfo['file'][i])
+                im = CCDData.read(iminfo[i]['file'])
                 resid = im.copy()
             else:
                 #resid_data = np.load(residfile)
@@ -497,7 +758,6 @@ def forced(files,mastertab=None,fitpm=False,reftime=None,refwcs=None,verbose=Tru
             meastab['dra'][msbeg:msend] = out['dra']
             meastab['ddec'][msbeg:msend] = out['ddec']            
 
-
             
             # allframe operates on the residual map, with the best-fit model subtracted
             
@@ -536,41 +796,23 @@ def forced(files,mastertab=None,fitpm=False,reftime=None,refwcs=None,verbose=Tru
         # Can also make modest corrections to the input geometric transformation
         # equations by evaluating and removing systematic trends in the centroid
         # corrections derived for stars in each input image.
-        
-        # Loop over object and calculate coordinate and proper motion corrections
-        for i in range(nobj):
-            cosdec = np.cos(np.deg2rad(objtab['cendec'][i]))
-            measind = objindex[i]
-            meas1 = meastab[measind]
-            jd0 = np.min(meas1['jd'])
-            jd = meas1['jd']-jd0
-            ra = meas1['ra']+meas1['dra']     # both in degrees
-            dec = meas1['dec']+meas1['ddec']
-            # Perform linear fit
-            # SHOULD BE WEIGHTED!!!
-            racoef = robust.linefit(jd,ra)
-            deccoef = robust.linefit(jd,dec)
-            # Get coordinate at the reference epoch
-            refra = np.polyval(racoef,refepoch.jd-jd0)
-            refdec = np.polyval(deccoef,refepoch.jd-jd0)
-            # Calculate new proper motion
-            pmra = racoef[0] * (3600*1e3)*365.2425      # convert slope from deg/day to mas/yr
-            pmdec = deccoef[0] * (3600*1e3)*365.2425
-            # update object cenra, cendec, cenpmra, cenpmdec
-            objtab['cenra'][i] += refra
-            objtab['cendec'][i] += refdec
-            objtab['cenpmra'][i] += pmra * cosdec  # multiply by cos(dec)
-            objtab['cenpmdec'][i] += pmdec 
-            
+
+        # Update the central coordinates and proper motions
+        print('Updating object coordinates and proper motions')
+        objtab = update_object(objtab,meastab,objindex,fitpm=fitpm)
 
         # Check for convergence
         count += 1
             
         import pdb; pdb.set_trace()
 
+
+    # Create magnitudes, corrected for exposure time
+    meastab = make_magnitudes(meastab,iminfo)
         
     # If there's filter information, then get average photometry
     # in each band for the objects
-
+    objtab = average_photometry(objtab,meastab,objindex)
+    
         
     return objtab,meastab
