@@ -254,7 +254,7 @@ class CCDData(CCD):
             if self.shape != value.shape:
                 raise ValueError('Shapes do not match')
             newim.data += value.data
-            newim.error = np.sqrt(newim.error**2 + value.error**2)
+            newim._error = np.sqrt(newim.error**2 + value.error**2)
             # combine masks, get the original by default
             if newim.mask is not None and value.mask is not None:
                 newim.mask = np.bitwise_or.reduce((newim.mask,value.mask))
@@ -282,7 +282,7 @@ class CCDData(CCD):
             if self.shape != value.shape:
                 raise ValueError('Shapes do not match')
             newim.data -= value.data
-            newim.error = np.sqrt(newim.error**2 + value.error**2)
+            newim._error = np.sqrt(newim.error**2 + value.error**2)
             # combine masks, get the original by default
             if newim.mask is not None and value.mask is not None:
                 newim.mask = np.bitwise_or.reduce((newim.mask,value.mask))
@@ -310,7 +310,7 @@ class CCDData(CCD):
             if self.shape != value.shape:
                 raise ValueError('Shapes do not match')
             newim.data *= value.data
-            newim.error *= value.data
+            newim._error *= value.data
             # combine masks, get the original by default
             if newim.mask is not None and value.mask is not None:
                 newim.mask = np.bitwise_or.reduce((newim.mask,value.mask))
@@ -318,7 +318,7 @@ class CCDData(CCD):
                 newim.mask = value.mask.copy()                        
         else:
             newim.data *= value
-            newim.error *= value            
+            newim._error *= value            
         return newim
 
     def __imul__(self, value):
@@ -326,10 +326,10 @@ class CCDData(CCD):
             if self.shape != value.shape:
                 raise ValueError('Shapes do not match')            
             self.data *= value.data
-            self.error *= value.data
+            self._error *= value.data
         else:
             self.data *= value
-            self.error *= value            
+            self._error *= value            
         return self
     
     def __rmul__(self, value):
@@ -341,7 +341,7 @@ class CCDData(CCD):
             if self.shape != value.shape:
                 raise ValueError('Shapes do not match')
             newim.data /= value.data
-            newim.error /= value.error
+            newim._error /= value.error
             # combine masks, get the original by default
             if newim.mask is not None and value.mask is not None:
                 newim.mask = np.bitwise_or.reduce((newim.mask,value.mask))
@@ -349,7 +349,7 @@ class CCDData(CCD):
                 newim.mask = value.mask.copy()
         else:
             newim.data /= value
-            newim.error /= value            
+            newim._error /= value            
         return newim
 
     def __itruediv__(self, value):
@@ -357,10 +357,10 @@ class CCDData(CCD):
             if self.shape != value.shape:
                 raise ValueError('Shapes do not match')            
             self.data /= value.data
-            self.error /= value.data
+            self._error /= value.data
         else:
             self.data /= value
-            self.error /= value            
+            self._error /= value            
         return self
       
     def __rtruediv__(self, value):
