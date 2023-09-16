@@ -44,7 +44,7 @@ def getgain(image):
     return gain
     
 def getrdnoise(image):
-    " Get the read noise from the header."""
+    """ Get the read noise from the header."""
 
     rdnoise = 0.0  # default
     
@@ -242,6 +242,130 @@ class CCDData(CCD):
         out += self.bbox.__repr__()
         return out
 
+    def __array__(self):
+        """ Return the main data array."""
+        return self.data
+
+    # Image arithmetic
+
+    def __add__(self, value):
+        newim = self.copy()
+        if isinstance(value,CCDData):
+            if self.shape != value.shape:
+                raise ValueError('Shapes do not match')
+            newim.data += value.data
+            newim.error = np.sqrt(newim.error**2 + value.error**2)
+            # combine masks, get the original by default
+            if newim.mask is not None and value.mask is not None:
+                newim.mask = np.bitwise_or.reduce((newim.mask,value.mask))
+            elif newim.mask is None and value.mask is not None:
+                newim.mask = value.mask.copy()
+        else:
+            newim.data += value
+        return newim
+        
+    def __iadd__(self, value):
+        if isinstance(value,CCDData):
+            if self.shape != value.shape:
+                raise ValueError('Shapes do not match')            
+            self.data += value.data
+        else:
+            self.data += value
+        return self
+        
+    def __radd__(self, value):
+        return self + value
+    
+    def __sub__(self, value):
+        newim = self.copy()
+        if isinstance(value,CCDData):
+            if self.shape != value.shape:
+                raise ValueError('Shapes do not match')
+            newim.data -= value.data
+            newim.error = np.sqrt(newim.error**2 + value.error**2)
+            # combine masks, get the original by default
+            if newim.mask is not None and value.mask is not None:
+                newim.mask = np.bitwise_or.reduce((newim.mask,value.mask))
+            elif newim.mask is None and value.mask is not None:
+                newim.mask = value.mask.copy()
+        else:
+            newim.data -= value
+        return newim
+
+    def __isub__(self, value):
+        if isinstance(value,CCDData):
+            if self.shape != value.shape:
+                raise ValueError('Shapes do not match')            
+            self.data -= value.data
+        else:
+            self.data -= value
+        return self
+         
+    def __rsub__(self, value):
+        return self - value 
+
+    def __mul__(self, value):
+        newim = self.copy()
+        if isinstance(value,CCDData):
+            if self.shape != value.shape:
+                raise ValueError('Shapes do not match')
+            newim.data *= value.data
+            newim.error *= value.data
+            # combine masks, get the original by default
+            if newim.mask is not None and value.mask is not None:
+                newim.mask = np.bitwise_or.reduce((newim.mask,value.mask))
+            elif newim.mask is None and value.mask is not None:
+                newim.mask = value.mask.copy()                        
+        else:
+            newim.data *= value
+            newim.error *= value            
+        return newim
+
+    def __imul__(self, value):
+        if isinstance(value,CCDData):
+            if self.shape != value.shape:
+                raise ValueError('Shapes do not match')            
+            self.data *= value.data
+            self.error *= value.data
+        else:
+            self.data *= value
+            self.error *= value            
+        return self
+    
+    def __rmul__(self, value):
+        return self * value
+               
+    def __truediv__(self, value):
+        newim = self.copy()
+        if isinstance(value,CCDData):
+            if self.shape != value.shape:
+                raise ValueError('Shapes do not match')
+            newim.data /= value.data
+            newim.error /= value.error
+            # combine masks, get the original by default
+            if newim.mask is not None and value.mask is not None:
+                newim.mask = np.bitwise_or.reduce((newim.mask,value.mask))
+            elif newim.mask is None and value.mask is not None:
+                newim.mask = value.mask.copy()
+        else:
+            newim.data /= value
+            newim.error /= value            
+        return newim
+
+    def __itruediv__(self, value):
+        if isinstance(value,CCDData):
+            if self.shape != value.shape:
+                raise ValueError('Shapes do not match')            
+            self.data /= value.data
+            self.error /= value.data
+        else:
+            self.data /= value
+            self.error /= value            
+        return self
+      
+    def __rtruediv__(self, value):
+        return self / value
+
     
     # for the string representation also print out the bbox values
         
@@ -251,6 +375,13 @@ class CCDData(CCD):
         if self.data.shape == ():
             raise TypeError('scalars cannot be sliced.')
 
+        # BoundingBox input, use its slices
+        if isinstance(item,BoundingBox):
+            item = item.slices
+        # Image input, use its bbox/slices
+        if isinstance(item,CCDData):
+            item = item.bbox.slices
+            
         # Single slice or integer
         #   make sure we have values for each dimension        
         if self.ndim==2 and type(item) is not tuple:
