@@ -366,6 +366,69 @@ class CCDData(CCD):
     def __rtruediv__(self, value):
         return self / value
 
+    # Comparison operations
+    #  These will all return numpy boolean arrays
+    
+    def __lt__(self,value):
+        if isinstance(value,CCDData):
+            if self.shape != value.shape:
+                raise ValueError('Shapes do not match')            
+            return self.data < value.data
+        elif isinstance(value,np.ndarray):
+            if self.shape != value.shape:
+                raise ValueError('Shapes do not match')            
+            return self.data < value
+        else:
+            return self.data < value
+
+    def __le__(self,value):
+        if isinstance(value,CCDData):
+            if self.shape != value.shape:
+                raise ValueError('Shapes do not match')            
+            return self.data <= value.data
+        elif isinstance(value,np.ndarray):
+            if self.shape != value.shape:
+                raise ValueError('Shapes do not match')            
+            return self.data <= value
+        else:
+            return self.data <= value    
+
+    def __gt__(self,value):
+        if isinstance(value,CCDData):
+            if self.shape != value.shape:
+                raise ValueError('Shapes do not match')            
+            return self.data > value.data
+        elif isinstance(value,np.ndarray):
+            if self.shape != value.shape:
+                raise ValueError('Shapes do not match')            
+            return self.data > value
+        else:
+            return self.data > value    
+
+    def __ge__(self,value):
+        if isinstance(value,CCDData):
+            if self.shape != value.shape:
+                raise ValueError('Shapes do not match')            
+            return self.data <= value.data
+        elif isinstance(value,np.ndarray):
+            if self.shape != value.shape:
+                raise ValueError('Shapes do not match')            
+            return self.data <= value
+        else:
+            return self.data <= value
+    
+    def __eq__(self,value):
+        if isinstance(value,CCDData):
+            if self.shape != value.shape:
+                raise ValueError('Shapes do not match')            
+            return self.data == value.data
+        elif isinstance(value,np.ndarray):
+            if self.shape != value.shape:
+                raise ValueError('Shapes do not match')            
+            return self.data == value
+        else:
+            return self.data == value
+    
     
     # for the string representation also print out the bbox values
         
