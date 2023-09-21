@@ -8,7 +8,7 @@ from setuptools import setup, find_packages
 pypiname = 'theprometheus'
 
 setup(name="prometheus",
-      version='1.0.19',
+      version='1.0.20',
       description='PSF Photometry Software',
       author='David Nidever',
       author_email='dnidever@montana.edu',
