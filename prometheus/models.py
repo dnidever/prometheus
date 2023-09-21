@@ -610,7 +610,7 @@ def gaussian2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
     y2 = np.tile(y,(osamp,osamp,1)) + np.tile(dx2,(nx,1,1)).T    
     
     # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
-    theta = np.deg2rad(pars[5])
+    theta = pars[5]
     cost2 = np.cos(theta) ** 2
     sint2 = np.sin(theta) ** 2
     sin2t = np.sin(2. * theta)
