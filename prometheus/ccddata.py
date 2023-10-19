@@ -924,6 +924,9 @@ class CCDData(CCD):
             unit = 'adu'
         if unit is None:
             unit = 'adu'
+
+        # Make sure the data is float
+        data = data.astype(float)
             
         # make the ccddata object
         image = CCDData(data,error=error,mask=mask,meta=head,
