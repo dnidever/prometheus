@@ -59,6 +59,28 @@ def getrdnoise(image):
                     break
     return rdnoise
 
+def mkbbox(data):
+    """ Make BoundingBox and x,y arrays for data."""
+
+    ndim = data.ndim
+    if ndim==0:
+        bbox = BoundingBox(0,0,0,0)
+        x = None
+        y = None         
+    elif ndim==1:
+        nx, = data.shape
+        bbox = BoundingBox(0,nx,0,0)
+        x = np.arange(bbox.xrange[0],bbox.xrange[-1])
+        y = None
+    elif ndim==2:
+        ny,nx = data.shape
+        bbox = BoundingBox(0,nx,0,ny)
+        x = np.arange(bbox.xrange[0],bbox.xrange[-1])
+        y = np.arange(bbox.yrange[0],bbox.yrange[-1])
+    else:
+        raise ValueError('3D CCDData not supported')
+    return bbox,x,y
+
 
 class CCDData(CCD):
     """
@@ -134,6 +156,9 @@ class CCDData(CCD):
 
         # NDData class has these input parameters
         # data, uncertainty=None, mask=None, wcs=None, meta=None, unit=None, copy=False
+
+        if data.ndim>2:
+            raise ValueError('3D CCDData not supported')
         
         # Pull out error from arguments
         if len(args)>0:
@@ -162,6 +187,11 @@ class CCDData(CCD):
         # Initialize with the parent...
         super().__init__(data, *args, mask=mask, copy=copy, unit=unit, **kwargs)
 
+        # Create initial header if none input
+        if self.header is None or len(self.header)==0:
+            self.header = fits.PrimaryHDU(self.data).header
+            # add unit, gain, rdnoise
+        
         # Do some checks on error, mask and sky
         if error is not None:
             if error.shape != data.shape:
@@ -199,27 +229,23 @@ class CCDData(CCD):
             if self._sky is not None:
                 self._sky = deepcopy(self._sky)
             self._skyfunc = deepcopy(self._skyfunc)
-            
-        ndim = self.data.ndim
-        if ndim==0:
-            if bbox is None: bbox=BoundingBox(0,0,0,0)
+
+        # Make Bounding Box
+        if bbox is None:
+            bbox,x,y = mkbbox(self.data)
+            self._bbox = bbox
+            self._x = x
+            self._y = y
+        else:  # bbox input
             self._bbox = bbox
             self._x = None
-            self._y = None         
-        elif ndim==1:
-            nx, = self.data.shape
-            if bbox is None: bbox=BoundingBox(0,nx,0,0)
-            self._bbox = bbox
-            self._x = np.arange(bbox.xrange[0],bbox.xrange[-1])
             self._y = None
-        elif ndim==2:
-            ny,nx = self.data.shape
-            if bbox is None: bbox=BoundingBox(0,nx,0,ny)
-            self._bbox = bbox
-            self._x = np.arange(bbox.xrange[0],bbox.xrange[-1])
-            self._y = np.arange(bbox.yrange[0],bbox.yrange[-1])
-        else:
-            raise ValueError('3D CCDData not supported')
+            if self.data.ndim==1:
+                self._x = np.arange(bbox.xrange[0],bbox.xrange[-1])
+            else:
+                self._x = np.arange(bbox.xrange[0],bbox.xrange[-1])
+                self._y = np.arange(bbox.yrange[0],bbox.yrange[-1])
+
         
         #self.native()
 
@@ -640,7 +666,51 @@ class CCDData(CCD):
             return dln.mad(self.data[~self.mask])
         else:        
             return dln.mad(self.data)
-    
+
+    def bin(self,binsize):
+        """ Bin the data in place."""
+        if type(binsize) is int:
+            binsize = [binsize,binsize]
+        nbinpix = binsize[0]*binsize[1]
+        self.data = dln.rebin(self.data,binsize=binsize)
+        if self._error is not None:
+            self._error = np.sqrt(dln.rebin(self._error**2,binsize=binsize))
+        newmask = dln.rebin(self.mask.astype(int),binsize=binsize,tot=True)
+        newmask = (newmask > 0.5*nbinpix)
+        self.mask = newmask
+        if self._sky is not None:
+            self._sky = dln.rebin(self._sky,binsize=binsize)
+        # Update header
+        self.header['NAXIS1'] = self.data.shape[1]
+        self.header['NAXIS2'] = self.data.shape[0]
+        self.header['XBIN'] = binsize[0]
+        self.header['YBIN'] = binsize[1]
+        # Update BoundingBox
+        bbox,x,y = mkbbox(self.data)
+        self._bbox = bbox
+        self._x = x
+        self._y = y
+        # Fix wcs
+        #  crval  keep
+        #  crpix  scale by binsize
+        #  cd/cdelt  scale by binsize
+        #  distortion terms,  scale by binsize with the appropriate power
+        if self.wcs.wcs.ctype[0] != '':
+            self.wcs.wcs.crpix /= np.array(binsize)
+            if hasattr(self.wcs.wcs,'cd'):
+                self.wcs.wcs.cd[:,0] *= binsize[0]
+                self.wcs.wcs.cd[:,1] *= binsize[1]     
+            else:
+                #self.wcs.wcs.pc[:,0] *= binsize[0]
+                #self.wcs.wcs.pc[:,1] *= binsize[1]                     
+                self.wcs.wcs.cdelt *= np.array(binsize)
+            # something still isn't quite right
+        self.wcs.array_shape = self.shape
+        
+    def resetbbox(self):
+        """ Forgot the original coordinates in BoundingBox."""
+        self.bbox.reset()
+        
     def isnative(self,data):
         """ Check if data has native byte order."""
         sys_is_le = sys.byteorder == 'little'
@@ -965,3 +1035,10 @@ class BoundingBox(BBox):
         """ Return the slices."""
         return (slice(self.iymin,self.iymax,None),
                 slice(self.ixmin,self.ixmax,None))
+
+    def reset(self):
+        """ Forget the original coordinates."""
+        self.ixmax -= self.ixmin
+        self.iymax -= self.iymin
+        self.ixmin = 0
+        self.iymin = 0

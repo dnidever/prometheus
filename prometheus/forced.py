@@ -686,6 +686,8 @@ def check_convergence(objtab,meastab,objindex,last_obj,fitpm=True):
 
     """
 
+    flag = 0
+    
     # Object loop
     nobj = len(objtab)
     for i in range(nobj):
@@ -708,6 +710,7 @@ def check_convergence(objtab,meastab,objindex,last_obj,fitpm=True):
             
     import pdb; pdb.set_trace()
 
+    return objtab,meastab,flag
 
 def forced(files,mastertab=None,fitpm=True,refepoch=None,refwcs=None,verbose=True):
     """
@@ -827,6 +830,7 @@ def forced(files,mastertab=None,fitpm=True,refepoch=None,refwcs=None,verbose=Tru
         else:
             recenter = True
 
+        # Save object information
         ldt = [('cenra',float),('cendec',float),('cenpmra',float),
                ('cenpmdec',float),('chisq',float)]
         last_obj = np.zeros(len(objtab),dtype=np.dtype(ldt))
@@ -882,6 +886,8 @@ def forced(files,mastertab=None,fitpm=True,refepoch=None,refwcs=None,verbose=Tru
                 if hasattr(resid,'_sky'):
                     resid._sky = None  # force it to be recomputed
                 resid.data -= resid.sky
+
+            # only fit measurements that have not converged yet
                 
             # Fit the fluxes while holding the positions fixed            
             out,resid = solve(psf,resid,meastab1,recenter=recenter,verbose=verbose)
@@ -912,7 +918,8 @@ def forced(files,mastertab=None,fitpm=True,refepoch=None,refwcs=None,verbose=Tru
             meastab['dx'][msbeg:msend] = out['dx']
             meastab['dy'][msbeg:msend] = out['dy']
             meastab['dra'][msbeg:msend] = out['dra']
-            meastab['ddec'][msbeg:msend] = out['ddec']            
+            meastab['ddec'][msbeg:msend] = out['ddec']
+            meastab['chisq'][msbeg:msend] = out['chisq']            
             
             # allframe operates on the residual map, with the best-fit model subtracted
             
