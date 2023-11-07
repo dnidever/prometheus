@@ -151,6 +151,7 @@ if __name__ == "__main__":
             if os.path.exists(outfile): os.remove(outfile)
             hdulist = fits.HDUList()
             hdulist.append(fits.table_to_hdu(out))  # table
+            hdulist[1].header['EXTNAME'] = 'SOURCE TABLE'
             hdulist[0].header['COMMENT']='Prometheus version '+str(prometheus.__version__)
             hdulist[0].header['COMMENT']='Date '+datetime.now().ctime()
             hdulist[0].header['COMMENT']='File '+f
@@ -160,11 +161,12 @@ if __name__ == "__main__":
             hdulist[0].header['COMMENT']='HDU#3 : Sky model image'
             hdulist[0].header['COMMENT']='HDU#4 : PSF model'
             hdulist.append(model.tohdu())  # model
-            hdulist[1].header['COMMENT'] = 'Prometheus model image'
+            hdulist[2].header['EXTNAME'] = 'MODEL IMAGE'
+            hdulist[2].header['COMMENT'] = 'Prometheus model image'
             hdulist.append(sky.tohdu())    # sky
-            hdulist[2].header['COMMENT'] = 'Prometheus sky image'
-            hdulist.append(psf.tohdu())    # psf
-            hdulist[3].header['COMMENT'] = 'Prometheus PSF model'
+            hdulist[3].header['EXTNAME'] = 'SKY MODEL IMAGE'            
+            hdulist[3].header['COMMENT'] = 'Prometheus sky image'
+            hdulist += psf.tohdu()    # psf, returns a list
             hdulist.writeto(outfile,overwrite=True)
             hdulist.close()
 

@@ -3955,8 +3955,10 @@ class PSFGaussian(PSFBase):
         hdu = psf.tohdu()
 
         """
-        hdulist = fits.HDUList()
+        hdulist = []   # HDUList always makes the first HDU a PrimaryHDU which can problems
         hdulist.append(fits.ImageHDU(self.params))
+        hdulist[0].header['EXTNAME'] = 'PSF MODEL'      
+        hdulist[0].header['COMMENT'] = 'Prometheus PSF model'
         hdulist[0].header['PSFTYPE'] = 'Gaussian'
         hdulist[0].header['BINNED'] = self.binned
         hdulist[0].header['NPIX'] = self.npix
@@ -3964,6 +3966,8 @@ class PSFGaussian(PSFBase):
         if self.haslookup:
             luhdu = self.lookup.tohdu()
             hdulist.append(luhdu)
+            hdulist[1].header['EXTNAME'] = 'PSF MODEL LOOKUP'
+            hdulist[1].header['COMMENT'] = 'Prometheus PSF model lookup table'
             hdulist[1].header['LOOKUP'] = 1
         return hdulist
     
