@@ -1,6 +1,7 @@
 import os
 import errno
 import numpy as np
+import time
 from dlnpyutils import utils as dln, robust, coords
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
@@ -224,7 +225,7 @@ def initialize_catalogs(iminfo,mastertab):
     # Initialize the measurement table
     dt = [('objid',int),('objindex',int),('imindex',int),('jd',float),
           ('ra',float),('dec',float),('x',float),('y',float),('amp',float),
-          ('flux',float),('fluxerr',float),('damp',float),('dx',float),
+          ('amp_error',float),('flux',float),('fluxerr',float),('damp',float),('dx',float),
           ('dxerr',float),('dy',float),('dyerr',float),('dra',float),
           ('ddec',float),('sky',float),('chisq',float),('npix',int),('converged',bool)]
     nmeas = np.sum([f['nmeas'] for f in iminfo])
@@ -286,9 +287,11 @@ def solveone(psf,im,cat,method='qr',bounds=None,fitradius=None,
     -------
     newamp : float
        New amplitude.
-    dx : float
+    newamp_error : float
+       Uncertainty in newamp.
+    deltax : float
        The offset in x coordinate.
-    dy : float
+    deltay : float
        The offset in y coordinate.
     chisq : float
        Chi-squared of the fit.
@@ -298,7 +301,7 @@ def solveone(psf,im,cat,method='qr',bounds=None,fitradius=None,
     Example
     -------
     
-    newamp,dx,dy,chisq,npix = solveone(psf,im,pars)
+    newamp,newamp_error,deltax,deltay,chisq,npix = solveone(psf,im,pars)
 
     """
     
@@ -401,21 +404,33 @@ def solveone(psf,im,cat,method='qr',bounds=None,fitradius=None,
     
     # Output values
     newamp = np.maximum(newpar[0], 0)  # amp cannot be negative
-    dx = newpar[1]-initpar[1]
-    dy = newpar[2]-initpar[2]
+    deltax = newpar[1]-initpar[1]
+    deltay = newpar[2]-initpar[2]
 
     # Model with only the new flux
     newm = psf.model(xdata,*[newamp,initpar[1],initpar[2],0.0])
     newdy = flux.ravel()-newm.ravel()
     chisq = np.sum(newdy**2 * wt.ravel())/len(newdy)
     npix = len(newdy)
-
+    
+    # Calculate uncertainties
+    dy = flux.ravel()-newm.ravel()    
+    if recenter==False:
+        jac = np.atleast_2d(newm.ravel()/newamp).T  # jacobian of the amplitude is just the model without the amp
+        cov = lsq.jac_covariance(jac,dy,wt.ravel())
+        perror = np.sqrt(np.diag(cov))
+        newamp_error = perror[0]
+    else:
+        cov = lsq.jac_covariance(jac,dy,wt.ravel())
+        perror = np.sqrt(np.diag(cov))
+        newamp_error = perror[0]
+    
     #import pdb; pdb.set_trace()
     
     #if recenter:
     #    import pdb; pdb.set_trace()
     
-    return newamp,dx,dy,chisq,npix
+    return newamp,newamp_error,deltax,deltay,chisq,npix
 
 
 def solve(psf,resid,meastab,fitradius=None,recenter=True,verbose=False):
@@ -472,12 +487,11 @@ def solve(psf,resid,meastab,fitradius=None,recenter=True,verbose=False):
                 _ = psf.add(resid.data,meastab[i:i+1],nocopy=True)
 
             # Solve single flux
-            newamp,dx,dy,chisq,npix = solveone(psf,resid,meastab[i:i+1],fitradius=fitradius,recenter=recenter)
-
-            # the dx/dy numbers are CRAZY LARGE!!!
-        
+            newamp,newamp_error,dx,dy,chisq,npix = solveone(psf,resid,meastab[i:i+1],fitradius=fitradius,recenter=recenter)
+            
             # Save the results
             out['amp'][i] = newamp
+            out['amp_error'][i] = newamp_error            
             out['dx'][i] = dx
             out['dy'][i] = dy
             out['chisq'][i] = chisq
@@ -604,7 +618,7 @@ def make_magnitudes(meastab,iminfo,zeropoint=25.0):
 
     # Add the new "mag" column
     meastab['mag'] = 0.0
-    meastab['mag_error'] = 0.0    
+    meastab['magerr'] = 0.0    
     
     # Loop over the images
     nimages = len(iminfo)
@@ -614,11 +628,11 @@ def make_magnitudes(meastab,iminfo,zeropoint=25.0):
         msend = msbeg + iminfo[i]['nmeas']
         flux = meastab[msbeg:msend]['flux']
         mag = -2.5*np.log10(np.maximum(flux,1e-10))+zeropoint
-        mag = +2.5*np.log10(exptime)
-        flux_error = meastab[msbeg:msend]['flux_error']
+        mag += 2.5*np.log10(exptime)
+        flux_error = meastab[msbeg:msend]['fluxerr']
         mag_error = (2.5/np.log(10))*(flux_error/flux)
-        meastab[msbeg:msend]['mag'] = mag
-        meastab[msbeg:msend]['mag_error'] = mag_error        
+        meastab['mag'][msbeg:msend] = mag
+        meastab['magerr'][msbeg:msend] = mag_error        
 
     return meastab
 
@@ -708,14 +722,15 @@ def average_photometry(objtab,meastab,objindex,iminfo):
 
     # Get unique filters
     imfilters = [f['filter'] for f in iminfo]
+    imfilters = ['_'.join(f.split()) for f in imfilters]  # replace any spaces with underscores
     ufilters = np.unique(imfilters)
     nufilt = len(ufilters)
     
     # Add average photometry columns to the object table
     for f in ufilters:
-        objtab['mag_'+f] = np.nan
-        objtab['mag_error_'+f] = np.nan        
-        objtab['ndet_'+f] = 0
+        objtab[f+'mag'] = np.nan
+        objtab[f+'magerr'] = np.nan        
+        objtab['ndet'+f] = 0
 
     # Image loop
     nobj = len(objtab)
@@ -732,24 +747,24 @@ def average_photometry(objtab,meastab,objindex,iminfo):
         meas1 = meastab[msbeg:msend]
         # Add up the flux for this filter for all coverage objects
         #   meastab has "objid" which we can use as an index into objtab and totalwt/totalfluxwt/ndet
-        totalwt[meas1['objid']-1,ufiltind] += 1.0/meas1['mag_error']**2
-        totalfluxwt[meas1['objid']-1,ufiltind] += 2.5118864**meas1['mag'] * (1.0/meas1['mag_error']**2)
+        totalwt[meas1['objid']-1,ufiltind] += 1.0/meas1['magerr']**2
+        totalfluxwt[meas1['objid']-1,ufiltind] += 2.5118864**meas1['mag'] * (1.0/meas1['magerr']**2)
         ndet[meas1['objid']-1,ufiltind] += 1
 
     # Now average the photometry in each unique filter
     for i,f in enumerate(ufilters):
         ind, = np.where(ndet[:,i] > 0)
-        objtab['ndet_'+f] = ndet[:,i]
+        objtab['ndet'+f] = ndet[:,i]
         if len(ind)>0:
             newflux = totalfluxwt[ind,i]/totalwt[ind,i]
             newmag = 2.5*np.log10(newflux) 
             newerr = np.sqrt(1.0/totalwt[ind,i])
-            objtab['mag_'+f][ind] = newmag
-            objtab['mag_error_'+f][ind] = newerr
+            objtab[f+'mag'][ind] = newmag
+            objtab[f+'magerr'][ind] = newerr
 
     return objtab
 
-def check_convergence(objtab,meastab,objindex,last_obj,fitpm=True):
+def check_convergence(objtab,meastab,objindex,last_obj,niter,fitpm=True):
     """
     Check for convergence of individual stars or all stars.
 
@@ -764,6 +779,8 @@ def check_convergence(objtab,meastab,objindex,last_obj,fitpm=True):
        List of measurement indices for each object.
     last_obj : table
        Object values from the last iteration.
+    niter : int
+       Iteration number.
     fitpm : boolean, optional
        Fit proper motions as well as central positions.
          Default is True.
@@ -785,6 +802,8 @@ def check_convergence(objtab,meastab,objindex,last_obj,fitpm=True):
 
     """
 
+    orig_converged = objtab['converged']
+    
     # Check of object cenra/cendec/cenpmra/cenpmdec changed
     #  or the measurement dx/dy values
     dra = objtab['cenra']-last_obj['cenra']
@@ -805,6 +824,11 @@ def check_convergence(objtab,meastab,objindex,last_obj,fitpm=True):
     #& (np.abs(dchisq)<0.001))
     
     objtab['converged'] = converged
+
+    # Newly converged, at iteration
+    new_converged = (orig_converged==False) & (converged==True)
+    objtab['niter'][new_converged] = niter
+    
         
     ## Object loop
     #nobj = len(objtab)
@@ -866,6 +890,8 @@ def forced(files,mastertab=None,fitpm=True,refepoch=None,maxiter=50,verbose=True
 
     """
 
+    t0 = time.time()
+    
     # fit proper motions as well
     # don't load all the data at once, only what you need
     #   maybe use memory maps
@@ -1053,6 +1079,8 @@ def forced(files,mastertab=None,fitpm=True,refepoch=None,maxiter=50,verbose=True
             # Stuff the information back in
             meastab['damp'][msbeg:msend] = out['amp']-meastab['amp'][msbeg:msend]
             meastab['amp'][msbeg:msend] = out['amp']
+            meastab['flux'][msbeg:msend] = out['amp']*psf.flux()
+            meastab['fluxerr'][msbeg:msend] = out['amp_error']*psf.flux()  
             meastab['ra'][msbeg:msend] = out['ra']
             meastab['dec'][msbeg:msend] = out['dec']
             meastab['dx'][msbeg:msend] = out['dx']
@@ -1107,7 +1135,7 @@ def forced(files,mastertab=None,fitpm=True,refepoch=None,maxiter=50,verbose=True
         # Check for convergence
         #   individual stars can converge
         if count > 0:
-            objtab,meastab = check_convergence(objtab,meastab,objindex,last_obj,fitpm=fitpm)
+            objtab,meastab = check_convergence(objtab,meastab,objindex,last_obj,count+1,fitpm=fitpm)
 
         nconverged = np.sum(objtab['converged'])
         print('Nconverged = {:d}'.format(nconverged))
@@ -1127,14 +1155,16 @@ def forced(files,mastertab=None,fitpm=True,refepoch=None,maxiter=50,verbose=True
             
         #import pdb; pdb.set_trace()
 
-
     # Create magnitudes, corrected for exposure time
     meastab = make_magnitudes(meastab,iminfo)
         
     # If there's filter information, then get average photometry
     # in each band for the objects
-    objtab = average_photometry(objtab,meastab,objindex)
+    objtab = average_photometry(objtab,meastab,objindex,iminfo)
 
+    dt = time.time()-t0
+    print('dt = {:.1f} sec'.format(dt))
+    
     import pdb; pdb.set_trace()
         
     return objtab,meastab
