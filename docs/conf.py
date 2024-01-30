@@ -31,8 +31,8 @@ import datetime
 from importlib import import_module
 
 try:
-    #from sphinx_astropy.conf.v1 import *  # noqa
-    from sphinx_astropy.conf import *
+    from sphinx_astropy.conf.v1 import *  # noqa
+    #from sphinx_astropy.conf import *
 except ImportError:
     print('ERROR: the documentation requires the sphinx-astropy package to be installed')
     sys.exit(1)

@@ -1,7 +1,0 @@
-numpy
-matplotlib
-astropy-helpers==4.0
-astropy
-scipy
-sphinx
-sphinx_astropy
