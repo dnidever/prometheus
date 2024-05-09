@@ -1132,6 +1132,8 @@ def forced(files,mastertab=None,fitpm=True,refepoch=None,maxiter=50,verbose=True
         objtab1 = objtab.copy()
         objtab = update_object(objtab,meastab,objindex,refepoch,fitpm=fitpm)
 
+        # ONLY FIT PROPER MOTION EVERY FEW ITERATIONS!!
+        
         # Check for convergence
         #   individual stars can converge
         if count > 0:
