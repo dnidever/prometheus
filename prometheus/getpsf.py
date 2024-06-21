@@ -196,9 +196,10 @@ def mkempirical(cube,order=0,coords=None,shape=None,rect=False,lookup=False):
         for i in range(ny):
             for j in range(nx):
                 data1 = cube[i,j,:]
-                # maybe use a small maxiter
-                pars1,perror1 = utils.poly2dfit(relx,rely,data1)
-                pars[i,j,:] = pars1
+                if np.sum(np.abs(data1)) != 0:
+                    # maybe use a small maxiter
+                    pars1,perror1 = utils.poly2dfit(relx,rely,data1)
+                    pars[i,j,:] = pars1
         # Make sure it goes to zero at large radius
         if rect:
             fpars = []
