@@ -39,7 +39,7 @@ def getgain(image):
             for f in ['gain','egain','gaina']:
                 hgain = image.meta.get(f)
                 if hgain is not None:
-                    gain = hgain
+                    gain = float(hgain)
                     break
     return gain
     
@@ -55,7 +55,7 @@ def getrdnoise(image):
             for f in ['rdnoise','readnois','enoise','rdnoisea']:
                 hrdnoise = image.meta.get(f)
                 if hrdnoise is not None:
-                    rdnoise = hrdnoise
+                    rdnoise = float(hrdnoise)
                     break
     return rdnoise
 
@@ -577,7 +577,7 @@ class CCDData(CCD):
         """ Return the uncertainty."""
         # if error not input
         # estimate error from image plus gain
-        if self._error is None:
+        if hasattr(self,'_error') is False or self._error is None:
             self._error = poissonnoise(self.data,self.gain,self.rdnoise)
         return self._error
     
