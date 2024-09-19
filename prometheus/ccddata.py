@@ -667,24 +667,42 @@ class CCDData(CCD):
         else:        
             return dln.mad(self.data)
 
-    def bin(self,binsize):
+    def bin(self,binsize,tot=False):
         """ Bin the data in place."""
         if type(binsize) is int:
             binsize = [binsize,binsize]
         nbinpix = binsize[0]*binsize[1]
-        self.data = dln.rebin(self.data,binsize=binsize)
+        self.data = dln.rebin(self.data,binsize=binsize,tot=tot)
         if self._error is not None:
-            self._error = np.sqrt(dln.rebin(self._error**2,binsize=binsize))
-        newmask = dln.rebin(self.mask.astype(int),binsize=binsize,tot=True)
-        newmask = (newmask > 0.5*nbinpix)
-        self.mask = newmask
+            self._error = np.sqrt(dln.rebin(self._error**2,binsize=binsize,tot=tot))
+        if self.mask is not None:
+            newmask = dln.rebin(self.mask.astype(int),binsize=binsize,tot=True)
+            newmask = (newmask > 0.5*nbinpix)
+            self.mask = newmask
         if self._sky is not None:
-            self._sky = dln.rebin(self._sky,binsize=binsize)
+            self._sky = dln.rebin(self._sky,binsize=binsize,tot=tot)
         # Update header
         self.header['NAXIS1'] = self.data.shape[1]
         self.header['NAXIS2'] = self.data.shape[0]
         self.header['XBIN'] = binsize[0]
         self.header['YBIN'] = binsize[1]
+        if 'CRPIX1' in self.header:
+            self.header['CRPIX1'] /= binsize[0]
+        if 'CRPIX2' in self.header:
+            self.header['CRPIX2'] /= binsize[1]
+        if 'CDELT1' in self.header:
+            self.header['CDELT1'] *= binsize[0]
+        if 'CDELT2' in self.header:
+            self.header['CDELT2'] *= binsize[1]
+        if 'CD1_1' in self.header:
+            self.header['CD1_1'] *= binsize[0]
+        if 'CD1_2' in self.header:
+            self.header['CD1_2'] *= binsize[1]
+        if 'CD2_1' in self.header:
+            self.header['CD2_1'] *= binsize[0]
+        if 'CD2_2' in self.header:
+            self.header['CD2_2'] *= binsize[1]
+            
         # Update BoundingBox
         bbox,x,y = mkbbox(self.data)
         self._bbox = bbox
@@ -695,17 +713,18 @@ class CCDData(CCD):
         #  crpix  scale by binsize
         #  cd/cdelt  scale by binsize
         #  distortion terms,  scale by binsize with the appropriate power
-        if self.wcs.wcs.ctype[0] != '':
-            self.wcs.wcs.crpix /= np.array(binsize)
-            if hasattr(self.wcs.wcs,'cd'):
-                self.wcs.wcs.cd[:,0] *= binsize[0]
-                self.wcs.wcs.cd[:,1] *= binsize[1]     
-            else:
-                #self.wcs.wcs.pc[:,0] *= binsize[0]
-                #self.wcs.wcs.pc[:,1] *= binsize[1]                     
-                self.wcs.wcs.cdelt *= np.array(binsize)
+        if self.wcs is not None:
+            if self.wcs.wcs.ctype[0] != '':
+                self.wcs.wcs.crpix /= np.array(binsize)
+                if hasattr(self.wcs.wcs,'cd'):
+                    self.wcs.wcs.cd[:,0] *= binsize[0]
+                    self.wcs.wcs.cd[:,1] *= binsize[1]     
+                else:
+                    #self.wcs.wcs.pc[:,0] *= binsize[0]
+                    #self.wcs.wcs.pc[:,1] *= binsize[1]                     
+                    self.wcs.wcs.cdelt *= np.array(binsize)
             # something still isn't quite right
-        self.wcs.array_shape = self.shape
+            self.wcs.array_shape = self.shape
         
     def resetbbox(self):
         """ Forgot the original coordinates in BoundingBox."""

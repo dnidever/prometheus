@@ -26,9 +26,10 @@ except ImportError:
 
     
 # run PSF fitting on an image
-def run(image,psfname='gaussian',iterdet=0,ndetsigma=1.5,snrthresh=5,psfsubnei=False,psffitradius=None,
-        fitradius=None,npsfpix=51,binned=False,lookup=False,lorder=0,psftrim=None,recenter=True,
-        reject=False,apcorr=False,timestamp=False,verbose=False):
+def run(image,psfname='gaussian',detmethod='sep',iterdet=0,ndetsigma=1.5,snrthresh=5,
+        psfsubnei=False,psffitradius=None,fitradius=None,npsfpix=51,binned=False,
+        lookup=False,lorder=0,psftrim=None,recenter=True,reject=False,apcorr=False,
+        timestamp=False,verbose=False):
     """
     Run PSF photometry on an image.
 
@@ -39,6 +40,9 @@ def run(image,psfname='gaussian',iterdet=0,ndetsigma=1.5,snrthresh=5,psfsubnei=F
     psfname : string, optional
       The name of the PSF type to use.  The options are "gaussian", "moffat",
       "penny" and "gausspow".  Default is "gaussian".
+    detmethod : string, optional
+      Detection method.  The options are "sep", "dao" and "iraf".
+        Default is "sep".
     iterdet : boolean, optional
       Number of iterations to use for detection.  Default is iterdet=0, meaning
        detection is only performed once.
@@ -129,7 +133,8 @@ def run(image,psfname='gaussian',iterdet=0,ndetsigma=1.5,snrthresh=5,psfsubnei=F
         #-------------
         if verbose:
             print('Step 1: Detection')
-        objects = detection.detect(residim,nsigma=ndetsigma,verbose=verbose)
+        objects = detection.detect(residim,method=detmethod,
+                                   nsigma=ndetsigma,verbose=verbose)
         objects['ndetiter'] = niter+1
         if verbose:
             print(str(len(objects))+' objects detected')
