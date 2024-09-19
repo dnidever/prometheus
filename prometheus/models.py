@@ -4559,7 +4559,7 @@ class PSFEmpirical(PSFBase):
         hdu = psf.tohdu()
 
         """
-        hdu = fits.PrimaryHDU(self._data)
+        hdu = fits.ImageHDU(self._data)
         hdu.header['PSFTYPE'] = 'Empirical'
         hdu.header['NPIX'] = self.npix
         hdu.header['BINNED'] = self.binned
