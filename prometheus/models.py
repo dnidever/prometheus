@@ -3969,7 +3969,7 @@ class PSFGaussian(PSFBase):
             hdulist[1].header['EXTNAME'] = 'PSF MODEL LOOKUP'
             hdulist[1].header['COMMENT'] = 'Prometheus PSF model lookup table'
             hdulist[1].header['LOOKUP'] = 1
-        return hdulist
+        return fits.HDUList(hdulist)
     
     def write(self,filename,overwrite=True):
         """ Write a PSF to a file."""
@@ -4071,7 +4071,7 @@ class PSFMoffat(PSFBase):
         hdu = psf.tohdu()
 
         """
-        hdulist = fits.HDUList()
+        hdulist = []   # HDUList always makes the first HDU a PrimaryHDU which can problems
         hdulist.append(fits.ImageHDU(self.params))
         hdulist[0].header['PSFTYPE'] = 'Moffat'
         hdulist[0].header['BINNED'] = self.binned
@@ -4081,7 +4081,7 @@ class PSFMoffat(PSFBase):
             luhdu = self.lookup.tohdu()
             hdulist.append(luhdu)
             hdulist[1].header['LOOKUP'] = 1
-        return hdulist
+        return fits.HDUList(hdulist)
 
     def write(self,filename,overwrite=True):
         """ Write a PSF to a file."""
@@ -4183,7 +4183,7 @@ class PSFPenny(PSFBase):
         hdu = psf.tohdu()
 
         """
-        hdulist = fits.HDUList()
+        hdulist = []   # HDUList always makes the first HDU a PrimaryHDU which can problems
         hdulist.append(fits.ImageHDU(self.params))
         hdulist[0].header['PSFTYPE'] = 'Penny'
         hdulist[0].header['BINNED'] = self.binned
@@ -4193,7 +4193,7 @@ class PSFPenny(PSFBase):
             luhdu = self.lookup.tohdu()
             hdulist.append(luhdu)
             hdulist[1].header['LOOKUP'] = 1
-        return hdulist
+        return fits.HDUList(hdulist)
 
     def write(self,filename,overwrite=True):
         """ Write a PSF to a file."""
@@ -4293,7 +4293,7 @@ class PSFGausspow(PSFBase):
         hdu = psf.tohdu()
 
         """
-        hdulist = fits.HDUList()
+        hdulist = []   # HDUList always makes the first HDU a PrimaryHDU which can problems
         hdulist.append(fits.ImageHDU(self.params))
         hdulist[0].header['PSFTYPE'] = 'Gausspow'
         hdulist[0].header['BINNED'] = self.binned
@@ -4303,7 +4303,7 @@ class PSFGausspow(PSFBase):
             luhdu = self.lookup.tohdu()
             hdulist.append(luhdu)
             hdulist[1].header['LOOKUP'] = 1
-        return hdulist
+        return fits.HDUList(hdulist)
     
     def write(self,filename,overwrite=True):
         """ Write a PSF to a file."""
@@ -4413,7 +4413,7 @@ class Sersic(PSFBase):
         hdu = psf.tohdu()
 
         """
-        hdu = fits.PrimaryHDU(self.params)
+        hdu = fits.ImageHDU(self.params)
         hdu.header['MTYPE'] = 'Sersic'
         hdu.header['BINNED'] = self.binned
         hdu.header['NPIX'] = self.npix
@@ -4559,7 +4559,7 @@ class PSFEmpirical(PSFBase):
         hdu = psf.tohdu()
 
         """
-        hdu = fits.PrimaryHDU(self._data)
+        hdu = fits.ImageHDU(self._data)
         hdu.header['PSFTYPE'] = 'Empirical'
         hdu.header['NPIX'] = self.npix
         hdu.header['BINNED'] = self.binned
