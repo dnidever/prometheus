@@ -433,3 +433,116 @@ def numba_morphology(im,xpeak,ypeak,thresh,bmax):
         mout[i,7:] = out
 
     return mout
+
+@njit
+def gaussval(x,y,xc,yc,asemi,bsemi,cxx,cyy,cxy):
+    """ Evaluate an elliptical unit-amplitude Gaussian at a point."""
+    u = (x-xc)
+    v = (y-yc)
+    # amp = 1/(asemi*bsemi*2*np.pi)
+    val = np.exp(-0.5*(cxx*u**2 + cyy*v**2 + cxy*u*v))
+    return val
+
+#def gaussfit(im,xc,yc,asemi,bsemi,theta,bbx0,bbx1,bby0,bby1,thresh=1e-3):
+def gaussfit(im,tab,thresh=1e-3):
+    """ Fit elliptical Gaussian profile to a source. """
+
+    gflux,apflux,npix = numba_gaussfit(im,tab['mnx'],tab['mny'],tab['asemi'],
+                                       tab['bsemi'],tab['theta'],tab['bbx0'].astype(float),
+                                       tab['bbx1'].astype(float),tab['bby0'].astype(float),
+                                       tab['bby1'].astype(float),thresh)
+
+    return gflux,apflux,npix
+    
+@njit
+def numba_gaussfit(im,xc,yc,asemi,bsemi,theta,bbx0,bbx1,bby0,bby1,thresh):
+    """ Fit elliptical Gaussian profile to a source. """
+
+    nsource = len(xc)
+    gflux = np.zeros(nsource,float)
+    apflux = np.zeros(nsource,float)
+    npix = np.zeros(nsource,dtype=np.int64)
+    for i in range(nsource):
+        if asemi[i]>0 and bsemi[i]>0:
+            gflux1,apflux1,npix1 = numba_gfit(im,xc[i],yc[i],asemi[i],bsemi[i],theta[i],
+                                              bbx0[i],bbx1[i],bby0[i],bby1[i],thresh)
+            gflux[i] = gflux1
+            apflux[i] = apflux1
+            npix[i] = npix1
+        
+    return gflux,apflux,npix
+    
+@njit
+def numba_gfit(im,xc,yc,asemi,bsemi,theta,bbx0,bbx1,bby0,bby1,thresh):
+    """ Fit elliptical Gaussian profile to a source. """
+
+    ny,nx = im.shape
+    nyb = int(bby1-bby0+1)
+    nxb = int(bbx1-bbx0+1)
+
+    if bsemi==0:
+        bsemi = 0.1
+    if asemi==0:
+        asemi = 0.1
+        
+    # Calculate sigx, sigy, cxx, cyy, cxy
+    thetarad = np.deg2rad(theta)
+    sintheta = np.sin(thetarad)
+    costheta = np.cos(thetarad)
+    sintheta2 = sintheta**2
+    costheta2 = costheta**2
+    asemi2 = asemi**2
+    bsemi2 = bsemi**2
+    cxx = costheta2/asemi2 + sintheta2/bsemi2
+    cyy = sintheta2/asemi2 + costheta2/bsemi2
+    cxy = 2*costheta*sintheta*(1/asemi2-1/bsemi2)
+    
+    # Simple linear regression
+    # https://en.wikipedia.org/wiki/Simple_linear_regression
+    # y = alpha + beta*x
+    # beta = Sum( (xi-xmn)*(yi-ymn) ) / Sum( (xi-xmn)**2 )
+    # alpha = ymn - beta*xmn
+    #
+    # without the intercept term
+    # y = beta*x
+    # beta = Sum(xi*yi ) / Sum(xi**2)
+
+    #model = np.zeros((nyb,nxb),float)
+
+    # thresh has to change with the size of the source
+    # if the source is larger then the value of the normalized
+    # Gaussian will be smaller
+    # We are now using a unit-amplitude Gaussian instead
+    
+    apflux = 0.0    # elliptical aperture flux
+    sumxy = 0.0
+    sumx2 = 0.0
+    npix = 0
+    for i in range(nxb):
+        x = i+int(bbx0)
+        for j in range(nyb):
+            y = j+int(bby0)
+            imval = im[y,x]
+            # Unit amplitude Gaussian value
+            gval = gaussval(x,y,xc,yc,asemi,bsemi,cxx,cyy,cxy)
+            #model[j,i] = gval
+            if gval>thresh:
+                npix += 1
+                # Add to aperture flux
+                if imval>0:
+                    apflux += imval
+                # Calculate fit
+                # x is the model, y is the data
+                # beta is the flux amplitude
+                sumxy += gval*imval
+                sumx2 += gval**2
+
+    if sumx2 <= 0:
+        sumx2 = 1
+    beta = sumxy / sumx2
+
+    # Now multiply by the volume of the Gaussian
+    amp = asemi*bsemi*2*np.pi
+    gflux = amp * beta
+    
+    return gflux,apflux,npix
