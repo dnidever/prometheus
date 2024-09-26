@@ -404,7 +404,7 @@ def morpho(im,xp,yp,x0,x1,y0,y1,thresh):
     # Ellipse parameters
     asemi = np.sqrt( 0.5*(sigx2+sigy2) + np.sqrt(((sigx2-sigy2)*0.5)**2 + sigxy**2 ) )
     bsemi = np.sqrt( 0.5*(sigx2+sigy2) - np.sqrt(((sigx2-sigy2)*0.5)**2 + sigxy**2 ) )
-    theta = np.rad2deg(0.5*np.arctan2(2*sigxy,sigx2-sigy2))
+    theta = 0.5*np.arctan2(2*sigxy,sigx2-sigy2)  # in radians
 
     return flux,mnx,mny,sigx,sigy,sigxy,fwhm,asemi,bsemi,theta
 
@@ -462,9 +462,9 @@ def numba_morphology(im,xpeak,ypeak,thresh,bmax):
 @njit
 def gauss_abt2cxy(asemi,bsemi,theta):
     """ Convert asemi/bsemi/theta to cxx/cyy/cxy. """
-    thetarad = np.deg2rad(theta)
-    sintheta = np.sin(thetarad)
-    costheta = np.cos(thetarad)
+    # theta in radians
+    sintheta = np.sin(theta)
+    costheta = np.cos(theta)
     sintheta2 = sintheta**2
     costheta2 = costheta**2
     asemi2 = asemi**2
@@ -474,10 +474,37 @@ def gauss_abt2cxy(asemi,bsemi,theta):
     cxy = 2*costheta*sintheta*(1/asemi2-1/bsemi2)
     return cxx,cyy,cxy
 
-#@njit
-def gauss_cxy2abt(asemi,bsemi,theta):
+@njit
+def gauss_cxy2abt(cxx,cyy,cxy):
     """ Convert asemi/bsemi/theta to cxx/cyy/cxy. """
-    pass
+
+    # a+c = 1/xstd2 + 1/ystd2
+    # b = sin2t * (1/xstd2 + 1/ystd2)
+    # tan 2*theta = b/(a-c)
+    if cxx==cyy or cxy==0:
+        theta = 0.0
+    else:
+        theta = np.arctan2(cxy,cxx-cyy)/2.0
+
+    if theta==0:
+        # a = 1 / xstd2
+        # b = 0        
+        # c = 1 / ystd2
+        xstd = 1/np.sqrt(cxx)
+        ystd = 1/np.sqrt(cyy)
+        return xstd,ystd,theta        
+        
+    sin2t = np.sin(2.0*theta)
+    # b/sin2t + (a+c) = 2/xstd2
+    # xstd2 = 2.0/(b/sin2t + (a+c))
+    xstd = np.sqrt( 2.0/(cxy/sin2t + (cxx+cyy)) )
+
+    # a+c = 1/xstd2 + 1/ystd2
+    ystd = np.sqrt( 1/(cxx+cyy-1/xstd**2) )
+
+    # theta in radians
+    
+    return xstd,ystd,theta
 
     
 @njit
@@ -490,7 +517,7 @@ def gaussval(x,y,xc,yc,cxx,cyy,cxy):
     return val
 
 @njit
-def gaussvalderiv(x,y,amp,xc,yc,cxx,cyy,cxy,nderiv):
+def gaussvalderiv(x,y,amp,xc,yc,asemi,bsemi,theta,cxx,cyy,cxy,nderiv):
     """ Evaluate an elliptical unit-amplitude Gaussian at a point and deriv."""
     u = (x-xc)
     u2 = u**2
@@ -510,37 +537,90 @@ def gaussvalderiv(x,y,amp,xc,yc,cxx,cyy,cxy,nderiv):
     # y0
     dg_dy_mean = g * 0.5*((cxy * u) + (2. * cyy * v))
     deriv[2] = dg_dy_mean
-    #if nderiv>3:
-    #    # xsig
-    #    cost = np.cos(theta)
-    #    sint = np.sin(theta)
-    #    xstd3 = pars[1] ** 3
-    #    da_dx_stddev = -cost2 / xstd3
-    #    db_dx_stddev = -sin2t / xstd3
-    #    dc_dx_stddev = -sint2 / xstd3        
-    #    dg_dx_stddev = g * (-(dcxx_dx_stddev * u2 +
-    #                          db_dx_stddev * u * v +
-    #                          dc_dx_stddev * v2))
-    #    deriv[3] = dg_dx_stddev
-    #    # ysig
-    #    ystd3 = pars[2] ** 3            
-    #    da_dy_stddev = -sint2 / ystd3
-    #    db_dy_stddev = sin2t / ystd3
-    #    dc_dy_stddev = -cost2 / ystd3        
-    #    dg_dy_stddev = g * (-(dcxx_dy_stddev * u2 +
-    #                          db_dy_stddev * u * v +
-    #                          dc_dy_stddev * v2))
-    #    deriv[4] = dg_dy_stddev
-    #    # theta
-    #    cos2t = np.cos(2. * theta)            
-    #    da_dtheta = (sint * cost * ((1. / ystd2) - (1. / xstd2)))
-    #    db_dtheta = (cos2t / xstd2) - (cos2t / ystd2)
-    #    dc_dtheta = -da_dtheta        
-    #    dg_dtheta = g * (-(dcxx_dtheta * u2 +
-    #                       db_dtheta * u * v +
-    #                       dc_dtheta * v2))
-    #    deriv[5] = dg_dtheta
-    
+    if nderiv>3:
+        sint = np.sin(theta)        
+        cost = np.cos(theta)        
+        sint2 = sint ** 2
+        cost2 = cost ** 2
+        sin2t = np.sin(2. * theta)
+        # xsig
+        asemi2 = asemi ** 2
+        asemi3 = asemi ** 3
+        da_dxsig = -cost2 / asemi3
+        db_dxsig = -sin2t / asemi3
+        dc_dxsig = -sint2 / asemi3
+        dg_dxsig = g * (-(da_dxsig * u2 +
+                          db_dxsig * u * v +
+                          dc_dxsig * v2))
+        deriv[3] = dg_dxsig
+        # ysig
+        bsemi2 = bsemi ** 2
+        bsemi3 = bsemi ** 3
+        da_dysig = -sint2 / bsemi3
+        db_dysig = sin2t / bsemi3
+        dc_dysig = -cost2 / bsemi3
+        dg_dysig = g * (-(da_dysig * u2 +
+                          db_dysig * u * v +
+                          dc_dysig * v2))
+        deriv[4] = dg_dysig
+        # dtheta
+        if asemi != bsemi:
+            cos2t = np.cos(2.0*theta)
+            da_dtheta = (sint * cost * ((1. / bsemi2) - (1. / asemi2)))
+            db_dtheta = (cos2t / asemi2) - (cos2t / bsemi2)
+            dc_dtheta = -da_dtheta
+            dg_dtheta = g * (-(da_dtheta * u2 +
+                               db_dtheta * u * v +
+                               dc_dtheta * v2))
+            deriv[5] = dg_dtheta
+        
+    return deriv
+
+@njit
+def gaussderiv(nx,ny,asemi,bsemi,theta,amp,xc,yc,nderiv):
+    """ Generate Gaussians PSF model and derivative."""
+    cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
+    deriv = np.zeros((ny,nx,nderiv),float)
+    for i in range(nx):
+        for j in range(ny):
+            deriv1 = gaussvalderiv(i,j,amp,xc,yc,asemi,bsemi,theta,cxx,cyy,cxy,nderiv)
+            #deriv1 = gaussvalderiv(i,j,amp,xc,yc,cxx,cyy,cxy,nderiv)
+            deriv[j,i,:] = deriv1
+    model = amp * deriv[:,:,0]
+    return model,deriv
+
+@njit
+def gaussvalderiv_cxy(x,y,amp,xc,yc,cxx,cyy,cxy,nderiv):
+    """ Evaluate an elliptical unit-amplitude Gaussian at a point and deriv."""
+    u = (x-xc)
+    u2 = u**2
+    v = (y-yc)
+    v2 = v**2
+    # amp = 1/(asemi*bsemi*2*np.pi)
+    g = amp * np.exp(-0.5*(cxx*u**2 + cyy*v**2 + cxy*u*v))
+
+    #  pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+    deriv = np.zeros(nderiv,float)
+    # amplitude
+    dg_dA = g / amp
+    deriv[0] = dg_dA
+    # x0
+    dg_dx_mean = g * 0.5*((2. * cxx * u) + (cxy * v))
+    deriv[1] = dg_dx_mean
+    # y0
+    dg_dy_mean = g * 0.5*((cxy * u) + (2. * cyy * v))
+    deriv[2] = dg_dy_mean
+    if nderiv>3:
+        # cxx
+        dg_cxx = -g * 0.5*u**2
+        deriv[3] = dg_cxx
+        # cyy
+        dg_cyy = -g * 0.5*v**2
+        deriv[4] = dg_cyy
+        # cxy
+        dg_cxy = -g * 0.5*u*v
+        deriv[5] = dg_cxy
+        
     return deriv
 
 #def gaussfit(im,xc,yc,asemi,bsemi,theta,bbx0,bbx1,bby0,bby1,thresh=1e-3):
@@ -690,20 +770,73 @@ def qr_jac_solve(jac,resid,weight=None):
         
     return dbeta
 
+@njit
+def checkbounds(pars,bounds):
+    """ Check the parameters against the bounds."""
+    # 0 means it's fine
+    # 1 means it's beyond the lower bound
+    # 2 means it's beyond the upper bound
+    npars = len(pars)
+    lbounds = bounds[:,0]
+    ubounds = bounds[:,1]
+    check = np.zeros(npars,np.int32)
+    check[pars<=lbounds] = 1
+    check[pars>=ubounds] = 2
+    return check
+
+@njit
+def limbounds(pars,bounds):
+    """ Limit the parameters to the boundaries."""
+    lbounds = bounds[:,0]
+    ubounds = bounds[:,1]
+    outpars = np.minimum(np.maximum(pars,lbounds),ubounds)
+    return outpars
+
+@njit
+def limsteps(steps,maxsteps):
+    """ Limit the parameter steps to maximum step sizes."""
+    signs = np.sign(steps)
+    outsteps = np.minimum(np.abs(steps),maxsteps)
+    outsteps *= signs
+    return outsteps
+
+@njit
+def newlsqpars(pars,steps,bounds,maxsteps):
+    """ Return new parameters that fit the constraints."""
+    # Limit the steps to maxsteps
+    limited_steps = limsteps(steps,maxsteps)
+        
+    # Make sure that these don't cross the boundaries
+    lbounds = bounds[:,0]
+    ubounds = bounds[:,1]
+    check = checkbounds(pars+limited_steps,bounds)
+    # Reduce step size for any parameters to go beyond the boundaries
+    badpars = (check!=0)
+    # reduce the step sizes until they are within bounds
+    newsteps = limited_steps.copy()
+    count = 0
+    maxiter = 2
+    while (np.sum(badpars)>0 and count<=maxiter):
+        newsteps[badpars] /= 2
+        newcheck = checkbounds(pars+newsteps,bounds)
+        badpars = (newcheck!=0)
+        count += 1
+            
+    # Final parameters
+    newparams = pars + newsteps
+            
+    # Make sure to limit them to the boundaries
+    check = checkbounds(newparams,bounds)
+    badpars = (check!=0)
+    if np.sum(badpars)>0:
+        # add a tiny offset so it doesn't fit right on the boundary
+        newparams = np.minimum(np.maximum(newparams,lbounds+1e-30),ubounds-1e-30)
+    return newparams
+
 
 # Fit analytic Gaussian profile first
 # x/y/amp
 
-@njit
-def gausspsfderiv(nx,ny,cxx,cyy,cxy,amp,xc,yc):
-    """ Generate Gaussians PSF model and derivative."""    
-    deriv = np.zeros((ny,nx,3),float)
-    for i in range(nx):
-        for j in range(ny):
-            deriv1 = gaussvalderiv(i,j,amp,xc,yc,cxx,cyy,cxy,3)
-            deriv[j,i,:] = deriv1
-    model = amp * deriv[:,:,0]
-    return model,deriv
 
 @njit
 def newbestpars(bestpars,dbeta):
@@ -792,8 +925,8 @@ def gausspsffit(im,err,gpars,ampc,xc,yc,verbose):
     maxpercdiff = 1e10
     niter = 0
     while (niter<maxiter and maxpercdiff>minpercdiff):
-        model,deriv = gausspsfderiv(nx,ny,cxx,cyy,cxy,
-                                    bestpar[0],bestpar[1],bestpar[2])
+        model,deriv = gaussderiv(nx,ny,asemi,bsemi,theta,
+                                 bestpar[0],bestpar[1],bestpar[2],3)
         resid = im-model
         dbeta = qr_jac_solve(deriv.reshape(ny*nx,3),resid.ravel(),weight=wt.ravel())
 
@@ -806,7 +939,13 @@ def gausspsffit(im,err,gpars,ampc,xc,yc,verbose):
         # limit the steps to the maximum step sizes and boundaries
         #if bounds is not None or maxsteps is not None:
         #    bestpar = newpars(bestpar,dbeta,bounds,maxsteps)
-        bestpar = newbestpars(bestpar,dbeta)
+        bounds = np.zeros((3,2),float)
+        bounds[:,0] = [0.00,0,0]
+        bounds[:,1] = [1e30,nx,ny]
+        maxsteps = np.zeros(3,float)
+        maxsteps[:] = [0.5*bestpar[0],0.5,0.5]
+        bestpar = newlsqpars(bestpar,dbeta,bounds,maxsteps)
+        #bestpar = newbestpars(bestpar,dbeta)
         #else:
         #bestpar += 0.5*dbeta
         
@@ -821,33 +960,104 @@ def gausspsffit(im,err,gpars,ampc,xc,yc,verbose):
             print()
         last_dbeta = dbeta
         niter += 1
-        
-    model,deriv = gausspsfderiv(nx,ny,cxx,cyy,cxy,
-                                bestpar[0],bestpar[1],bestpar[2])
+
+    model,deriv = gaussderiv(nx,ny,asemi,bsemi,theta,
+                             bestpar[0],bestpar[1],bestpar[2],3)        
     resid = im-model
     
-    # Now multiply by the volume of the Gaussian
-    #amp = asemi*bsemi*2*np.pi
-
-
     # Get covariance and errors
     cov = jac_covariance(deriv.reshape(ny*nx,3),resid.ravel(),wt.ravel())
     perror = np.sqrt(np.diag(cov))
 
-    return bestpar,perror,cov
+    # Now get the flux, multiply by the volume of the Gaussian
+    gvolume = asemi*bsemi*2*np.pi
+    flux = bestpar[0]*gvolume
+    fluxerr = perror[0]*gvolume
+    
+    return bestpar,perror,cov,flux,fluxerr
 
 
-#@njit
-def psffit(im,psf,x0,y0,amp0):
-    """ Fit a PSF to a source."""
-    # Solve for x, y, amplitude
+@njit
+def psffit(im,err,ampc,xc,yc,verbose):
+    """ Fit all parameters of the Gaussian."""
+    # xc/yc are with respect to the image origin (0,0)
+    
+    # Solve for x, y, amplitude and asemi/bsemi/theta
 
+    maxiter = 10
+    minpercdiff = 0.5
+    
     ny,nx = im.shape
-    nyp,nxp = psf.shape
 
-    for i in range(nx):
-        for j in range(ny):
-            # Need to interpolate
-            pass
+    wt = 1/err**2
 
-    return x,y,amp
+    asemi = 2.5
+    bsemi = 2.4
+    theta = 0.1
+
+    # theta in radians
+    
+    # Initial values
+    bestpar = np.zeros(6,float)
+    bestpar[0] = ampc
+    bestpar[1] = xc
+    bestpar[2] = yc
+    bestpar[3] = asemi
+    bestpar[4] = bsemi
+    bestpar[5] = theta
+    
+    # Iteration loop
+    maxpercdiff = 1e10
+    niter = 0
+    while (niter<maxiter and maxpercdiff>minpercdiff):
+        model,deriv = gaussderiv(nx,ny,bestpar[3],bestpar[4],bestpar[5],
+                                 bestpar[0],bestpar[1],bestpar[2],6)
+        resid = im-model
+        dbeta = qr_jac_solve(deriv.reshape(ny*nx,6),resid.ravel(),weight=wt.ravel())
+        
+        if verbose:
+            print(niter,bestpar)
+            print(dbeta)
+        
+        # Update parameters
+        last_bestpar = bestpar.copy()
+        # limit the steps to the maximum step sizes and boundaries
+        #if bounds is not None or maxsteps is not None:
+        #    bestpar = newpars(bestpar,dbeta,bounds,maxsteps)
+        bounds = np.zeros((6,2),float)
+        bounds[:,0] = [0.00, 0, 0, 0.1, 0.1, -180]
+        bounds[:,1] = [1e30,nx,ny, nx//2, ny//2, 180]
+        maxsteps = np.zeros(6,float)
+        maxsteps[:] = [0.5*bestpar[0],0.5,0.5,0.5,0.5,2.0]
+        bestpar = newlsqpars(bestpar,dbeta,bounds,maxsteps)
+        
+        # Check differences and changes
+        diff = np.abs(bestpar-last_bestpar)
+        denom = np.maximum(np.abs(bestpar.copy()),0.0001)
+        percdiff = diff.copy()/denom*100  # percent differences
+        maxpercdiff = np.max(percdiff)
+        chisq = np.sum((im-model)**2/err**2)/(nx*ny)
+        if verbose:
+            print('chisq=',chisq)
+        #if verbose:
+        #    print(niter,percdiff,chisq)
+        #    print()
+        last_dbeta = dbeta
+        niter += 1
+
+    model,deriv = gaussderiv(nx,ny,bestpar[3],bestpar[4],bestpar[5],
+                             bestpar[0],bestpar[1],bestpar[2],6)
+    resid = im-model
+    
+    # Get covariance and errors
+    cov = jac_covariance(deriv.reshape(ny*nx,6),resid.ravel(),wt.ravel())
+    perror = np.sqrt(np.diag(cov))
+
+    # Now get the flux, multiply by the volume of the Gaussian
+    asemi,bsemi,theta = bestpar[3],bestpar[4],bestpar[5]
+    gvolume = asemi*bsemi*2*np.pi
+    flux = bestpar[0]*gvolume
+    fluxerr = perror[0]*gvolume
+    
+    return bestpar,perror,cov,flux,fluxerr
+
