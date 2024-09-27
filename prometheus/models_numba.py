@@ -27,96 +27,6 @@ def clip(val,minval,maxval):
     else:
         nval = val
     return nval
-    
-def sky(im,tot=False,med=False):
-    tot = 0
-    if tot:
-        tot = 1
-    if med:
-        med = 1
-        tot = 0
-    return numba_sky(im,tot=tot,med=med)
-
-@njit
-def numba_sky(im,tot=1,med=0):
-    """ Estimate the background."""
-    binsize = 200
-    ny,nx = im.shape
-    ny2 = ny // binsize
-    nx2 = nx // binsize
-    bgim = np.zeros((ny2,nx2),float)
-    sample = np.random.randint(0,binsize*binsize-1,1000)
-    #xsample = np.random.randint(0,nbin-1,500)
-    #ysample = np.random.randint(0,nbin-1,500)
-    for i in range(ny2):
-        for j in range(nx2):
-            x1 = i*binsize
-            x2 = x1+binsize
-            if x2 > nx: x2=nx
-            y1 = j*binsize
-            y2 = y1+binsize
-            if y2 > ny: y2=ny
-            if tot==1:
-                bgim[j,i] = np.sum(im[y1:y2,x1:x2].ravel()[sample])
-            elif med==1:
-                bgim[j,i] = np.median(im[y1:y2,x1:x2].ravel()[sample])
-            else:
-                bgim[j,i] = np.mean(im[y1:y2,x1:x2].ravel()[sample])
-    #import pdb; pdb.set_trace()
-
-    return bgim
-
-def sky2(im,binsize=200,tot=False,med=True):
-    tot = 0
-    if tot:
-        tot = 1
-    if med:
-        med = 1
-        tot = 0
-    bgimbin = numba_sky2(im,binsize,tot,med)
-
-    # Linearly interpolate
-    bgim = np.zeros(im.shape,float)+np.median(bgimbin)
-    bgim = numba_linearinterp(bgimbin,bgim,binsize)
-
-    # do the edges
-    #bgim[:binsize,:] = bgim[binsize,:].reshape(1,-1)
-    #bgim[:,:binsize] = bgim[:,binsize].reshape(-1,1)
-    #bgim[-binsize:,:] = bgim[-binsize,:].reshape(1,-1)
-    #bgim[:,-binsize:] = bgim[:,-binsize].reshape(-1,1)    
-    
-    return bgim
-    
-@njit
-def numba_sky2(im,binsize,tot,med):
-    """ Estimate the background."""
-    ny,nx = im.shape
-    ny2 = ny // binsize
-    nx2 = nx // binsize
-    bgim = np.zeros((ny2,nx2),float)
-    #sample = np.random.randint(0,binsize*binsize-1,1000)
-    xsample = np.random.randint(0,binsize-1,1000)
-    ysample = np.random.randint(0,binsize-1,1000)
-    data = np.zeros(1000,float)
-    for i in range(ny2):
-        for j in range(nx2):
-            x1 = i*binsize
-            x2 = x1+binsize
-            if x2 > nx: x2=nx
-            y1 = j*binsize
-            y2 = y1+binsize
-            if y2 > ny: y2=ny
-            for k in range(1000):
-                data[k] = im[y1+ysample[k],x1+xsample[k]]
-            if tot==1:
-                bgim[j,i] = np.sum(data)
-            elif med==1:
-                bgim[j,i] = np.median(data)
-            else:
-                bgim[j,i] = np.mean(data)
-    #import pdb; pdb.set_trace()
-
-    return bgim
 
 @njit
 def numba_linearinterp(binim,fullim,binsize):
@@ -168,300 +78,10 @@ def numba_linearinterp(binim,fullim,binsize):
 
     return fullim
 
-def sigma(im):
-    """ Determine sigma."""
-    sample = np.random.randint(0,im.size-1,10000)
-    sig = dln.mad(im.ravel()[sample])
-    return sig
-    
-def detection(im,nsig=10):
-    """  Detect peaks """
-
-    # just looping over the 9K x 9K array
-    # takes 1.3 sec
-
-    # bin 2x2 as a crude initial smoothing
-    imbin = dln.rebin(im,binsize=(2,2))
-    
-    sig = sigma(imbin)
-    xpeak,ypeak,count = numba_detection(imbin,sig,nsig)
-    xpeak = xpeak[:count]*2
-    ypeak = ypeak[:count]*2
-    
-    return xpeak,ypeak
-
-@njit
-def numba_detection(im,sig,nsig):
-    """ Detect peaks"""
-    # input sky subtracted image
-    ny,nx = im.shape
-    nbin = 3  # 5
-    nhbin = nbin//2
-
-    mnim = np.zeros(im.shape,float)-100000
-    
-    count = 0
-    xpeak = np.zeros(100000,float)
-    ypeak = np.zeros(100000,float)
-    for i in np.arange(nhbin+1,nx-nhbin-2):
-        for j in range(nhbin+1,ny-nhbin-2):
-            if im[j,i]>nsig*sig:
-                if mnim[j,i] > -1000:
-                    mval = mnim[j,i]
-                else:
-                    mval = np.mean(im[j-nhbin:j+nhbin+1,i-nhbin:i+nhbin+1])
-                    mnim[j,i] = mval
-                if mnim[j,i-1] > -1000:
-                    lval = mnim[j,i-1]
-                else:
-                    lval = np.mean(im[j-nhbin:j+nhbin+1,i-nhbin-1:i+nhbin])
-                    mnim[j,i-1] = lval
-                if mnim[j,i+1] > -1000:
-                    rval = mnim[j,i+1]
-                else:
-                    rval = np.mean(im[j-nhbin:j+nhbin+1,i-nhbin+1:i+nhbin+2])
-                    mnim[j,i+1] = rval
-                if mnim[j-1,i] > -1000:
-                    dval = mnim[j-1,i]
-                else:
-                    dval = np.mean(im[j-nhbin-1:j+nhbin,i-nhbin:i+nhbin+1])
-                    mnim[j-1,i] = dval
-                if mnim[j+1,i] > -1000:
-                    uval = mnim[j+1,i]
-                else:
-                    uval = np.mean(im[j-nhbin+1:j+nhbin+2,i-nhbin:i+nhbin+1])
-                    mnim[j+1,i] = uval
-                # Check that it is a peak
-                if (mval>lval and mval>rval and mval>dval and mval>uval):
-                    xpeak[count] = i
-                    ypeak[count] = j
-                    count = count + 1
-    return xpeak,ypeak,count
-    
-@njit
-def numba_detection2(im,sig,nsig):
-    """ Detect peaks"""
-    # input sky subtracted image
-    ny,nx = im.shape
-    lines = np.zeros((ny,3),float)    
-    nbin = 5
-    nhbin = nbin//2
-    
-    # Start the mean lines
-    for j in range(ny):
-        lines[j,0] = np.mean(im[j,:nbin])
-        lines[j,1] = np.mean(im[j,1:nbin+1])
-        lines[j,2] = np.mean(im[j,2:nbin+2])
-        
-    count = 0
-    xpeak = np.zeros(100000,float)
-    ypeak = np.zeros(100000,float)
-    grid = np.zeros((3,3),float)
-    for i in np.arange(nhbin+1,nx-nhbin-2):
-        # Find peaks
-        #lval = np.mean(line[:nbin])
-        #mval = np.mean(line[1:nbin+1])
-        #rval = np.mean(line[2:nbin+2])
-        for j in range(nhbin+1,ny-nhbin-2):
-            # 3x3 grid
-            grid = lines[j-1:j+2,:]
-            mval = grid[1,1]
-            if mval>nsig*sig:
-                if (mval>grid[0,0] and mval>grid[0,1] and mval>grid[0,2] and
-                    mval>grid[1,0] and mval>grid[1,2] and mval>grid[2,0] and
-                    mval>grid[2,1] and mval>grid[2,2]):
-                    xpeak[count] = i
-                    ypeak[count] = j
-                    count = count + 1
-            ## increment
-            #lval += line[j+nhbin]/nbin - line[j-nhbin-1]/nbin
-            #mval += line[j+nhbin+1]/nbin - line[j-nhbin]/nbin
-            #rval += line[j+nhbin+2]/nbin - line[j-nhbin+1]/nbin
-                
-        # Add/Subtract line
-        for j in range(ny):
-            lines[j,0] = lines[j,1]  # shift
-            lines[j,1] = lines[j,2]  # shift
-            lines[j,2] += im[j,i+nhbin+2]/nbin - im[j,i-nhbin+1]/nbin
-
-    return xpeak,ypeak,count
-
-@njit
-def boundingbox(im,xp,yp,thresh,bmax):
-    """ Get bounding box for the source """
-
-    ny,nx = im.shape
-    nbin = 3
-    nhbin = nbin//2
-    
-    # Step left until you reach the threshold
-    y0 = yp-nhbin
-    if y0<0: y0=0
-    y1 = yp+nhbin+1
-    if y1>ny: y1=ny
-    flag = False
-    midval = np.mean(im[y0:y1,xp])
-    count = 1
-    while (flag==False):
-        newval = np.mean(im[y0:y1,xp-count])
-        if newval < thresh*midval or xp-count==0 or count==bmax:
-            flag = True
-        lastval = newval
-        count += 1
-    leftxp = xp-count+1
-    # Step right until you reach the threshold
-    flag = False
-    count = 1
-    while (flag==False):
-        newval = np.mean(im[y0:y1,xp+count])
-        if newval < thresh*midval or xp+count==(nx-1) or count==bmax:
-            flag = True
-        lastval = newval
-        count += 1
-    rightxp = xp+count-1
-    # Step down until you reach the threshold
-    x0 = xp-nhbin
-    if x0<0: x0=0
-    x1 = xp+nhbin+1
-    if x1>nx: x1=nx
-    flag = False
-    midval = np.mean(im[yp,x0:x1])
-    count = 1
-    while (flag==False):
-        newval = np.mean(im[yp-count,x0:x1])
-        if newval < thresh*midval or yp-count==0 or count==bmax:
-            flag = True
-        lastval = newval
-        count += 1
-    downyp = yp-count+1
-    # Step up until you reach the threshold
-    flag = False
-    count = 1
-    while (flag==False):
-        newval = np.mean(im[yp+count,x0:x1])
-        if newval < thresh*midval or yp+count==(ny-1) or count==bmax:
-            flag = True
-        lastval = newval
-        count += 1
-    upyp = yp+count-1
-    #print(leftxp,rightxp,downyp,upyp)
-
-    return leftxp,rightxp,downyp,upyp
-
-@njit
-def morpho(im,xp,yp,x0,x1,y0,y1,thresh):
-    """ Measure morphology parameters """
-    ny,nx = im.shape
-
-    midval = im[yp,xp]
-    hthresh = thresh*midval
-    
-    nx = x1-x0+1
-    ny = y1-y0+1
-
-    # Flux and first moments
-    flux = 0.0
-    mnx = 0.0
-    mny = 0.0
-    # X loop    
-    for i in range(nx):
-        x = i+x0
-        # Y loop
-        for j in range(ny):
-            y = j+y0
-            val = im[y,x]
-            if val>hthresh:
-                # Flux
-                flux += val
-                # First moments
-                mnx += val*x
-                mny += val*y
-    mnx /= flux
-    mny /= flux
-
-    # Second moments
-    sigx2 = 0.0
-    sigy2 = 0.0
-    sigxy = 0.0
-    # X loop    
-    for i in range(nx):
-        x = i+x0
-        # Y loop
-        for j in range(ny):
-            y = j+y0
-            val = im[y,x]
-            if val>hthresh:
-                sigx2 += val*(x-mnx)**2
-                sigy2 += val*(y-mny)**2
-                sigxy += val*(x-mnx)*(y-mny)
-    sigx2 /= flux
-    sigy2 /= flux
-    sigx = np.sqrt(sigx2)
-    sigy = np.sqrt(sigy2)
-    sigxy /= flux
-    fwhm = (sigx+sigy)*0.5 * 2.35
-    
-    # Ellipse parameters
-    asemi = np.sqrt( 0.5*(sigx2+sigy2) + np.sqrt(((sigx2-sigy2)*0.5)**2 + sigxy**2 ) )
-    bsemi = np.sqrt( 0.5*(sigx2+sigy2) - np.sqrt(((sigx2-sigy2)*0.5)**2 + sigxy**2 ) )
-    theta = 0.5*np.arctan2(2*sigxy,sigx2-sigy2)  # in radians
-
-    return flux,mnx,mny,sigx,sigy,sigxy,fwhm,asemi,bsemi,theta
-
-def morphology(im,xpeak,ypeak,thresh=0.2,bmax=100):
-    """ Measure morphology for the peaks."""
-    # thresh - fraction amplitude threshold
-    # bmax - maximum half-width of the bounding box
-    
-    ny,nx = im.shape
-    nbin = 3
-    nhbin = nbin//2   
-
-    out = numba_morphology(im,xpeak,ypeak,thresh,bmax)
-
-    dt = [('xp',int),('yp',int),('bbx0',int),('bbx1',int),
-          ('bby0',int),('bby1',int),('area',int),
-          ('flux',float),('mnx',float),
-          ('mny',float),('sigx',float),('sigy',float),
-          ('sigxy',float),('fwhm',float),('asemi',float),
-          ('bsemi',float),('theta',float)]
-    tab = np.rec.fromarrays(out.T, dtype=dt)
-    
-    return tab
-    
-@njit
-def numba_morphology(im,xpeak,ypeak,thresh,bmax):
-    """ Measure morphology of the peaks."""
-
-    ny,nx = im.shape
-    nbin = 3
-    nhbin = nbin//2
-
-    mout = np.zeros((len(xpeak),17),float)
-    for i in range(len(xpeak)):
-        xp = int(xpeak[i])
-        yp = int(ypeak[i])
-        mout[i,0] = xp
-        mout[i,1] = yp
-        
-        # Get the bounding box
-        leftxp,rightxp,downyp,upyp = boundingbox(im,xp,yp,thresh,bmax)
-        mout[i,2] = leftxp
-        mout[i,3] = rightxp
-        mout[i,4] = downyp
-        mout[i,5] = upyp
-        mout[i,6] = (rightxp-leftxp+1)*(upyp-downyp+1)
-
-        # Measure morphology parameters
-        out = morpho(im,xp,yp,leftxp,rightxp,downyp,upyp,thresh)
-        #flux,mnx,mny,sigx,sigy,sigxy,fwhm,asemi,bsemi,theta = out
-        mout[i,7:] = out
-
-    return mout
 
 
-# models
-
+###################################################################
+# Numba analytical PSF models
 
 @njit
 def gauss_abt2cxy(asemi,bsemi,theta):
@@ -510,119 +130,9 @@ def gauss_cxy2abt(cxx,cyy,cxy):
     
     return xstd,ystd,theta
 
-
-
-
-    
-@njit
-def gaussval(x,y,xc,yc,cxx,cyy,cxy):
-    """ Evaluate an elliptical unit-amplitude Gaussian at a point."""
-    u = (x-xc)
-    v = (y-yc)
-    # amp = 1/(asemi*bsemi*2*np.pi)
-    val = np.exp(-0.5*(cxx*u**2 + cyy*v**2 + cxy*u*v))
-    return val
-
-@njit
-def gaussvalderiv(x,y,amp,xc,yc,asemi,bsemi,theta,cxx,cyy,cxy,nderiv):
-    """ Evaluate an elliptical unit-amplitude Gaussian at a point and deriv."""
-    u = (x-xc)
-    u2 = u**2
-    v = (y-yc)
-    v2 = v**2
-    # amp = 1/(asemi*bsemi*2*np.pi)
-    g = amp * np.exp(-0.5*(cxx*u**2 + cyy*v**2 + cxy*u*v))
-
-    #  pars = [amplitude, x0, y0, xsigma, ysigma, theta]
-    deriv = np.zeros(nderiv,float)
-    # amplitude
-    dg_dA = g / amp
-    deriv[0] = dg_dA
-    # x0
-    dg_dx_mean = g * 0.5*((2. * cxx * u) + (cxy * v))
-    deriv[1] = dg_dx_mean
-    # y0
-    dg_dy_mean = g * 0.5*((cxy * u) + (2. * cyy * v))
-    deriv[2] = dg_dy_mean
-    if nderiv>3:
-        sint = np.sin(theta)        
-        cost = np.cos(theta)        
-        sint2 = sint ** 2
-        cost2 = cost ** 2
-        sin2t = np.sin(2. * theta)
-        # xsig
-        asemi2 = asemi ** 2
-        asemi3 = asemi ** 3
-        da_dxsig = -cost2 / asemi3
-        db_dxsig = -sin2t / asemi3
-        dc_dxsig = -sint2 / asemi3
-        dg_dxsig = g * (-(da_dxsig * u2 +
-                          db_dxsig * u * v +
-                          dc_dxsig * v2))
-        deriv[3] = dg_dxsig
-        # ysig
-        bsemi2 = bsemi ** 2
-        bsemi3 = bsemi ** 3
-        da_dysig = -sint2 / bsemi3
-        db_dysig = sin2t / bsemi3
-        dc_dysig = -cost2 / bsemi3
-        dg_dysig = g * (-(da_dysig * u2 +
-                          db_dysig * u * v +
-                          dc_dysig * v2))
-        deriv[4] = dg_dysig
-        # dtheta
-        if asemi != bsemi:
-            cos2t = np.cos(2.0*theta)
-            da_dtheta = (sint * cost * ((1. / bsemi2) - (1. / asemi2)))
-            db_dtheta = (cos2t / asemi2) - (cos2t / bsemi2)
-            dc_dtheta = -da_dtheta
-            dg_dtheta = g * (-(da_dtheta * u2 +
-                               db_dtheta * u * v +
-                               dc_dtheta * v2))
-            deriv[5] = dg_dtheta
-        
-    return deriv
-
-@njit
-def gaussvalderiv_cxy(x,y,amp,xc,yc,cxx,cyy,cxy,nderiv):
-    """ Evaluate an elliptical unit-amplitude Gaussian at a point and deriv."""
-    u = (x-xc)
-    u2 = u**2
-    v = (y-yc)
-    v2 = v**2
-    # amp = 1/(asemi*bsemi*2*np.pi)
-    g = amp * np.exp(-0.5*(cxx*u**2 + cyy*v**2 + cxy*u*v))
-
-    #  pars = [amplitude, x0, y0, xsigma, ysigma, theta]
-    deriv = np.zeros(nderiv,float)
-    # amplitude
-    dg_dA = g / amp
-    deriv[0] = dg_dA
-    # x0
-    dg_dx_mean = g * 0.5*((2. * cxx * u) + (cxy * v))
-    deriv[1] = dg_dx_mean
-    # y0
-    dg_dy_mean = g * 0.5*((cxy * u) + (2. * cyy * v))
-    deriv[2] = dg_dy_mean
-    if nderiv>3:
-        # cxx
-        dg_cxx = -g * 0.5*u**2
-        deriv[3] = dg_cxx
-        # cyy
-        dg_cyy = -g * 0.5*v**2
-        deriv[4] = dg_cyy
-        # cxy
-        dg_cxy = -g * 0.5*u*v
-        deriv[5] = dg_cxy
-        
-    return deriv
-
-###################################################################
-# Numba analytical PSF models
-
 ####### GAUSSIAN ########
 
-#@njit
+@njit
 def gaussian2d_flux(pars):
     """
     Return the total flux (or volume) of a 2D Gaussian.
@@ -650,7 +160,7 @@ def gaussian2d_flux(pars):
     volume = 2*np.pi*amp*xsig*ysig
     return volume
 
-#@njit
+@njit
 def gaussian2d_fwhm(pars):
     """
     Return the FWHM of a 2D Gaussian.
@@ -682,8 +192,8 @@ def gaussian2d_fwhm(pars):
     ysig = pars[4]
 
     # The mean radius of an ellipse is: (2a+b)/3
-    sig_major = np.max([xsig,ysig])
-    sig_minor = np.min([xsig,ysig])
+    sig_major = np.max(np.array([xsig,ysig]))
+    sig_minor = np.min(np.array([xsig,ysig]))
     mnsig = (2.0*sig_major+sig_minor)/3.0
     # Convert sigma to FWHM
     # FWHM = 2*sqrt(2*ln(2))*sig ~ 2.35482*sig
@@ -706,11 +216,8 @@ def agaussian2d(x,y,pars,nderiv):
        Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta].
          Or can include cxx, cyy, cxy at the end so they don't have to be
          computed.
-    deriv : boolean, optional
-       Return the derivatives as well.
-    nderiv : int, optional
-       The number of derivatives to return.  The default is None
-        which means that all are returned if deriv=True.
+    nderiv : int
+       The number of derivatives to return.
 
     Returns
     -------
@@ -773,11 +280,8 @@ def gaussian2d(x,y,pars,nderiv):
       Single Y-value of points for which to compute the Gaussian model.
     pars : numpy array or list
        Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta]
-    deriv : boolean, optional
-       Return the derivatives as well.
-    nderiv : int, optional
-       The number of derivatives to return.  The default is None
-        which means that all are returned if deriv=True.
+    nderiv : int
+       The number of derivatives to return.
 
     Returns
     -------
@@ -786,16 +290,11 @@ def gaussian2d(x,y,pars,nderiv):
         shape as x/y).
     derivative : list
       List of derivatives of g relative to the input parameters.
-        This is only returned if deriv=True.
 
     Example
     -------
 
-    g = gaussian2d(x,y,pars)
-
-    or
-
-    g,derivative = gaussian2d(x,y,pars,deriv=True)
+    g,derivative = gaussian2d(x,y,pars,nderiv)
 
     """
 
@@ -960,7 +459,7 @@ def gaussian2dfit(im,err,ampc,xc,yc,verbose):
 
 ####### MOFFAT ########
 
-#@njit
+@njit
 def moffat2d_fwhm(pars):
     """
     Return the FWHM of a 2D Moffat function.
@@ -990,13 +489,13 @@ def moffat2d_fwhm(pars):
     beta = pars[6]
     
     # The mean radius of an ellipse is: (2a+b)/3
-    sig_major = np.max([xsig,ysig])
-    sig_minor = np.min([xsig,ysig])
+    sig_major = np.max(np.array([xsig,ysig]))
+    sig_minor = np.min(np.array([xsig,ysig]))
     mnsig = (2.0*sig_major+sig_minor)/3.0
     
     return 2.0 * np.abs(mnsig) * np.sqrt(2.0 ** (1.0/beta) - 1.0)
 
-#@njit
+@njit
 def moffat2d_flux(pars):
     """
     Return the total Flux of a 2D Moffat.
@@ -1051,7 +550,7 @@ def amoffat2d(x,y,pars,nderiv):
       Array of Y-values of points for which to compute the Moffat model.
     pars : numpy array or list
        Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta].
-    nderiv : int, optional
+    nderiv : int
        The number of derivatives to return.
 
     Returns
@@ -1118,7 +617,7 @@ def moffat2d(x,y,pars,nderiv):
        Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
          The cxx, cyy, cxy parameter can be added to the end so they don't
          have to be computed.
-    nderiv : int, optional
+    nderiv : int
        The number of derivatives to return.
 
     Returns
@@ -1131,7 +630,7 @@ def moffat2d(x,y,pars,nderiv):
     Example
     -------
 
-    g,derivative = moffat2d(x,y,pars,deriv=True)
+    g,derivative = moffat2d(x,y,pars,nderiv)
 
     """
 
@@ -1301,7 +800,7 @@ def moffat2dfit(im,err,ampc,xc,yc,verbose):
 
 ####### PENNY ########
 
-#@njit
+@njit
 def penny2d_fwhm(pars):
     """
     Return the FWHM of a 2D Penny function.
@@ -1329,7 +828,7 @@ def penny2d_fwhm(pars):
     amp = pars[0]
     xsig = pars[3]
     ysig = pars[4]
-    relamp = np.minimum(np.maximum(pars[6],0),1.0)  # 0<relamp<1
+    relamp = clip(pars[6],0.0,1.0)  # 0<relamp<1
     sigma = np.maximum(pars[7],0)
     beta = 1.2   # Moffat
 
@@ -1337,8 +836,8 @@ def penny2d_fwhm(pars):
         raise ValueError('PARS cannot be inf or nan')
     
     # The mean radius of an ellipse is: (2a+b)/3
-    sig_major = np.max([xsig,ysig])
-    sig_minor = np.min([xsig,ysig])
+    sig_major = np.max(np.array([xsig,ysig]))
+    sig_minor = np.min(np.array([xsig,ysig]))
     mnsig = (2.0*sig_major+sig_minor)/3.0
     # Convert sigma to FWHM
     # FWHM = 2*sqrt(2*ln(2))*sig ~ 2.35482*sig
@@ -1350,14 +849,15 @@ def penny2d_fwhm(pars):
     mfwhm = 2.0 * np.abs(sigma) * np.sqrt(2.0 ** (1.0/beta) - 1.0)
 
     # Generate a small profile
-    x = np.arange( np.min([gfwhm,mfwhm])/2.35/2, np.max([gfwhm,mfwhm]), 0.5)
+    x = np.arange( np.min(np.array([gfwhm,mfwhm]))/2.35/2,
+                   np.max(np.array([gfwhm,mfwhm])), 0.5)
     f = (1-relamp)*np.exp(-0.5*(x/mnsig)**2) + relamp/(1+(x/sigma)**2)**beta
     hwhm = np.interp(0.5,f[::-1],x[::-1])
     fwhm = 2*hwhm
         
     return fwhm
 
-#@njit
+@njit
 def penny2d_flux(pars):
     """
     Return the total Flux of a 2D Penny function.
@@ -1417,7 +917,7 @@ def apenny2d(x,y,pars,nderiv):
       Array of Y-values of points for which to compute the Penny model.
     pars : numpy array or list
        Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta].
-    nderiv : int, optional
+    nderiv : int
        The number of derivatives to return.
 
     Returns
@@ -1486,7 +986,7 @@ def penny2d(x,y,pars,nderiv):
                                relamp, sigma]
          The cxx, cyy, cxy parameter can be added to the end so they don't
          have to be computed.
-    nderiv : int, optional
+    nderiv : int
        The number of derivatives to return.
 
     Returns
@@ -1499,7 +999,7 @@ def penny2d(x,y,pars,nderiv):
     Example
     -------
 
-    g,derivative = penny2d(x,y,pars,deriv=True)
+    g,derivative = penny2d(x,y,pars,nderiv)
 
     """
 
@@ -1529,8 +1029,8 @@ def penny2d(x,y,pars,nderiv):
     deriv = np.zeros(nderiv,float)    
     if nderiv>0:
         # amplitude
-        dg_dA = f / amp
-        deriv[0] = dg_dA
+        df_dA = f / amp
+        deriv[0] = df_dA
         # x0
         df_dx_mean = ( g * 0.5*((2 * cxx * u) + (cxy * v)) +                           
                        2*beta*l*u/(sigma**2 * (1+rr_gg)) )  
@@ -1684,7 +1184,7 @@ def penny2dfit(im,err,ampc,xc,yc,verbose):
 
 ####### GAUSSPOW ########
 
-#@njit
+@njit
 def gausspow2d_fwhm(pars):
     """
     Return the FWHM of a 2D DoPHOT Gausspow function.
@@ -1727,8 +1227,8 @@ def gausspow2d_fwhm(pars):
     c = ((sint2 / xsig2) + (cost2 / ysig2))
     
     # The mean radius of an ellipse is: (2a+b)/3
-    sig_major = np.max([xsig,ysig])
-    sig_minor = np.min([xsig,ysig])
+    sig_major = np.max(np.array([xsig,ysig]))
+    sig_minor = np.min(np.array([xsig,ysig]))
     mnsig = (2.0*sig_major+sig_minor)/3.0
     # Convert sigma to FWHM
     # FWHM = 2*sqrt(2*ln(2))*sig ~ 2.35482*sig
@@ -1745,6 +1245,7 @@ def gausspow2d_fwhm(pars):
     
     return fwhm
 
+@njit
 def gausspow2d_flux(pars):
     """
     Return the flux of a 2D DoPHOT Gausspow function.
@@ -1793,7 +1294,7 @@ def gausspow2d_flux(pars):
     return volume
 
 
-#@njit
+@njit
 def agausspow2d(x,y,pars,nderiv):
     """
     Two dimensional Gausspow model function with x/y array inputs.
@@ -1805,8 +1306,9 @@ def agausspow2d(x,y,pars,nderiv):
     y : numpy array
       Array of Y-values of points for which to compute the Gausspow model.
     pars : numpy array or list
-       Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta].
-    nderiv : int, optional
+       Parameter list.
+        pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6].
+    nderiv : int
        The number of derivatives to return.
 
     Returns
@@ -1822,13 +1324,13 @@ def agausspow2d(x,y,pars,nderiv):
     Example
     -------
 
-    g,derivative = agausspow2d(x,y,pars,3)
+    g,derivative = agausspow2d(x,y,pars,nderiv)
 
     """
 
     allpars = np.zeros(11,float)
     if len(pars)==8:
-        amp,xc,yc,asemi,bsemi,theta,relamp,sigma = pars
+        amp,xc,yc,asemi,bsemi,theta,beta4,beta6 = pars
         cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
         allpars[:8] = pars
         allpars[8:] = [cxx,cyy,cxy]
@@ -1858,11 +1360,11 @@ def agausspow2d(x,y,pars,nderiv):
     return g,deriv
 
     
-#@njit
+@njit
 def gausspow2d(x,y,pars,nderiv):
     """
-    Two dimensional Gausspow model function for a single point.
-    Gaussian core and Lorentzian-like wings, only Gaussian is tilted.
+    DoPHOT PSF, sum of elliptical Gaussians.
+    For a single point.
 
     Parameters
     ----------
@@ -1871,11 +1373,11 @@ def gausspow2d(x,y,pars,nderiv):
     y : numpy array
       Array of Y-values of points for which to compute the Gausspow model.
     pars : numpy array or list
-       Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta,
-                               relamp, sigma]
+       Parameter list.
+        pars = [amplitude, x0, y0, sigx, sigy, theta, beta4, beta6]
          The cxx, cyy, cxy parameter can be added to the end so they don't
          have to be computed.
-    nderiv : int, optional
+    nderiv : int
        The number of derivatives to return.
 
     Returns
@@ -1888,46 +1390,48 @@ def gausspow2d(x,y,pars,nderiv):
     Example
     -------
 
-    g,derivative = gausspow2d(x,y,pars,deriv=True)
+    g,derivative = gausspow2d(x,y,pars,nderiv)
 
     """
 
     if len(pars)==8:
-        amp,xc,yc,asemi,bsemi,theta,relamp,sigma = pars
+        amp,xc,yc,asemi,bsemi,theta,beta4,beta6 = pars
         cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
     else:
-        amp,xc,yc,asemi,bsemi,theta,relamp,sigma,cxx,cyy,cxy = pars
+        amp,xc,yc,asemi,bsemi,theta,beta4,beta6,cxx,cyy,cxy = pars
+
+    # Schechter, Mateo & Saha (1993), eq. 1 on pg.4
+    # I(x,y) = Io * (1+z2+0.5*beta4*z2**2+(1/6)*beta6*z2**3)**(-1)
+    # z2 = [0.5*(x**2/sigx**2 + 2*sigxy*x*y + y**2/sigy**2]
+    # x = (x'-x0)
+    # y = (y'-y0)
+    # nominal center of image at (x0,y0)
+    # if beta4=beta6=1, then it's just a truncated power series for a Gaussian
+    # 8 free parameters
+    # pars = [amplitude, x0, y0, sigx, sigy, theta, beta4, beta6]
         
     u = (x-xc)
     u2 = u**2
     v = (y-yc)
     v2 = v**2
-    relamp = clip(relamp,0.0,1.0)  # 0<relamp<1
-    # Gaussian component
-    g = amp * (1-relamp) * np.exp(-0.5*((cxx * u2) + (cxy * u*v) +
-                                        (cyy * v2)))
-    # Add Lorentzian/Moffat beta=1.2 wings
-    sigma = np.maximum(sigma,0)
-    rr_gg = (u2+v2) / sigma ** 2
-    beta = 1.2
-    l = amp * relamp / (1 + rr_gg)**(beta)
-    # Sum of Gaussian + Lorentzian
-    f = g + l
+    z2 = 0.5 * (cxx*u2 + cxy*u*v + cyy*v2)
+    gxy = (1 + z2 + 0.5*beta4*z2**2 + (1.0/6.0)*beta6*z2**3)
+    g = amp / gxy
     
     #  pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
     deriv = np.zeros(nderiv,float)    
     if nderiv>0:
+        dgxy_dz2 = (1 + beta4*z2 + 0.5*beta6*z2**2)
+        g_gxy = g / gxy
         # amplitude
-        dg_dA = f / amp
+        dg_dA = g / amp
         deriv[0] = dg_dA
         # x0
-        df_dx_mean = ( g * 0.5*((2 * cxx * u) + (cxy * v)) +                           
-                       2*beta*l*u/(sigma**2 * (1+rr_gg)) )  
-        deriv[1] = df_dx_mean
+        dg_dx_mean = g_gxy * dgxy_dz2 * 0.5 * (2*cxx*u + cxy*v)
+        deriv[1] = dg_dx_mean
         # y0
-        df_dy_mean = ( g * 0.5*((2 * cyy * v) + (cxy * u)) +
-                       2*beta*l*v/(sigma**2 * (1+rr_gg)) ) 
-        deriv[2] = df_dy_mean
+        dg_dy_mean = g_gxy * dgxy_dz2 * 0.5 * (2*cyy*v + cxy*u)
+        deriv[2] = dg_dy_mean
         if nderiv>3:
             sint = np.sin(theta)        
             cost = np.cos(theta)        
@@ -1940,38 +1444,38 @@ def gausspow2d(x,y,pars,nderiv):
             da_dxsig = -cost2 / asemi3
             db_dxsig = -sin2t / asemi3
             dc_dxsig = -sint2 / asemi3
-            df_dxsig = g * (-(da_dxsig * u2 +
-                              db_dxsig * u * v +
-                              dc_dxsig * v2))
-            deriv[3] = df_dxsig
+            dg_dxsig = -g_gxy * dgxy_dz2 * (da_dxsig * u2 +
+                                            db_dxsig * u * v +
+                                            dc_dxsig * v2)   
+            deriv[3] = dg_dxsig
             # bsemi/ysig
             bsemi2 = bsemi ** 2
             bsemi3 = bsemi ** 3
             da_dysig = -sint2 / bsemi3
             db_dysig = sin2t / bsemi3
             dc_dysig = -cost2 / bsemi3
-            df_dysig = g * (-(da_dysig * u2 +
-                              db_dysig * u * v +
-                              dc_dysig * v2))
-            deriv[4] = df_dysig
+            dg_dysig = -g_gxy * dgxy_dz2 * (da_dysig * u2 +
+                                            db_dysig * u * v +
+                                            dc_dysig * v2)
+            deriv[4] = dg_dysig
             # dtheta
             if asemi != bsemi:
                 cos2t = np.cos(2.0*theta)
                 da_dtheta = (sint * cost * ((1. / bsemi2) - (1. / asemi2)))
                 db_dtheta = (cos2t / asemi2) - (cos2t / bsemi2)
                 dc_dtheta = -da_dtheta
-                df_dtheta = g * (-(da_dtheta * u2 +
-                                   db_dtheta * u * v +
-                                   dc_dtheta * v2))
-                deriv[5] = df_dtheta
-            # relamp
-            df_drelamp = -g/(1-relamp) + l/relamp
-            deriv[6] = df_drelamp
-            # sigma
-            df_dsigma = beta*l/(1+rr_gg) * 2*(u2+v2)/sigma**3 
-            deriv[7] = df_dsigma
+                dg_dtheta = -g_gxy * dgxy_dz2 * (da_dtheta * u2 +
+                                                 db_dtheta * u * v +
+                                                 dc_dtheta * v2)
+                deriv[5] = dg_dtheta
+            # beta4
+            dg_dbeta4 = -g_gxy * (0.5*z2**2)
+            deriv[6] = dg_dbeta4
+            # beta6
+            dg_dbeta6 = -g_gxy * ((1.0/6.0)*z2**3)
+            deriv[7] = dg_dbeta6
             
-    return f,deriv
+    return g,deriv
 
 #@njit
 def gausspow2dfit(im,err,ampc,xc,yc,verbose):
@@ -1996,8 +1500,8 @@ def gausspow2dfit(im,err,ampc,xc,yc,verbose):
     asemi = 2.5
     bsemi = 2.4
     theta = 0.1
-    relamp = 0.2
-    sigma = 2*asemi
+    beta4 = 3.5
+    beta6 = 4.5
 
     # theta in radians
     
@@ -2009,8 +1513,8 @@ def gausspow2dfit(im,err,ampc,xc,yc,verbose):
     bestpar[3] = asemi
     bestpar[4] = bsemi
     bestpar[5] = theta
-    bestpar[6] = relamp
-    bestpar[7] = sigma
+    bestpar[6] = beta4
+    bestpar[7] = beta6
     
     # Iteration loop
     maxpercdiff = 1e10
@@ -2030,10 +1534,10 @@ def gausspow2dfit(im,err,ampc,xc,yc,verbose):
         #if bounds is not None or maxsteps is not None:
         #    bestpar = newpars(bestpar,dbeta,bounds,maxsteps)
         bounds = np.zeros((8,2),float)
-        bounds[:,0] = [0.00, 0, 0, 0.1, 0.1, -180, 0.00, 0.1]
-        bounds[:,1] = [1e30,nx,ny, nx//2, ny//2, 180, 1, 10]
+        bounds[:,0] = [0.00, 0, 0, 0.1, 0.1, -180, 0.1, 0.1]
+        bounds[:,1] = [1e30,nx,ny, nx//2, ny//2, 180, nx//2, nx//2]
         maxsteps = np.zeros(8,float)
-        maxsteps[:] = [0.5*bestpar[0],0.5,0.5,0.5,0.5,2.0,0.02,0.5]
+        maxsteps[:] = [0.5*bestpar[0],0.5,0.5,0.5,0.5,2.0,0.5,0.5]
         bestpar = newlsqpars(bestpar,dbeta,bounds,maxsteps)
         
         # Check differences and changes
@@ -2074,7 +1578,7 @@ def gausspow2dfit(im,err,ampc,xc,yc,verbose):
 ####### SERSIC ########
 
 #@njit  
-def sersic2d(x, y, pars, deriv=False, nderiv=None):
+def sersic2d(x, y, pars, nderiv):
     """
     Sersic profile and can be elliptical and rotated.
 
@@ -2087,11 +1591,8 @@ def sersic2d(x, y, pars, deriv=False, nderiv=None):
     pars : numpy array or list
        Parameter list.
         pars = [amp,x0,y0,k,alpha,recc,theta]
-    deriv : boolean, optional
-       Return the derivatives as well.
-    nderiv : int, optional
-       The number of derivatives to return.  The default is None
-        which means that all are returned if deriv=True.
+    nderiv : int
+       The number of derivatives to return.
 
     Returns
     -------
@@ -2100,16 +1601,11 @@ def sersic2d(x, y, pars, deriv=False, nderiv=None):
         shape as x/y).
     derivative : list
       List of derivatives of g relative to the input parameters.
-        This is only returned if deriv=True.
 
     Example
     -------
-
-    g = sersic2d(x,y,pars)
-
-    or
-
-    g,derivative = sersic2d(x,y,pars,deriv=True)
+    
+    g,derivative = sersic2d(x,y,pars,nderiv)
 
     """
     # pars = [amp,x0,y0,k,alpha,recc,theta]
@@ -2440,7 +1936,6 @@ def sersic2d_estimates(pars):
 
 # Left to add:
 # -empirical
-# -sersic
 
 
 ####---------------------------------------
