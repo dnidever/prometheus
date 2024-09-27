@@ -1146,7 +1146,7 @@ def moffat2dfit(im,err,ampc,xc,yc,verbose):
 
 
 
-#@njit
+@njit
 def apenny2d(x,y,pars,nderiv):
     """
     Two dimensional Penny model function with x/y array inputs.
@@ -1180,7 +1180,7 @@ def apenny2d(x,y,pars,nderiv):
     """
 
     allpars = np.zeros(11,float)
-    if len(pars)==7:
+    if len(pars)==8:
         amp,xc,yc,asemi,bsemi,theta,relamp,sigma = pars
         cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
         allpars[:8] = pars
@@ -1211,7 +1211,7 @@ def apenny2d(x,y,pars,nderiv):
     return g,deriv
 
     
-#@njit
+@njit
 def penny2d(x,y,pars,nderiv):
     """
     Two dimensional Penny model function for a single point.
@@ -1255,10 +1255,6 @@ def penny2d(x,y,pars,nderiv):
     u2 = u**2
     v = (y-yc)
     v2 = v**2
-    # amp = 1/(asemi*bsemi*2*np.pi)
-    rr_gg = (cxx*u**2 + cyy*v**2 + cxy*u*v)
-    g = amp * (1 + rr_gg) ** (-beta)
-
     relamp = clip(relamp,0.0,1.0)  # 0<relamp<1
     # Gaussian component
     g = amp * (1-relamp) * np.exp(-0.5*((cxx * u2) + (cxy * u*v) +
@@ -1322,7 +1318,7 @@ def penny2d(x,y,pars,nderiv):
                                    dc_dtheta * v2))
                 deriv[5] = df_dtheta
             # relamp
-            f_drelamp = -g/(1-relamp) + l/relamp
+            df_drelamp = -g/(1-relamp) + l/relamp
             deriv[6] = df_drelamp
             # sigma
             df_dsigma = beta*l/(1+rr_gg) * 2*(u2+v2)/sigma**3 
