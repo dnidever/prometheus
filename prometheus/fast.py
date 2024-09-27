@@ -1132,13 +1132,297 @@ def moffat2dfit(im,err,ampc,xc,yc,verbose):
     gvolume = asemi*bsemi*2*np.pi
     flux = bestpar[0]*gvolume
     fluxerr = perror[0]*gvolume
+
+    # USE MOFFAT_FLUX
     
     return bestpar,perror,cov,flux,fluxerr
 
 
+# Left to add:
+# -Penny
+# -gausspow
+# -empirical
 
 
 
+
+#@njit
+def apenny2d(x,y,pars,nderiv):
+    """
+    Two dimensional Penny model function with x/y array inputs.
+    
+    Parameters
+    ----------
+    x : numpy array
+      Array of X-values of points for which to compute the Penny model
+    y : numpy array
+      Array of Y-values of points for which to compute the Penny model.
+    pars : numpy array or list
+       Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta].
+    nderiv : int, optional
+       The number of derivatives to return.
+
+    Returns
+    -------
+    g : numpy array
+      The Penny model for the input x/y values and parameters.  Always
+        returned as 1D raveled() array.
+    derivative : numpy array
+      Array derivatives of g relative to the input parameters.
+        Always 2D [Npix,Nderiv] with the 1st dimension being the x/y arrays
+        raveled() to 1D.
+
+    Example
+    -------
+
+    g,derivative = apenny2d(x,y,pars,3)
+
+    """
+
+    allpars = np.zeros(11,float)
+    if len(pars)==7:
+        amp,xc,yc,asemi,bsemi,theta,relamp,sigma = pars
+        cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
+        allpars[:8] = pars
+        allpars[8:] = [cxx,cyy,cxy]
+    else:
+        allpars[:] = pars
+
+    # Unravel 2D arrays
+    if x.ndim==2:
+        xx = x.ravel()
+        yy = y.ravel()
+    else:
+        xx = x
+        yy = y
+    npix = len(xx)
+    # Initialize output
+    g = np.zeros(npix,float)
+    if nderiv>0:
+        deriv = np.zeros((npix,nderiv),float)
+    else:
+        deriv = np.zeros((1,1),float)
+    # Loop over the points
+    for i in range(npix):
+        g1,deriv1 = penny2d(xx[i],yy[i],allpars,nderiv)
+        g[i] = g1
+        if nderiv>0:
+            deriv[i,:] = deriv1
+    return g,deriv
+
+    
+#@njit
+def penny2d(x,y,pars,nderiv):
+    """
+    Two dimensional Penny model function for a single point.
+    Gaussian core and Lorentzian-like wings, only Gaussian is tilted.
+
+    Parameters
+    ----------
+    x : numpy array
+      Array of X-values of points for which to compute the Penny model.
+    y : numpy array
+      Array of Y-values of points for which to compute the Penny model.
+    pars : numpy array or list
+       Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta,
+                               relamp, sigma]
+         The cxx, cyy, cxy parameter can be added to the end so they don't
+         have to be computed.
+    nderiv : int, optional
+       The number of derivatives to return.
+
+    Returns
+    -------
+    g : numpy array
+      The Penny model for the input x/y values and parameters.
+    derivative : list
+      Array of derivatives of g relative to the input parameters.
+
+    Example
+    -------
+
+    g,derivative = penny2d(x,y,pars,deriv=True)
+
+    """
+
+    if len(pars)==8:
+        amp,xc,yc,asemi,bsemi,theta,relamp,sigma = pars
+        cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
+    else:
+        amp,xc,yc,asemi,bsemi,theta,relamp,sigma,cxx,cyy,cxy = pars
+        
+    u = (x-xc)
+    u2 = u**2
+    v = (y-yc)
+    v2 = v**2
+    # amp = 1/(asemi*bsemi*2*np.pi)
+    rr_gg = (cxx*u**2 + cyy*v**2 + cxy*u*v)
+    g = amp * (1 + rr_gg) ** (-beta)
+
+    relamp = clip(relamp,0.0,1.0)  # 0<relamp<1
+    # Gaussian component
+    g = amp * (1-relamp) * np.exp(-0.5*((cxx * u2) + (cxy * u*v) +
+                                        (cyy * v2)))
+    # Add Lorentzian/Moffat beta=1.2 wings
+    sigma = np.maximum(sigma,0)
+    rr_gg = (u2+v2) / sigma ** 2
+    beta = 1.2
+    l = amp * relamp / (1 + rr_gg)**(beta)
+    # Sum of Gaussian + Lorentzian
+    f = g + l
+    
+    #  pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
+    deriv = np.zeros(nderiv,float)    
+    if nderiv>0:
+        # amplitude
+        dg_dA = f / amp
+        deriv[0] = dg_dA
+        # x0
+        df_dx_mean = ( g * 0.5*((2 * cxx * u) + (cxy * v)) +                           
+                       2*beta*l*u/(sigma**2 * (1+rr_gg)) )  
+        deriv[1] = df_dx_mean
+        # y0
+        df_dy_mean = ( g * 0.5*((2 * cyy * v) + (cxy * u)) +
+                       2*beta*l*v/(sigma**2 * (1+rr_gg)) ) 
+        deriv[2] = df_dy_mean
+        if nderiv>3:
+            sint = np.sin(theta)        
+            cost = np.cos(theta)        
+            sint2 = sint ** 2
+            cost2 = cost ** 2
+            sin2t = np.sin(2. * theta)
+            # asemi/xsig
+            asemi2 = asemi ** 2
+            asemi3 = asemi ** 3
+            da_dxsig = -cost2 / asemi3
+            db_dxsig = -sin2t / asemi3
+            dc_dxsig = -sint2 / asemi3
+            df_dxsig = g * (-(da_dxsig * u2 +
+                              db_dxsig * u * v +
+                              dc_dxsig * v2))
+            deriv[3] = df_dxsig
+            # bsemi/ysig
+            bsemi2 = bsemi ** 2
+            bsemi3 = bsemi ** 3
+            da_dysig = -sint2 / bsemi3
+            db_dysig = sin2t / bsemi3
+            dc_dysig = -cost2 / bsemi3
+            df_dysig = g * (-(da_dysig * u2 +
+                              db_dysig * u * v +
+                              dc_dysig * v2))
+            deriv[4] = df_dysig
+            # dtheta
+            if asemi != bsemi:
+                cos2t = np.cos(2.0*theta)
+                da_dtheta = (sint * cost * ((1. / bsemi2) - (1. / asemi2)))
+                db_dtheta = (cos2t / asemi2) - (cos2t / bsemi2)
+                dc_dtheta = -da_dtheta
+                df_dtheta = g * (-(da_dtheta * u2 +
+                                   db_dtheta * u * v +
+                                   dc_dtheta * v2))
+                deriv[5] = df_dtheta
+            # relamp
+            f_drelamp = -g/(1-relamp) + l/relamp
+            deriv[6] = df_drelamp
+            # sigma
+            df_dsigma = beta*l/(1+rr_gg) * 2*(u2+v2)/sigma**3 
+            deriv[7] = df_dsigma
+            
+    return f,deriv
+
+#@njit
+def penny2dfit(im,err,ampc,xc,yc,verbose):
+    """ Fit all parameters of the Penny."""
+    # xc/yc are with respect to the image origin (0,0)
+    
+    # Solve for x, y, amplitude and asemi/bsemi/theta
+
+    maxiter = 10
+    minpercdiff = 0.5
+    
+    ny,nx = im.shape
+    im1d = im.ravel()
+
+    x2d,y2d = np.meshgrid(np.arange(nx),np.arange(ny))
+    x1d = x2d.ravel()
+    y1d = y2d.ravel()
+    
+    wt = 1/err**2
+    wt1d = wt.ravel()
+
+    asemi = 2.5
+    bsemi = 2.4
+    theta = 0.1
+    relamp = 0.2
+    sigma = 2*asemi
+
+    # theta in radians
+    
+    # Initial values
+    bestpar = np.zeros(8,float)
+    bestpar[0] = ampc
+    bestpar[1] = xc
+    bestpar[2] = yc
+    bestpar[3] = asemi
+    bestpar[4] = bsemi
+    bestpar[5] = theta
+    bestpar[6] = relamp
+    bestpar[7] = sigma
+    
+    # Iteration loop
+    maxpercdiff = 1e10
+    niter = 0
+    while (niter<maxiter and maxpercdiff>minpercdiff):
+        model,deriv = apenny2d(x1d,y1d,bestpar,8)
+        resid = im1d-model
+        dbeta = qr_jac_solve(deriv,resid,weight=wt1d)
+        
+        if verbose:
+            print(niter,bestpar)
+            print(dbeta)
+        
+        # Update parameters
+        last_bestpar = bestpar.copy()
+        # limit the steps to the maximum step sizes and boundaries
+        #if bounds is not None or maxsteps is not None:
+        #    bestpar = newpars(bestpar,dbeta,bounds,maxsteps)
+        bounds = np.zeros((8,2),float)
+        bounds[:,0] = [0.00, 0, 0, 0.1, 0.1, -180, 0.00, 0.1]
+        bounds[:,1] = [1e30,nx,ny, nx//2, ny//2, 180, 1, 10]
+        maxsteps = np.zeros(8,float)
+        maxsteps[:] = [0.5*bestpar[0],0.5,0.5,0.5,0.5,2.0,0.02,0.5]
+        bestpar = newlsqpars(bestpar,dbeta,bounds,maxsteps)
+        
+        # Check differences and changes
+        diff = np.abs(bestpar-last_bestpar)
+        denom = np.maximum(np.abs(bestpar.copy()),0.0001)
+        percdiff = diff.copy()/denom*100  # percent differences
+        maxpercdiff = np.max(percdiff)
+        chisq = np.sum((im1d-model)**2 * wt1d)/(nx*ny)
+        if verbose:
+            print('chisq=',chisq)
+        #if verbose:
+        #    print(niter,percdiff,chisq)
+        #    print()
+        last_dbeta = dbeta
+        niter += 1
+
+    model,deriv = apenny2d(x1d,y1d,bestpar,8)
+    resid = im1d-model
+    
+    # Get covariance and errors
+    cov = jac_covariance(deriv,resid,wt1d)
+    perror = np.sqrt(np.diag(cov))
+
+    # Now get the flux, multiply by the volume of the Gaussian
+    asemi,bsemi,theta = bestpar[3],bestpar[4],bestpar[5]
+    gvolume = asemi*bsemi*2*np.pi
+    flux = bestpar[0]*gvolume
+    fluxerr = perror[0]*gvolume
+
+    # USE PENNY_FLUX
+    
+    return bestpar,perror,cov,flux,fluxerr
 
 
 
