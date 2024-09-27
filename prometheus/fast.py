@@ -881,6 +881,271 @@ def gaussian2dfit(im,err,ampc,xc,yc,verbose):
 
 
 @njit
+def amoffat2d(x,y,pars,nderiv):
+    """
+    Two dimensional Moffat model function with x/y array inputs.
+    
+    Parameters
+    ----------
+    x : numpy array
+      Array of X-values of points for which to compute the Moffat model
+    y : numpy array
+      Array of Y-values of points for which to compute the Moffat model.
+    pars : numpy array or list
+       Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta].
+    nderiv : int, optional
+       The number of derivatives to return.
+
+    Returns
+    -------
+    g : numpy array
+      The Moffat model for the input x/y values and parameters.  Always
+        returned as 1D raveled() array.
+    derivative : numpy array
+      Array derivatives of g relative to the input parameters.
+        Always 2D [Npix,Nderiv] with the 1st dimension being the x/y arrays
+        raveled() to 1D.
+
+    Example
+    -------
+
+    g,derivative = amoffat2d(x,y,pars,3)
+
+    """
+
+    allpars = np.zeros(10,float)
+    if len(pars)==7:
+        amp,xc,yc,asemi,bsemi,theta,beta = pars
+        cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
+        allpars[:7] = pars
+        allpars[7:] = [cxx,cyy,cxy]
+    else:
+        allpars[:] = pars
+
+    # Unravel 2D arrays
+    if x.ndim==2:
+        xx = x.ravel()
+        yy = y.ravel()
+    else:
+        xx = x
+        yy = y
+    npix = len(xx)
+    # Initialize output
+    g = np.zeros(npix,float)
+    if nderiv>0:
+        deriv = np.zeros((npix,nderiv),float)
+    else:
+        deriv = np.zeros((1,1),float)
+    # Loop over the points
+    for i in range(npix):
+        g1,deriv1 = moffat2d(xx[i],yy[i],allpars,nderiv)
+        g[i] = g1
+        if nderiv>0:
+            deriv[i,:] = deriv1
+    return g,deriv
+
+    
+@njit
+def moffat2d(x,y,pars,nderiv):
+    """
+    Two dimensional Moffat model function for a single point.
+
+    Parameters
+    ----------
+    x : numpy array
+      Array of X-values of points for which to compute the Moffat model.
+    y : numpy array
+      Array of Y-values of points for which to compute the Moffat model.
+    pars : numpy array or list
+       Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
+         The cxx, cyy, cxy parameter can be added to the end so they don't
+         have to be computed.
+    nderiv : int, optional
+       The number of derivatives to return.
+
+    Returns
+    -------
+    g : numpy array
+      The Moffat model for the input x/y values and parameters.
+    derivative : list
+      Array of derivatives of g relative to the input parameters.
+
+    Example
+    -------
+
+    g,derivative = moffat2d(x,y,pars,deriv=True)
+
+    """
+
+    if len(pars)==7:
+        amp,xc,yc,asemi,bsemi,theta,beta = pars
+        cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
+    else:
+        amp,xc,yc,asemi,bsemi,theta,beta,cxx,cyy,cxy = pars
+        
+    u = (x-xc)
+    u2 = u**2
+    v = (y-yc)
+    v2 = v**2
+    # amp = 1/(asemi*bsemi*2*np.pi)
+    rr_gg = (cxx*u**2 + cyy*v**2 + cxy*u*v)
+    g = amp * (1 + rr_gg) ** (-beta)
+    
+    #  pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
+    deriv = np.zeros(nderiv,float)    
+    if nderiv>0:
+        # amplitude
+        dg_dA = g / amp
+        deriv[0] = dg_dA
+        # x0
+        dg_dx_mean = beta * g/(1+rr_gg) * ((2. * cxx * u) + (cxy * v))
+        deriv[1] = dg_dx_mean
+        # y0
+        dg_dy_mean = beta * g/(1+rr_gg) * ((cxy * u) + (2. * cyy * v))
+        deriv[2] = dg_dy_mean
+        if nderiv>3:
+            sint = np.sin(theta)        
+            cost = np.cos(theta)        
+            sint2 = sint ** 2
+            cost2 = cost ** 2
+            sin2t = np.sin(2. * theta)
+            # asemi/xsig
+            asemi2 = asemi ** 2
+            asemi3 = asemi ** 3
+            da_dxsig = -cost2 / asemi3
+            db_dxsig = -sin2t / asemi3
+            dc_dxsig = -sint2 / asemi3
+            dg_dxsig = (-beta)*g/(1+rr_gg) * 2*(da_dxsig * u2 +
+                                                db_dxsig * u * v +
+                                                dc_dxsig * v2)
+            deriv[3] = dg_dxsig
+            # bsemi/ysig
+            bsemi2 = bsemi ** 2
+            bsemi3 = bsemi ** 3
+            da_dysig = -sint2 / bsemi3
+            db_dysig = sin2t / bsemi3
+            dc_dysig = -cost2 / bsemi3
+            dg_dysig = (-beta)*g/(1+rr_gg) * 2*(da_dysig * u2 +
+                                                db_dysig * u * v +
+                                                dc_dysig * v2)
+            deriv[4] = dg_dysig
+            # dtheta
+            if asemi != bsemi:
+                cos2t = np.cos(2.0*theta)
+                da_dtheta = (sint * cost * ((1. / bsemi2) - (1. / asemi2)))
+                db_dtheta = (cos2t / asemi2) - (cos2t / bsemi2)
+                dc_dtheta = -da_dtheta
+                dg_dtheta = (-beta)*g/(1+rr_gg) * 2*(da_dtheta * u2 +
+                                                     db_dtheta * u * v +
+                                                     dc_dtheta * v2)
+                deriv[5] = dg_dtheta
+            # beta
+            dg_dbeta = -g * np.log(1 + rr_gg)
+            deriv[6] = dg_dbeta
+                
+    return g,deriv
+
+#@njit
+def moffat2dfit(im,err,ampc,xc,yc,verbose):
+    """ Fit all parameters of the Moffat."""
+    # xc/yc are with respect to the image origin (0,0)
+    
+    # Solve for x, y, amplitude and asemi/bsemi/theta
+
+    maxiter = 10
+    minpercdiff = 0.5
+    
+    ny,nx = im.shape
+    im1d = im.ravel()
+
+    x2d,y2d = np.meshgrid(np.arange(nx),np.arange(ny))
+    x1d = x2d.ravel()
+    y1d = y2d.ravel()
+    
+    wt = 1/err**2
+    wt1d = wt.ravel()
+
+    asemi = 2.5
+    bsemi = 2.4
+    theta = 0.1
+    beta = 2.5
+
+    # theta in radians
+    
+    # Initial values
+    bestpar = np.zeros(7,float)
+    bestpar[0] = ampc
+    bestpar[1] = xc
+    bestpar[2] = yc
+    bestpar[3] = asemi
+    bestpar[4] = bsemi
+    bestpar[5] = theta
+    bestpar[6] = beta
+    
+    # Iteration loop
+    maxpercdiff = 1e10
+    niter = 0
+    while (niter<maxiter and maxpercdiff>minpercdiff):
+        model,deriv = amoffat2d(x1d,y1d,bestpar,7)
+        resid = im1d-model
+        dbeta = qr_jac_solve(deriv,resid,weight=wt1d)
+        
+        if verbose:
+            print(niter,bestpar)
+            print(dbeta)
+        
+        # Update parameters
+        last_bestpar = bestpar.copy()
+        # limit the steps to the maximum step sizes and boundaries
+        #if bounds is not None or maxsteps is not None:
+        #    bestpar = newpars(bestpar,dbeta,bounds,maxsteps)
+        bounds = np.zeros((7,2),float)
+        bounds[:,0] = [0.00, 0, 0, 0.1, 0.1, -180, 0.1]
+        bounds[:,1] = [1e30,nx,ny, nx//2, ny//2, 180, 10]
+        maxsteps = np.zeros(7,float)
+        maxsteps[:] = [0.5*bestpar[0],0.5,0.5,0.5,0.5,2.0,0.5]
+        bestpar = newlsqpars(bestpar,dbeta,bounds,maxsteps)
+        
+        # Check differences and changes
+        diff = np.abs(bestpar-last_bestpar)
+        denom = np.maximum(np.abs(bestpar.copy()),0.0001)
+        percdiff = diff.copy()/denom*100  # percent differences
+        maxpercdiff = np.max(percdiff)
+        chisq = np.sum((im1d-model)**2 * wt1d)/(nx*ny)
+        if verbose:
+            print('chisq=',chisq)
+        #if verbose:
+        #    print(niter,percdiff,chisq)
+        #    print()
+        last_dbeta = dbeta
+        niter += 1
+
+    model,deriv = amoffat2d(x1d,y1d,bestpar,7)
+    resid = im1d-model
+    
+    # Get covariance and errors
+    cov = jac_covariance(deriv,resid,wt1d)
+    perror = np.sqrt(np.diag(cov))
+
+    # Now get the flux, multiply by the volume of the Gaussian
+    asemi,bsemi,theta = bestpar[3],bestpar[4],bestpar[5]
+    gvolume = asemi*bsemi*2*np.pi
+    flux = bestpar[0]*gvolume
+    fluxerr = perror[0]*gvolume
+    
+    return bestpar,perror,cov,flux,fluxerr
+
+
+
+
+
+
+
+
+
+
+
+@njit
 def gaussderiv(nx,ny,asemi,bsemi,theta,amp,xc,yc,nderiv):
     """ Generate Gaussians PSF model and derivative."""
     cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
