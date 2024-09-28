@@ -446,7 +446,44 @@ def gaussian2d(x,y,pars,nderiv):
 
 #@njit
 def gaussian2dfit(im,err,ampc,xc,yc,verbose):
-    """ Fit all parameters of the Gaussian."""
+    """
+    Fit a single Gaussian 2D model to data.
+
+    Parameters
+    ----------
+    im : numpy array
+       Flux array.  Can be 1D or 2D array.
+    err : numpy array
+       Uncertainty array of im.  Same dimensions as im.
+    ampc : float
+       Initial guess of amplitude.
+    xc : float
+       Initial guess of central X coordinate.
+    yc : float
+       Initial guess of central Y coordinate.
+    verbose : bool
+       Verbose output to the screen.
+
+    Returns
+    -------
+    pars : numpy array
+       Best fit pararmeters.
+    perror : numpy array
+       Uncertainties in pars.
+    pcov : numpy array
+       Covariance matrix.
+    flux : float
+       Best fit flux.
+    fluxerr : float
+       Uncertainty in flux.
+    
+    Example
+    -------
+
+    pars,perror,cov,flux,fluxerr = gaussian2dfit(im,err,1,100.0,5.5,6.5,False)
+
+    """
+
     # xc/yc are with respect to the image origin (0,0)
     
     # Solve for x, y, amplitude and asemi/bsemi/theta
@@ -785,7 +822,44 @@ def moffat2d(x,y,pars,nderiv):
 
 #@njit
 def moffat2dfit(im,err,ampc,xc,yc,verbose):
-    """ Fit all parameters of the Moffat."""
+    """
+    Fit a single Moffat 2D model to data.
+
+    Parameters
+    ----------
+    im : numpy array
+       Flux array.  Can be 1D or 2D array.
+    err : numpy array
+       Uncertainty array of im.  Same dimensions as im.
+    ampc : float
+       Initial guess of amplitude.
+    xc : float
+       Initial guess of central X coordinate.
+    yc : float
+       Initial guess of central Y coordinate.
+    verbose : bool
+       Verbose output to the screen.
+
+    Returns
+    -------
+    pars : numpy array
+       Best fit pararmeters.
+    perror : numpy array
+       Uncertainties in pars.
+    pcov : numpy array
+       Covariance matrix.
+    flux : float
+       Best fit flux.
+    fluxerr : float
+       Uncertainty in flux.
+    
+    Example
+    -------
+
+    pars,perror,cov,flux,fluxerr = moffat2dfit(im,err,1,100.0,5.5,6.5,False)
+
+    """
+
     # xc/yc are with respect to the image origin (0,0)
     
     # Solve for x, y, amplitude and asemi/bsemi/theta
@@ -1164,7 +1238,43 @@ def penny2d(x,y,pars,nderiv):
 
 #@njit
 def penny2dfit(im,err,ampc,xc,yc,verbose):
-    """ Fit all parameters of the Penny."""
+    """
+    Fit a single Penny 2D model to data.
+
+    Parameters
+    ----------
+    im : numpy array
+       Flux array.  Can be 1D or 2D array.
+    err : numpy array
+       Uncertainty array of im.  Same dimensions as im.
+    ampc : float
+       Initial guess of amplitude.
+    xc : float
+       Initial guess of central X coordinate.
+    yc : float
+       Initial guess of central Y coordinate.
+    verbose : bool
+       Verbose output to the screen.
+
+    Returns
+    -------
+    pars : numpy array
+       Best fit pararmeters.
+    perror : numpy array
+       Uncertainties in pars.
+    pcov : numpy array
+       Covariance matrix.
+    flux : float
+       Best fit flux.
+    fluxerr : float
+       Uncertainty in flux.
+    
+    Example
+    -------
+
+    pars,perror,cov,flux,fluxerr = penny2dfit(im,err,1,100.0,5.5,6.5,False)
+
+    """
     # xc/yc are with respect to the image origin (0,0)
     
     # Solve for x, y, amplitude and asemi/bsemi/theta
@@ -1557,7 +1667,44 @@ def gausspow2d(x,y,pars,nderiv):
 
 #@njit
 def gausspow2dfit(im,err,ampc,xc,yc,verbose):
-    """ Fit all parameters of the Gausspow."""
+    """
+    Fit a single GaussPOW 2D model to data.
+
+    Parameters
+    ----------
+    im : numpy array
+       Flux array.  Can be 1D or 2D array.
+    err : numpy array
+       Uncertainty array of im.  Same dimensions as im.
+    ampc : float
+       Initial guess of amplitude.
+    xc : float
+       Initial guess of central X coordinate.
+    yc : float
+       Initial guess of central Y coordinate.
+    verbose : bool
+       Verbose output to the screen.
+
+    Returns
+    -------
+    pars : numpy array
+       Best fit pararmeters.
+    perror : numpy array
+       Uncertainties in pars.
+    pcov : numpy array
+       Covariance matrix.
+    flux : float
+       Best fit flux.
+    fluxerr : float
+       Uncertainty in flux.
+    
+    Example
+    -------
+
+    pars,perror,cov,flux,fluxerr = gausspow2dfit(im,err,1,100.0,5.5,6.5,False)
+
+    """
+
     # xc/yc are with respect to the image origin (0,0)
     
     # Solve for x, y, amplitude and asemi/bsemi/theta
@@ -1655,7 +1802,7 @@ def gausspow2dfit(im,err,ampc,xc,yc,verbose):
 
 ####### SERSIC ########
 
-@njit
+#@njit
 def asersic2d(x,y,pars,nderiv):
     """
     Sersic profile and can be elliptical and rotated.
@@ -1710,7 +1857,7 @@ def asersic2d(x,y,pars,nderiv):
             deriv[i,:] = deriv1
     return g,deriv
 
-@njit  
+#@njit  
 def sersic2d(x, y, pars, nderiv):
     """
     Sersic profile and can be elliptical and rotated.
@@ -1774,23 +1921,52 @@ def sersic2d(x, y, pars, nderiv):
     #  pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
     deriv = np.zeros(nderiv,float)    
     if nderiv>0:
-        fact = (kserc*alpha)*(rr**(alpha-2))
+        if rr==0:
+            du_drr = 1.0
+        else:
+            du_drr = (kserc*alpha)*(rr**(alpha-2))
         # amplitude
         dg_dA = g / amp
         deriv[0] = dg_dA
         # x0
-        dg_dx_mean = g * fact * 0.5 * ((2 * a * xdiff) + (b * ydiff))
+        if rr != 0:
+            dg_dx_mean = g * du_drr * 0.5 * ((2 * a * xdiff) + (b * ydiff))
+        else:
+            # special case, use finite difference
+            # Taylor expansion of exp(x) = 1 + x
+            # derivative d exp(x)/dx = 1 + x
+            # finite difference
+            # g_2 = A*(1-kserc*r_2**alpha)
+            # g_1 = A
+            # r_2 = dx*a**(1/2)
+            # dg/dx0 = [A*(1-kserc*r_2**alpha)-A]/dx
+            #        = -A*kserc*a**(alpha/2) * dx**alpha / dx
+            # as dx->0   dx**(alpha-1)->1  ONLY if alpha>=1
+            # dg/dx0 = -A*kserc*a**(alpha/2)
+            dg_dx_mean = -amp*kserc*a**(alpha/2)
+            dx = 1e-3
+            r_2 = dx*np.sqrt(a)
+            g_1 = amp
+            g_2 = amp*np.exp(-kserc*r_2**alpha)
+            dg_dx_mean = (g_2-g_1)/dx
+            import pdb; pdb.set_trace()
         deriv[1] = dg_dx_mean
         # y0
-        dg_dy_mean = g * fact * 0.5 * ((2 * c * ydiff) + (b * xdiff))
+        if rr != 0:
+            dg_dy_mean = g * du_drr * 0.5 * ((2 * c * ydiff) + (b * xdiff))
+        else:
+            # special case, use finite difference
+            # similar to above, but replace a with c
+            dg_dy_mean = -amp*kserc*c**(alpha/2)
         deriv[2] = dg_dy_mean
         if nderiv>3:
             # kserc
             dg_dkserc = -g * rr**alpha
             deriv[3] = dg_dkserc
             # alpha
-            dg_dalpha = -g * kserc*np.log(rr) * rr**alpha
-            if rr==0:
+            if rr != 0:
+                dg_dalpha = -g * kserc*np.log(rr) * rr**alpha
+            else:
                 dg_dalpha = 0.0
             deriv[4] = dg_dalpha
             # recc
@@ -1799,12 +1975,13 @@ def sersic2d(x, y, pars, nderiv):
             recc3 = recc**3
             da_drecc = -2*sint2 / recc3
             db_drecc =  2*sin2t / recc3            
-            dc_drecc = -2*cost2 / recc3            
-            dg_drecc = -g * fact * 0.5 * (da_drecc * xdiff2 +
-                                          db_drecc * xdiff * ydiff +
-                                          dc_drecc * ydiff2)
+            dc_drecc = -2*cost2 / recc3
             if rr==0:
                 dg_drecc = 0.0
+            else:
+                dg_drecc = -g * du_drr * 0.5 * (da_drecc * xdiff2 +
+                                                db_drecc * xdiff * ydiff +
+                                                dc_drecc * ydiff2)
             deriv[5] = dg_drecc
             # theta
             sint = np.sin(theta)
@@ -1812,15 +1989,14 @@ def sersic2d(x, y, pars, nderiv):
             cos2t = np.cos(2.0*theta)
             da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
             db_dtheta = (cos2t / xsig2) - (cos2t / ysig2)            
-            dc_dtheta = -da_dtheta            
-            dg_dtheta = -g * fact * (da_dtheta * xdiff2 +
-                                     db_dtheta * xdiff * ydiff +
-                                     dc_dtheta * ydiff2)
+            dc_dtheta = -da_dtheta
             if rr==0:
                 dg_dtheta = 0.0
+            else:
+                dg_dtheta = -g * du_drr * (da_dtheta * xdiff2 +
+                                           db_dtheta * xdiff * ydiff +
+                                           dc_dtheta * ydiff2)
             deriv[6] = dg_dtheta
-
-        # special case if alpha=2???
 
     return g,deriv
 
@@ -2112,7 +2288,7 @@ def psf2d(x,y,psftype,pars,nderiv):
         print('psftype=',psftype,'not supported')
         return
 
-@njit
+#@njit
 def apsf2d(x,y,psftype,pars,nderiv):
     """
     Two dimensional Gaussian model function with x/y array inputs.
@@ -2265,6 +2441,360 @@ def psf2d_fwhm(psftype,pars):
         print('psftype=',psftype,'not supported')
         return
 
+
+@njit
+def psf2d_estimates(psftype,ampc,xc,yc):
+    """
+    Get initial estimates for parameters
+
+    Parameters
+    ----------
+
+    Returns
+    -------
+
+    Examples
+    --------
+
+    
+    """
+    # Gaussian
+    if psftype==1:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+        initpars = np.zeros(6,float)
+        initpars[:3] = [ampc,xc,yc]
+        initpars[3:] = [3.5,3.0,0.2]
+        return initpars
+    # Moffat
+    elif psftype==2:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
+        initpars = np.zeros(7,float)
+        initpars[:3] = [ampc,xc,yc]
+        initpars[3:] = [3.5,3.0,0.2,2.5]
+        return initpars        
+    # Penny
+    elif psftype==3:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
+        initpars = np.zeros(8,float)
+        initpars[:3] = [ampc,xc,yc]
+        initpars[3:] = [3.5,3.0,0.2,0.1,5.0]
+        return initpars        
+    # Gausspow
+    elif psftype==4:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
+        initpars = np.zeros(8,float)
+        initpars[:3] = [ampc,xc,yc]
+        initpars[3:] = [3.5,3.0,0.2,4.0,6.0]
+        return initpars        
+    # Sersic
+    elif psftype==5:
+        # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
+        initpars = np.zeros(7,float)
+        initpars[:3] = [ampc,xc,yc]
+        initpars[3:] = [0.3,0.7,0.2,0.2]
+        return initpars        
+    else:
+        print('psftype=',psftype,'not supported')
+        return
+
+@njit
+def psf2d_bounds(psftype):
+    """
+    Return upper and lower fitting bounds for the parameters.
+
+    Parameters
+    ----------
+    psftype : int
+       Type of PSF model: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic.
+    
+    Returns
+    -------
+    bounds : numpy array
+       Upper and lower fitting bounds for each parameter.
+
+    Examples
+    --------
+
+    bounds = psf2d_bounds(2)
+    
+    """
+    # Gaussian
+    if psftype==1:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+        bounds = np.zeros((6,2),float)
+        bounds[:,0] = [0.00, 0.0, 0.0, 0.1, 0.1, -np.pi]
+        bounds[:,1] = [1e30, 1e4, 1e4,  50,  50,  np.pi]
+        return bounds
+    # Moffat
+    elif psftype==2:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
+        bounds = np.zeros((7,2),float)
+        bounds[:,0] = [0.00, 0.0, 0.0, 0.1, 0.1, -np.pi, 0.1]
+        bounds[:,1] = [1e30, 1e4, 1e4,  50,  50,  np.pi, 10]
+        return bounds
+    # Penny
+    elif psftype==3:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
+        bounds = np.zeros((8,2),float)
+        bounds[:,0] = [0.00, 0.0, 0.0, 0.1, 0.1, -np.pi, 0.0, 0.1]
+        bounds[:,1] = [1e30, 1e4, 1e4,  50,  50,  np.pi, 1.0,  50]
+        return bounds
+    # Gausspow
+    elif psftype==4:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
+        bounds = np.zeros((8,2),float)
+        bounds[:,0] = [0.00, 0.0, 0.0, 0.1, 0.1, -np.pi, 0.1, 0.1]
+        bounds[:,1] = [1e30, 1e4, 1e4,  50,  50,  np.pi,  50,  50]
+        return bounds
+    # Sersic
+    elif psftype==5:
+        # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
+        bounds = np.zeros((7,2),float)
+        bounds[:,0] = [0.00, 0.0, 0.0, 0.01, 0.02, 0.0, -np.pi]
+        bounds[:,1] = [1e30, 1e4, 1e4,   20,  100, 1.0,  np.pi]
+        return bounds
+    else:
+        print('psftype=',psftype,'not supported')
+        return
+    
+@njit
+def psf2d_maxsteps(psftype,pars):
+    """
+    Get maximum steps for parameters.
+
+    Parameters
+    ----------
+    psftype : int
+       Type of PSF model: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic.
+    pars : numpy array
+       Current best-fit parameters.
+    
+    Returns
+    -------
+    maxsteps : numpy array
+       Maximum step to allow for each parameter.
+
+    Examples
+    --------
+
+    maxsteps = psf2d_maxsteps(2,pars)
+    
+    """
+    # Gaussian
+    if psftype==1:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+        maxsteps = np.zeros(6,float)
+        maxsteps[:] = [0.5*pars[0],0.5,0.5,0.5,0.5,0.05]
+        return maxsteps
+    # Moffat
+    elif psftype==2:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
+        maxsteps = np.zeros(7,float)
+        maxsteps[:] = [0.5*pars[0],0.5,0.5,0.5,0.5,0.05,0.03]
+        return maxsteps
+    # Penny
+    elif psftype==3:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
+        maxsteps = np.zeros(8,float)
+        maxsteps[:] = [0.5*pars[0],0.5,0.5,0.5,0.5,0.05,0.01,0.5]
+        return maxsteps
+    # Gausspow
+    elif psftype==4:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
+        maxsteps = np.zeros(8,float)
+        maxsteps[:] = [0.5*pars[0],0.5,0.5,0.5,0.5,0.05,0.5,0.5]
+        return maxsteps
+    # Sersic
+    elif psftype==5:
+        # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
+        maxsteps = np.zeros(7,float)
+        maxsteps[:] = [0.5*pars[0],0.5,0.5,0.05,0.1,0.05,0.05]
+        return maxsteps
+    else:
+        print('psftype=',psftype,'not supported')
+        return
+
+#@njit
+def psf2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
+    """
+    Fit a single model to data.
+
+    Parameters
+    ----------
+    im : numpy array
+       Flux array.  Can be 1D or 2D array.
+    err : numpy array
+       Uncertainty array of im.  Same dimensions as im.
+    x : numpy array
+       Array of X-values for im.
+    y : numpy array
+       Array of Y-values for im.
+    psftype : int
+       Type of PSF model: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic.
+    ampc : float
+       Initial guess of amplitude.
+    xc : float
+       Initial guess of central X coordinate.
+    yc : float
+       Initial guess of central Y coordinate.
+    verbose : bool
+       Verbose output to the screen.
+
+    Returns
+    -------
+    pars : numpy array
+       Best fit pararmeters.
+    perror : numpy array
+       Uncertainties in pars.
+    pcov : numpy array
+       Covariance matrix.
+    flux : float
+       Best fit flux.
+    fluxerr : float
+       Uncertainty in flux.
+    chisq : float
+       Reduced chi-squared of the best-fit.
+    
+    Example
+    -------
+
+    pars,perror,cov,flux,fluxerr,chisq = psf2dfit(im,err,x,y,1,100.0,5.5,6.5,False)
+
+    """
+
+    maxiter = 10
+    minpercdiff = 0.5
+
+    if im.ndim==2:
+        im1d = im.ravel()
+        err1d = err.ravel()
+        x1d = x.ravel()
+        y1d = y.ravel()
+    else:
+        im1d = im
+        err1d = err
+        x1d = x
+        y1d = y
+    wt1d = 1/err1d**2
+    npix = len(im1d)
+    
+    # Initial values
+    bestpar = psf2d_estimates(psftype,ampc,xc,yc)
+    nparams = len(bestpar)
+    nderiv = nparams
+    bounds = psf2d_bounds(psftype)
+
+    if verbose:
+        print('bestpar=',bestpar)
+        print('nderiv=',nderiv)
+    
+    # Iteration loop
+    maxpercdiff = 1e10
+    niter = 0
+    while (niter<maxiter and maxpercdiff>minpercdiff):
+        import pdb; pdb.set_trace()
+        model,deriv = apsf2d(x1d,y1d,psftype,bestpar,nderiv)
+        resid = im1d-model
+        dbeta = qr_jac_solve(deriv,resid,weight=wt1d)
+        
+        if verbose:
+            print(niter,bestpar)
+            print(dbeta)
+        
+        # Update parameters
+        last_bestpar = bestpar.copy()
+        # limit the steps to the maximum step sizes and boundaries
+        maxsteps = psf2d_maxsteps(psftype,bestpar)
+        bestpar = newlsqpars(bestpar,dbeta,bounds,maxsteps)
+        
+        # Check differences and changes
+        diff = np.abs(bestpar-last_bestpar)
+        denom = np.maximum(np.abs(bestpar.copy()),0.0001)
+        percdiff = diff.copy()/denom*100  # percent differences
+        maxpercdiff = np.max(percdiff)
+        chisq = np.sum((im1d-model)**2 * wt1d)/npix
+        if verbose:
+            print('chisq=',chisq)
+        #if verbose:
+        #    print(niter,percdiff,chisq)
+        #    print()
+        last_dbeta = dbeta
+        niter += 1
+
+    model,deriv = apsf2d(x1d,y1d,psftype,bestpar,nderiv)
+    resid = im1d-model
+    
+    # Get covariance and errors
+    cov = jac_covariance(deriv,resid,wt1d)
+    perror = np.sqrt(np.diag(cov))
+
+    # Now get the flux
+    flux = psf2d_flux(psftype,bestpar)
+    fluxerr = perror[0]*(flux/bestpar[0]) 
+    
+    return bestpar,perror,cov,flux,fluxerr,chisq
+
+    
+@njit
+def psf2dfit2(im,err,psftype,ampc,xc,yc,verbose):
+    """
+    Fit a single model to data.
+
+    Parameters
+    ----------
+    im : numpy array
+       Flux array.  Can be 1D or 2D array.
+    err : numpy array
+       Uncertainty array of im.  Same dimensions as im.
+    psftype : int
+       Type of PSF model: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic.
+    ampc : float
+       Initial guess of amplitude.
+    xc : float
+       Initial guess of central X coordinate.
+    yc : float
+       Initial guess of central Y coordinate.
+    verbose : bool
+       Verbose output to the screen.
+
+    Returns
+    -------
+    pars : numpy array
+       Best fit pararmeters.
+    perror : numpy array
+       Uncertainties in pars.
+    pcov : numpy array
+       Covariance matrix.
+    flux : float
+       Best fit flux.
+    fluxerr : float
+       Uncertainty in flux.
+    
+    Example
+    -------
+
+    pars,perror,cov,flux,fluxerr = psf2dfit(im,err,1,100.0,5.5,6.5,False)
+
+    """
+    # Gaussian
+    if psftype==1:
+        return gaussian2dfit(im,err,ampc,xc,yc,verbose)
+    # Moffat
+    elif psftype==2:
+        return moffat2d_fit(im,err,ampc,xc,yc,verbose)
+    # Penny
+    elif psftype==3:
+        return penny2d_fit(im,err,ampc,xc,yc,verbose)
+    # Gausspow
+    elif psftype==4:
+        return gausspow2d_fit(im,err,ampc,xc,yc,verbose)
+    # Sersic
+    elif psftype==5:
+        return sersic2d_fit(im,err,ampc,xc,yc,verbose)
+    else:
+        print('psftype=',psftype,'not supported')
+        return
+    
 ####################################################
 
 
