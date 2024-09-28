@@ -2210,10 +2210,10 @@ def psf2d_flux(psftype,pars):
     elif psftype==4:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
         return gausspow2d_flux(pars)
-    ## Sersic
-    #elif psftype==5:
-    #    # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
-    #    return sersic2d_flux(pars)
+    # Sersic
+    elif psftype==5:
+        # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
+        return sersic2d_flux(pars)
     else:
         print('psftype=',psftype,'not supported')
         return
@@ -2257,10 +2257,10 @@ def psf2d_fwhm(psftype,pars):
     elif psftype==4:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
         return gausspow2d_fwhm(pars)
-    ## Sersic
-    #elif psftype==5:
-    #    # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
-    #    return sersic2d_fwhm(pars)
+    # Sersic
+    elif psftype==5:
+        # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
+        return sersic2d_fwhm(pars)
     else:
         print('psftype=',psftype,'not supported')
         return
