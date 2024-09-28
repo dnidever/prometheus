@@ -1,9 +1,15 @@
 import os
 import sys
 import numpy as np
+#from scipy.special import gamma, gammaincinv, gammainc
+import scipy.special as sc
+#import numba_special  # The import generates Numba overloads for special
 from dlnpyutils import utils as dln
-from numba import njit
+import numba
+from numba import njit,types
 from . import leastsquares as lsq
+
+PI = 3.141592653589793
 
 @njit
 def aclip(val,minval,maxval):
@@ -27,6 +33,81 @@ def clip(val,minval,maxval):
     else:
         nval = val
     return nval
+
+@njit
+def drop_imag(z):
+    EPSILON = 1e-07    
+    if abs(z.imag) <= EPSILON:
+        z = z.real
+    return z
+
+@njit
+def gamma(z):
+    # Gamma function for a single z value
+    # Using the Lanczos approximation
+    # https://en.wikipedia.org/wiki/Lanczos_approximation
+    g = 7
+    n = 9
+    p = [
+        0.99999999999980993,
+        676.5203681218851,
+        -1259.1392167224028,
+        771.32342877765313,
+        -176.61502916214059,
+        12.507343278686905,
+        -0.13857109526572012,
+        9.9843695780195716e-6,
+        1.5056327351493116e-7
+    ]
+    if z < 0.5:
+        y = PI / (np.sin(PI * z) * gamma(1 - z))  # Reflection formula
+    else:
+        z -= 1
+        x = p[0]
+        for i in range(1, len(p)):
+            x += p[i] / (z + i)
+        t = z + g + 0.5
+        y = np.sqrt(2 * PI) * t ** (z + 0.5) * np.exp(-t) * x
+    return y
+
+@njit
+def gammaincinv05(a):
+    """ gammaincinv(a,0.5) """
+    n = np.array([1.00e-03, 1.12e-01, 2.23e-01, 3.34e-01, 4.45e-01, 5.56e-01,
+                  6.67e-01, 7.78e-01, 8.89e-01, 1.00e+00, 2.00e+00, 3.00e+00,
+                  4.00e+00, 5.00e+00, 6.00e+00, 7.00e+00, 8.00e+00, 9.00e+00,
+                  1.00e+01, 1.10e+01, 1.20e+01])
+
+    y = np.array([5.24420641e-302, 1.25897478e-003, 3.03558724e-002, 9.59815712e-002,
+                  1.81209305e-001, 2.76343765e-001, 3.76863377e-001, 4.80541354e-001,
+                  5.86193928e-001, 6.93147181e-001, 1.67834699e+000, 2.67406031e+000,
+                  3.67206075e+000, 4.67090888e+000, 5.67016119e+000, 6.66963707e+000,
+                  7.66924944e+000, 8.66895118e+000, 9.66871461e+000, 1.06685224e+001,
+                  1.16683632e+001])
+    # Lower edge
+    if a < n[0]:
+        out = 0.0
+    # Upper edge
+    elif a > n[-1]:
+        # linear approximation to large values
+        # coef = np.array([ 0.99984075, -0.32972584])
+        out = 0.99984075*a-0.32972584
+    # Interpolate values
+    else:
+        ind = np.searchsorted(n,a)
+        # exact match
+        if n[ind]==a:
+            out = y[ind]
+        # At beginning
+        elif ind==0:
+            slp = (y[1]-y[0])/(n[1]-n[0])
+            out = slp*(a-n[0])+y[0]
+        else:
+            slp = (y[ind]-y[ind-1])/(n[ind]-n[ind-1])
+            out = slp*(a-n[ind-1])+y[ind-1]
+            
+    return out
+
 
 @njit
 def numba_linearinterp(binim,fullim,binsize):
@@ -831,9 +912,6 @@ def penny2d_fwhm(pars):
     relamp = clip(pars[6],0.0,1.0)  # 0<relamp<1
     sigma = np.maximum(pars[7],0)
     beta = 1.2   # Moffat
-
-    if np.sum(~np.isfinite(np.array(pars)))>0:
-        raise ValueError('PARS cannot be inf or nan')
     
     # The mean radius of an ellipse is: (2a+b)/3
     sig_major = np.max(np.array([xsig,ysig]))
@@ -1746,7 +1824,7 @@ def sersic2d(x, y, pars, nderiv):
 
     return g,deriv
 
-#@njit
+@njit
 def sersic2d_fwhm(pars):
     """
     Return the FWHM of a 2D Sersic function.
@@ -1777,9 +1855,6 @@ def sersic2d_fwhm(pars):
     alpha = pars[4]
     recc = pars[5]               # b/a
 
-    if np.sum(~np.isfinite(np.array(pars)))>0:
-        raise ValueError('PARS cannot be inf or nan')
-
     # Radius of half maximum
     # I(R) = I0 * exp(-k*R**alpha) 
     # 0.5*I0 = I0 * exp(-k*R**alpha)
@@ -1804,12 +1879,14 @@ def sersic2d_fwhm(pars):
     
     return fwhm
 
-#@njit
+@njit
 def sersic_b(n):
     # Normalisation constant
     # bn ~ 2n-1/3 for n>8
-    # https://gist.github.com/bamford/b657e3a14c9c567afc4598b1fd10a459    
-    return gammaincinv(2*n, 0.5)
+    # https://gist.github.com/bamford/b657e3a14c9c567afc4598b1fd10a459
+    # n is always positive
+    #return gammaincinv(2*n, 0.5)
+    return gammaincinv05(2*n)
 
 #@njit
 def create_sersic_function(Ie, re, n):
@@ -1822,14 +1899,14 @@ def create_sersic_function(Ie, re, n):
         return Ie * np.exp(f * r ** reciprocal_n - neg_bn)
     return sersic_wrapper
 
-#@njit
+@njit
 def sersic_lum(Ie, re, n):
     # total luminosity (integrated to infinity)
     bn = sersic_b(n)
     g2n = gamma(2*n)
     return Ie * re**2 * 2*np.pi*n * np.exp(bn)/(bn**(2*n)) * g2n
 
-#@njit
+@njit
 def sersic_full2half(I0,kserc,alpha):
     # Convert Io and k to Ie and Re
     # Ie = Io * exp(-bn)
@@ -1840,7 +1917,7 @@ def sersic_full2half(I0,kserc,alpha):
     Re = (bn/kserc)**n
     return Ie,Re
 
-#@njit
+@njit
 def sersic_half2full(Ie,Re,alpha):
     # Convert Ie and Re to Io and k
     # Ie = Io * exp(-bn)
@@ -1851,7 +1928,7 @@ def sersic_half2full(Ie,Re,alpha):
     kserc = bn/Re**alpha
     return I0,kserc
 
-#@njit
+@njit
 def sersic2d_flux(pars):
     """
     Return the total Flux of a 2D Sersic function.
@@ -2093,6 +2170,100 @@ def apsf2d(x,y,psftype,pars,nderiv):
         print('psftype=',psftype,'not supported')
 
     return g,deriv
+
+@njit
+def psf2d_flux(psftype,pars):
+    """
+    Return the flux of a 2D PSF model.
+
+    Parameters
+    ----------
+    psftype : int
+       Type of PSF model: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic.
+    pars : numpy array
+       Parameter list.
+
+    Returns
+    -------
+    flux : float
+       Total flux or volume of the 2D PSF model.
+    
+    Example
+    -------
+
+    flux = psf2d_flux(pars)
+
+    """
+    # Gaussian
+    if psftype==1:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+        return gaussian2d_flux(pars)
+    # Moffat
+    elif psftype==2:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
+        return moffat2d_flux(pars)
+    # Penny
+    elif psftype==3:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
+        return penny2d_flux(pars)
+    # Gausspow
+    elif psftype==4:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
+        return gausspow2d_flux(pars)
+    ## Sersic
+    #elif psftype==5:
+    #    # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
+    #    return sersic2d_flux(pars)
+    else:
+        print('psftype=',psftype,'not supported')
+        return
+
+@njit
+def psf2d_fwhm(psftype,pars):
+    """
+    Return the fwhm of a 2D PSF model.
+
+    Parameters
+    ----------
+    psftype : int
+       Type of PSF model: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic.
+    pars : numpy array
+       Parameter list.
+
+    Returns
+    -------
+    fwhm : float
+       FWHM of the 2D PSF model.
+    
+    Example
+    -------
+
+    fwhm = psf2d_fwhm(pars)
+
+    """
+    # Gaussian
+    if psftype==1:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+        return gaussian2d_fwhm(pars)
+    # Moffat
+    elif psftype==2:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
+        return moffat2d_fwhm(pars)
+    # Penny
+    elif psftype==3:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
+        return penny2d_fwhm(pars)
+    # Gausspow
+    elif psftype==4:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
+        return gausspow2d_fwhm(pars)
+    ## Sersic
+    #elif psftype==5:
+    #    # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
+    #    return sersic2d_fwhm(pars)
+    else:
+        print('psftype=',psftype,'not supported')
+        return
 
 ####################################################
 
