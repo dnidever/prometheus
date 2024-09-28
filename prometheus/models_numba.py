@@ -139,7 +139,7 @@ def gaussian2d_flux(pars):
 
     Parameters
     ----------
-    pars : numpy array or list
+    pars : numpy array
        Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta]
 
     Returns
@@ -167,7 +167,7 @@ def gaussian2d_fwhm(pars):
 
     Parameters
     ----------
-    pars : numpy array or list
+    pars : numpy array
        Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta]
 
     Returns
@@ -212,7 +212,7 @@ def agaussian2d(x,y,pars,nderiv):
       Array of X-values of points for which to compute the Gaussian model.
     y : numpy array
       Array of Y-values of points for which to compute the Gaussian model.
-    pars : numpy array or list
+    pars : numpy array
        Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta].
          Or can include cxx, cyy, cxy at the end so they don't have to be
          computed.
@@ -274,22 +274,22 @@ def gaussian2d(x,y,pars,nderiv):
     
     Parameters
     ----------
-    x : numpy array
+    x : float
       Single X-value for which to compute the Gaussian model.
-    y : numpy array
+    y : float
       Single Y-value of points for which to compute the Gaussian model.
-    pars : numpy array or list
+    pars : numpy array
        Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta]
     nderiv : int
        The number of derivatives to return.
 
     Returns
     -------
-    g : numpy array
+    g : float
       The Gaussian model for the input x/y values and parameters (same
         shape as x/y).
-    derivative : list
-      List of derivatives of g relative to the input parameters.
+    derivative : numpy array
+      Array of derivatives of g relative to the input parameters.
 
     Example
     -------
@@ -466,7 +466,7 @@ def moffat2d_fwhm(pars):
 
     Parameters
     ----------
-    pars : numpy array or list
+    pars : numpy array
        Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
 
     Returns
@@ -502,7 +502,7 @@ def moffat2d_flux(pars):
 
     Parameters
     ----------
-    pars : numpy array or list
+    pars : numpy array
        Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
 
     Returns
@@ -548,7 +548,7 @@ def amoffat2d(x,y,pars,nderiv):
       Array of X-values of points for which to compute the Moffat model
     y : numpy array
       Array of Y-values of points for which to compute the Moffat model.
-    pars : numpy array or list
+    pars : numpy array
        Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta].
     nderiv : int
        The number of derivatives to return.
@@ -609,11 +609,11 @@ def moffat2d(x,y,pars,nderiv):
 
     Parameters
     ----------
-    x : numpy array
-      Array of X-values of points for which to compute the Moffat model.
-    y : numpy array
-      Array of Y-values of points for which to compute the Moffat model.
-    pars : numpy array or list
+    x : float
+      Single X-value for which to compute the Moffat model.
+    y : float
+      Single Y-value for which to compute the Moffat model.
+    pars : numpy array
        Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
          The cxx, cyy, cxy parameter can be added to the end so they don't
          have to be computed.
@@ -622,9 +622,9 @@ def moffat2d(x,y,pars,nderiv):
 
     Returns
     -------
-    g : numpy array
+    g : float
       The Moffat model for the input x/y values and parameters.
-    derivative : list
+    derivative : numpy array
       Array of derivatives of g relative to the input parameters.
 
     Example
@@ -807,7 +807,7 @@ def penny2d_fwhm(pars):
 
     Parameters
     ----------
-    pars : numpy array or list
+    pars : numpy array
        Parameter list.
         pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
 
@@ -864,7 +864,7 @@ def penny2d_flux(pars):
 
     Parameters
     ----------
-    pars : numpy array or list
+    pars : numpy array
        Parameter list.
         pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
 
@@ -915,7 +915,7 @@ def apenny2d(x,y,pars,nderiv):
       Array of X-values of points for which to compute the Penny model
     y : numpy array
       Array of Y-values of points for which to compute the Penny model.
-    pars : numpy array or list
+    pars : numpy array
        Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta].
     nderiv : int
        The number of derivatives to return.
@@ -977,11 +977,11 @@ def penny2d(x,y,pars,nderiv):
 
     Parameters
     ----------
-    x : numpy array
-      Array of X-values of points for which to compute the Penny model.
-    y : numpy array
-      Array of Y-values of points for which to compute the Penny model.
-    pars : numpy array or list
+    x : float
+      Single X-value for which to compute the Penny model.
+    y : float
+      Single Y-value for which to compute the Penny model.
+    pars : numpy array
        Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta,
                                relamp, sigma]
          The cxx, cyy, cxy parameter can be added to the end so they don't
@@ -991,9 +991,9 @@ def penny2d(x,y,pars,nderiv):
 
     Returns
     -------
-    g : numpy array
+    g : float
       The Penny model for the input x/y values and parameters.
-    derivative : list
+    derivative : numpy array
       Array of derivatives of g relative to the input parameters.
 
     Example
@@ -1191,7 +1191,7 @@ def gausspow2d_fwhm(pars):
 
     Parameters
     ----------
-    pars : numpy array or list
+    pars : numpy array
        Parameter list.
         pars = [amplitude, x0, y0, sigx, sigy, theta, beta4, beta6]
 
@@ -1252,7 +1252,7 @@ def gausspow2d_flux(pars):
 
     Parameters
     ----------
-    pars : numpy array or list
+    pars : numpy array
        Parameter list.
         pars = [amplitude, x0, y0, sigx, sigy, theta, beta4, beta6]
 
@@ -1305,7 +1305,7 @@ def agausspow2d(x,y,pars,nderiv):
       Array of X-values of points for which to compute the Gausspow model
     y : numpy array
       Array of Y-values of points for which to compute the Gausspow model.
-    pars : numpy array or list
+    pars : numpy array
        Parameter list.
         pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6].
     nderiv : int
@@ -1368,11 +1368,11 @@ def gausspow2d(x,y,pars,nderiv):
 
     Parameters
     ----------
-    x : numpy array
-      Array of X-values of points for which to compute the Gausspow model.
-    y : numpy array
-      Array of Y-values of points for which to compute the Gausspow model.
-    pars : numpy array or list
+    x : float
+      Single X-value for which to compute the Gausspow model.
+    y : float
+      Single Y-value for which to compute the Gausspow model.
+    pars : numpy array
        Parameter list.
         pars = [amplitude, x0, y0, sigx, sigy, theta, beta4, beta6]
          The cxx, cyy, cxy parameter can be added to the end so they don't
@@ -1382,9 +1382,9 @@ def gausspow2d(x,y,pars,nderiv):
 
     Returns
     -------
-    g : numpy array
+    g : float
       The Gausspow model for the input x/y values and parameters.
-    derivative : list
+    derivative : numpy array
       Array of derivatives of g relative to the input parameters.
 
     Example
@@ -1418,7 +1418,7 @@ def gausspow2d(x,y,pars,nderiv):
     gxy = (1 + z2 + 0.5*beta4*z2**2 + (1.0/6.0)*beta6*z2**3)
     g = amp / gxy
     
-    #  pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
+    #  pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
     deriv = np.zeros(nderiv,float)    
     if nderiv>0:
         dgxy_dz2 = (1 + beta4*z2 + 0.5*beta6*z2**2)
@@ -1577,18 +1577,19 @@ def gausspow2dfit(im,err,ampc,xc,yc,verbose):
 
 ####### SERSIC ########
 
-#@njit  
-def sersic2d(x, y, pars, nderiv):
+@njit
+def asersic2d(x,y,pars,nderiv):
     """
     Sersic profile and can be elliptical and rotated.
-
+    With x/y arrays input.
+    
     Parameters
     ----------
     x : numpy array
       Array of X-values of points for which to compute the Sersic model.
     y : numpy array
       Array of Y-values of points for which to compute the Sersic model.
-    pars : numpy array or list
+    pars : numpy array
        Parameter list.
         pars = [amp,x0,y0,k,alpha,recc,theta]
     nderiv : int
@@ -1599,8 +1600,63 @@ def sersic2d(x, y, pars, nderiv):
     g : numpy array
       The Sersic model for the input x/y values and parameters (same
         shape as x/y).
-    derivative : list
-      List of derivatives of g relative to the input parameters.
+    derivative : numpy array
+      Array of derivatives of g relative to the input parameters.
+
+    Example
+    -------
+    
+    g,derivative = sersic2d(x,y,pars,nderiv)
+
+    """
+
+    # Unravel 2D arrays
+    if x.ndim==2:
+        xx = x.ravel()
+        yy = y.ravel()
+    else:
+        xx = x
+        yy = y
+    npix = len(xx)
+    # Initialize output
+    g = np.zeros(npix,float)
+    if nderiv>0:
+        deriv = np.zeros((npix,nderiv),float)
+    else:
+        deriv = np.zeros((1,1),float)
+    # Loop over the points
+    for i in range(npix):
+        g1,deriv1 = sersic2d(xx[i],yy[i],pars,nderiv)
+        g[i] = g1
+        if nderiv>0:
+            deriv[i,:] = deriv1
+    return g,deriv
+
+@njit  
+def sersic2d(x, y, pars, nderiv):
+    """
+    Sersic profile and can be elliptical and rotated.
+    For a single point.
+
+    Parameters
+    ----------
+    x : float
+      Single X-value for which to compute the Sersic model.
+    y : float
+      Single Y-value for which to compute the Sersic model.
+    pars : numpy array
+       Parameter list.
+        pars = [amp,x0,y0,k,alpha,recc,theta]
+    nderiv : int
+       The number of derivatives to return.
+
+    Returns
+    -------
+    g : float
+      The Sersic model for the input x/y values and parameters (same
+        shape as x/y).
+    derivative : numpy array
+      Array of derivatives of g relative to the input parameters.
 
     Example
     -------
@@ -1618,14 +1674,13 @@ def sersic2d(x, y, pars, nderiv):
     # most galaxies have indices in the range 1/2 < n < 10
     # n=4 is the de Vaucouleurs profile
     # n=1 is the exponential
-    
-    xdiff = x - pars[1]
-    ydiff = y - pars[2]
-    amp = pars[0]
-    kserc = pars[3]
-    alpha = pars[4]
-    recc = pars[5]               # b/a
-    theta = pars[6]    
+
+    amp,xc,yc,kserc,alpha,recc,theta = pars
+    xdiff = (x-xc)
+    xdiff2 = xdiff**2
+    ydiff = (y-yc)
+    ydiff2 = ydiff**2
+    # recc = b/c
     cost2 = np.cos(theta) ** 2
     sint2 = np.sin(theta) ** 2
     sin2t = np.sin(2. * theta)
@@ -1637,68 +1692,59 @@ def sersic2d(x, y, pars, nderiv):
 
     rr = np.sqrt( (a * xdiff ** 2) + (b * xdiff * ydiff) + (c * ydiff ** 2) )
     g = amp * np.exp(-kserc*rr**alpha)
-   
-    # Compute derivative as well
-    if deriv is True:
 
-        # How many derivative terms to return
-        if nderiv is not None:
-            if nderiv <=0:
-                nderiv = 7
-        else:
-            nderiv = 7
-        
-        derivative = []
-        if nderiv>=1:
-            dg_dA = g / amp
-            derivative.append(dg_dA)
-        if nderiv>=2:        
-            dg_dx_mean = g * (kserc*alpha)*(rr**(alpha-2))*0.5*((2 * a * xdiff) + (b * ydiff))
-            dg_dx_mean[rr==0] = 0
-            derivative.append(dg_dx_mean)
-        if nderiv>=3:
-            dg_dy_mean = g * (kserc*alpha)*(rr**(alpha-2))*0.5*((2 * c * ydiff) + (b * xdiff))
-            dg_dx_mean[rr==0] = 0           
-            derivative.append(dg_dy_mean)
-        if nderiv>=4:
-            dg_dk = -g * rr**alpha
-            derivative.append(dg_dk)
-        if nderiv>=5:
+    #  pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
+    deriv = np.zeros(nderiv,float)    
+    if nderiv>0:
+        fact = (kserc*alpha)*(rr**(alpha-2))
+        # amplitude
+        dg_dA = g / amp
+        deriv[0] = dg_dA
+        # x0
+        dg_dx_mean = g * fact * 0.5 * ((2 * a * xdiff) + (b * ydiff))
+        deriv[1] = dg_dx_mean
+        # y0
+        dg_dy_mean = g * fact * 0.5 * ((2 * c * ydiff) + (b * xdiff))
+        deriv[2] = dg_dy_mean
+        if nderiv>3:
+            # kserc
+            dg_dkserc = -g * rr**alpha
+            deriv[3] = dg_dkserc
+            # alpha
             dg_dalpha = -g * kserc*np.log(rr) * rr**alpha
-            dg_dalpha[rr==0] = 0
-            derivative.append(dg_dalpha)
-        if nderiv>=6:
+            if rr==0:
+                dg_dalpha = 0.0
+            deriv[4] = dg_dalpha
+            # recc
             xdiff2 = xdiff ** 2
             ydiff2 = ydiff ** 2
             recc3 = recc**3
             da_drecc = -2*sint2 / recc3
             db_drecc =  2*sin2t / recc3            
             dc_drecc = -2*cost2 / recc3            
-            dg_drecc = -g*(kserc*alpha)*(rr**(alpha-2))*0.5*(da_drecc * xdiff2 +
-                                                             db_drecc * xdiff * ydiff +
-                                                             dc_drecc * ydiff2)
-            dg_drecc[rr==0] = 0
-            derivative.append(dg_drecc)
-        if nderiv>=7:
+            dg_drecc = -g * fact * 0.5 * (da_drecc * xdiff2 +
+                                          db_drecc * xdiff * ydiff +
+                                          dc_drecc * ydiff2)
+            if rr==0:
+                dg_drecc = 0.0
+            deriv[5] = dg_drecc
+            # theta
             sint = np.sin(theta)
             cost = np.cos(theta)
             cos2t = np.cos(2.0*theta)
             da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
             db_dtheta = (cos2t / xsig2) - (cos2t / ysig2)            
             dc_dtheta = -da_dtheta            
-            dg_dtheta = -g*(kserc*alpha)*(rr**(alpha-2))*(da_dtheta * xdiff2 +
-                                                          db_dtheta * xdiff * ydiff +
-                                                          dc_dtheta * ydiff2)
-            dg_dtheta[rr==0] = 0
-            derivative.append(dg_dtheta)
+            dg_dtheta = -g * fact * (da_dtheta * xdiff2 +
+                                     db_dtheta * xdiff * ydiff +
+                                     dc_dtheta * ydiff2)
+            if rr==0:
+                dg_dtheta = 0.0
+            deriv[6] = dg_dtheta
 
         # special case if alpha=2???
-            
-        return g,derivative
-            
-    # No derivative
-    else:        
-        return g
+
+    return g,deriv
 
 #@njit
 def sersic2d_fwhm(pars):
@@ -1707,7 +1753,7 @@ def sersic2d_fwhm(pars):
 
     Parameters
     ----------
-    pars : numpy array or list
+    pars : numpy array
        Parameter list.
         pars = [amp,x0,y0,k,alpha,recc,theta]
 
@@ -1928,8 +1974,127 @@ def sersic2d_estimates(pars):
     
     return spars
 
-    
 
+#---------------------------------------------------
+
+# Generic model routines
+
+@njit
+def psf2d(x,y,psftype,pars,nderiv):
+    """
+    Two dimensional Gaussian model function.
+    
+    Parameters
+    ----------
+    x : float
+      Single X-value for which to compute the 2D model.
+    y : float
+      Single Y-value of points for which to compute the 2D model.
+    psftype : int
+      Type of PSF model: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic.
+    pars : numpy array
+       Parameter list.
+    nderiv : int
+       The number of derivatives to return.
+
+    Returns
+    -------
+    g : float
+      The 2D model for the input x/y values and parameters (same
+        shape as x/y).
+    derivative : numpy array
+      Array of derivatives of g relative to the input parameters.
+
+    Example
+    -------
+
+    g,derivative = psf2d(x,y,1,pars,nderiv)
+
+    """
+    # Gaussian
+    if psftype==1:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+        return gaussian2d(x,y,pars,nderiv)
+    # Moffat
+    elif psftype==2:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
+        return moffat2d(x,y,pars,nderiv)
+    # Penny
+    elif psftype==3:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
+        return penny2d(x,y,pars,nderiv)
+    # Gausspow
+    elif psftype==4:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
+        return gausspow2d(x,y,pars,nderiv)
+    # Sersic
+    elif psftype==5:
+        # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
+        return sersic2d(x,y,pars,nderiv)
+    else:
+        print('psftype=',psftype,'not supported')
+        return
+
+@njit
+def apsf2d(x,y,psftype,pars,nderiv):
+    """
+    Two dimensional Gaussian model function with x/y array inputs.
+    
+    Parameters
+    ----------
+    x : numpy array
+      Array of X-values of points for which to compute the 2D model.
+    y : numpy array
+      Array of Y-values of points for which to compute the 2D model.
+    psftype : int
+      Type of PSF model: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic.
+    pars : numpy array
+       Parameter list.
+    nderiv : int
+       The number of derivatives to return.
+
+    Returns
+    -------
+    g : numpy array
+      The 2D model for the input x/y values and parameters.  Always
+        returned as 1D raveled() array.
+    derivative : numpy array
+      Array of derivatives of g relative to the input parameters.
+        Always 2D [Npix,Nderiv] with the 1st dimension being the x/y arrays
+        raveled() to 1D.
+
+    Example
+    -------
+
+    g,derivative = apsf2d(x,y,1,pars,3)
+
+    """
+    # Gaussian
+    if psftype==1:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+        g,deriv = agaussian2d(x,y,pars,nderiv)
+    # Moffat
+    elif psftype==2:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
+        g,deriv = amoffat2d(x,y,pars,nderiv)
+    # Penny
+    elif psftype==3:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
+        g,deriv = apenny2d(x,y,pars,nderiv)
+    # Gausspow
+    elif psftype==4:
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
+        g,deriv = agausspow2d(x,y,pars,nderiv)
+    # Sersic
+    elif psftype==5:
+        # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
+        g,deriv = asersic2d(x,y,pars,nderiv)
+    else:
+        print('psftype=',psftype,'not supported')
+
+    return g,deriv
+
+####################################################
 
 
 
