@@ -316,6 +316,9 @@ def agaussian2d(x,y,pars,nderiv):
     g,derivative = agaussian2d(x,y,pars,3)
 
     """
+    if len(pars)!=6 and len(pars)!=9:
+        raise Exception('agaussian2d pars must have either 6 or 9 elements')
+    
     if len(pars)==6:
         amp,xc,yc,asemi,bsemi,theta = pars
         cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
@@ -688,6 +691,9 @@ def amoffat2d(x,y,pars,nderiv):
 
     """
 
+    if len(pars)!=7 and len(pars)!=10:
+        raise Exception('amoffat2d pars must have either 6 or 9 elements')
+    
     allpars = np.zeros(10,float)
     if len(pars)==7:
         amp,xc,yc,asemi,bsemi,theta,beta = pars
@@ -1089,6 +1095,9 @@ def apenny2d(x,y,pars,nderiv):
 
     """
 
+    if len(pars)!=8 and len(pars)!=11:
+        raise Exception('apenny2d pars must have either 6 or 9 elements')
+    
     allpars = np.zeros(11,float)
     if len(pars)==8:
         amp,xc,yc,asemi,bsemi,theta,relamp,sigma = pars
@@ -1516,6 +1525,9 @@ def agausspow2d(x,y,pars,nderiv):
 
     """
 
+    if len(pars)!=8 and len(pars)!=11:
+        raise Exception('agausspow2d pars must have either 6 or 9 elements')
+    
     allpars = np.zeros(11,float)
     if len(pars)==8:
         amp,xc,yc,asemi,bsemi,theta,beta4,beta6 = pars
@@ -1802,7 +1814,7 @@ def gausspow2dfit(im,err,ampc,xc,yc,verbose):
 
 ####### SERSIC ########
 
-#@njit
+@njit
 def asersic2d(x,y,pars,nderiv):
     """
     Sersic profile and can be elliptical and rotated.
@@ -1835,6 +1847,9 @@ def asersic2d(x,y,pars,nderiv):
 
     """
 
+    if len(pars)!=7:
+        raise Exception('aseric2d pars must have either 6 or 9 elements')
+    
     # Unravel 2D arrays
     if x.ndim==2:
         xx = x.ravel()
@@ -1857,7 +1872,7 @@ def asersic2d(x,y,pars,nderiv):
             deriv[i,:] = deriv1
     return g,deriv
 
-#@njit  
+@njit  
 def sersic2d(x, y, pars, nderiv):
     """
     Sersic profile and can be elliptical and rotated.
@@ -1890,7 +1905,7 @@ def sersic2d(x, y, pars, nderiv):
 
     """
     # pars = [amp,x0,y0,k,alpha,recc,theta]
-
+    
     # Sersic radial profile
     # I(R) = I0 * exp(-k*R**(1/n))
     # n is the sersic index
@@ -1932,32 +1947,19 @@ def sersic2d(x, y, pars, nderiv):
         if rr != 0:
             dg_dx_mean = g * du_drr * 0.5 * ((2 * a * xdiff) + (b * ydiff))
         else:
-            # special case, use finite difference
-            # Taylor expansion of exp(x) = 1 + x
-            # derivative d exp(x)/dx = 1 + x
-            # finite difference
-            # g_2 = A*(1-kserc*r_2**alpha)
-            # g_1 = A
-            # r_2 = dx*a**(1/2)
-            # dg/dx0 = [A*(1-kserc*r_2**alpha)-A]/dx
-            #        = -A*kserc*a**(alpha/2) * dx**alpha / dx
-            # as dx->0   dx**(alpha-1)->1  ONLY if alpha>=1
-            # dg/dx0 = -A*kserc*a**(alpha/2)
-            dg_dx_mean = -amp*kserc*a**(alpha/2)
-            dx = 1e-3
-            r_2 = dx*np.sqrt(a)
-            g_1 = amp
-            g_2 = amp*np.exp(-kserc*r_2**alpha)
-            dg_dx_mean = (g_2-g_1)/dx
-            import pdb; pdb.set_trace()
+            # not well defined at rr=0
+            # g comes to a sharp point at rr=0
+            # if you approach rr=0 from the left, then the slope is +
+            # but if you approach rr=0 from the right, then the slope is -
+            # use 0 so it is at least well-behaved
+            dg_dx_mean = 0.0
         deriv[1] = dg_dx_mean
         # y0
         if rr != 0:
             dg_dy_mean = g * du_drr * 0.5 * ((2 * c * ydiff) + (b * xdiff))
         else:
-            # special case, use finite difference
-            # similar to above, but replace a with c
-            dg_dy_mean = -amp*kserc*c**(alpha/2)
+            # not well defined at rr=0, see above
+            dg_dy_mean = 0.0
         deriv[2] = dg_dy_mean
         if nderiv>3:
             # kserc
@@ -2288,7 +2290,7 @@ def psf2d(x,y,psftype,pars,nderiv):
         print('psftype=',psftype,'not supported')
         return
 
-#@njit
+@njit
 def apsf2d(x,y,psftype,pars,nderiv):
     """
     Two dimensional Gaussian model function with x/y array inputs.
@@ -2325,27 +2327,26 @@ def apsf2d(x,y,psftype,pars,nderiv):
     # Gaussian
     if psftype==1:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
-        g,deriv = agaussian2d(x,y,pars,nderiv)
+        return agaussian2d(x,y,pars,nderiv)
     # Moffat
     elif psftype==2:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
-        g,deriv = amoffat2d(x,y,pars,nderiv)
+        return amoffat2d(x,y,pars,nderiv)
     # Penny
     elif psftype==3:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
-        g,deriv = apenny2d(x,y,pars,nderiv)
+        return apenny2d(x,y,pars,nderiv)
     # Gausspow
     elif psftype==4:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
-        g,deriv = agausspow2d(x,y,pars,nderiv)
+        return agausspow2d(x,y,pars,nderiv)
     # Sersic
     elif psftype==5:
         # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
-        g,deriv = asersic2d(x,y,pars,nderiv)
+        return asersic2d(x,y,pars,nderiv)
     else:
         print('psftype=',psftype,'not supported')
-
-    return g,deriv
+        return
 
 @njit
 def psf2d_flux(psftype,pars):
@@ -2420,26 +2421,27 @@ def psf2d_fwhm(psftype,pars):
     # Gaussian
     if psftype==1:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
-        return gaussian2d_fwhm(pars)
+        g,deriv = gaussian2d_fwhm(pars)
     # Moffat
     elif psftype==2:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
-        return moffat2d_fwhm(pars)
+        g,deriv = moffat2d_fwhm(pars)
     # Penny
     elif psftype==3:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
-        return penny2d_fwhm(pars)
+        g,deriv = penny2d_fwhm(pars)
     # Gausspow
     elif psftype==4:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
-        return gausspow2d_fwhm(pars)
+        g,deriv = gausspow2d_fwhm(pars)
     # Sersic
     elif psftype==5:
         # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
-        return sersic2d_fwhm(pars)
+        g,deriv = sersic2d_fwhm(pars)
     else:
         print('psftype=',psftype,'not supported')
-        return
+
+    return g,deriv
 
 
 @njit
@@ -2614,7 +2616,7 @@ def psf2d_maxsteps(psftype,pars):
         print('psftype=',psftype,'not supported')
         return
 
-#@njit
+@njit
 def psf2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
     """
     Fit a single model to data.
@@ -2692,7 +2694,6 @@ def psf2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
     maxpercdiff = 1e10
     niter = 0
     while (niter<maxiter and maxpercdiff>minpercdiff):
-        import pdb; pdb.set_trace()
         model,deriv = apsf2d(x1d,y1d,psftype,bestpar,nderiv)
         resid = im1d-model
         dbeta = qr_jac_solve(deriv,resid,weight=wt1d)
