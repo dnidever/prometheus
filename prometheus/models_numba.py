@@ -3157,7 +3157,12 @@ def psf2d(x,y,psf,amp,xc,yc,deriv=False,verbose=False):
         derivative = np.zeros((1,1),float)
 
     # Add lookup table portion
-    
+    if psftype != 6 and npsfx > 0:
+        lookup = lookup.reshape((npsfy,npsfx,psforder+1))
+        eg,ederivative = empirical(x,y,pars,lookup,(nyhalf,nxhalf),(nderiv>0))
+        g[:] += eg
+        derivative[:,:,:] += ederivative
+        
     return g,derivative
 
 @njit
