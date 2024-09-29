@@ -2235,9 +2235,9 @@ def sersic2d_estimates(pars):
 # Generic model routines
 
 @njit
-def psf2d(x,y,psftype,pars,nderiv):
+def model2d(x,y,psftype,pars,nderiv):
     """
-    Two dimensional Gaussian model function.
+    Two dimensional model function.
     
     Parameters
     ----------
@@ -2263,7 +2263,7 @@ def psf2d(x,y,psftype,pars,nderiv):
     Example
     -------
 
-    g,derivative = psf2d(x,y,1,pars,nderiv)
+    g,derivative = model2d(x,y,1,pars,nderiv)
 
     """
     # Gaussian
@@ -2291,9 +2291,9 @@ def psf2d(x,y,psftype,pars,nderiv):
         return
 
 @njit
-def apsf2d(x,y,psftype,pars,nderiv):
+def amodel2d(x,y,psftype,pars,nderiv):
     """
-    Two dimensional Gaussian model function with x/y array inputs.
+    Two dimensional model function with x/y array inputs.
     
     Parameters
     ----------
@@ -2321,7 +2321,7 @@ def apsf2d(x,y,psftype,pars,nderiv):
     Example
     -------
 
-    g,derivative = apsf2d(x,y,1,pars,3)
+    g,derivative = amodel2d(x,y,1,pars,3)
 
     """
     # Gaussian
@@ -2349,9 +2349,9 @@ def apsf2d(x,y,psftype,pars,nderiv):
         return
 
 @njit
-def psf2d_flux(psftype,pars):
+def model2d_flux(psftype,pars):
     """
-    Return the flux of a 2D PSF model.
+    Return the flux of a 2D model.
 
     Parameters
     ----------
@@ -2368,7 +2368,7 @@ def psf2d_flux(psftype,pars):
     Example
     -------
 
-    flux = psf2d_flux(pars)
+    flux = model2d_flux(pars)
 
     """
     # Gaussian
@@ -2396,9 +2396,9 @@ def psf2d_flux(psftype,pars):
         return
 
 @njit
-def psf2d_fwhm(psftype,pars):
+def model2d_fwhm(psftype,pars):
     """
-    Return the fwhm of a 2D PSF model.
+    Return the fwhm of a 2D model.
 
     Parameters
     ----------
@@ -2415,7 +2415,7 @@ def psf2d_fwhm(psftype,pars):
     Example
     -------
 
-    fwhm = psf2d_fwhm(pars)
+    fwhm = model2d_fwhm(pars)
 
     """
     # Gaussian
@@ -2445,19 +2445,30 @@ def psf2d_fwhm(psftype,pars):
 
 
 @njit
-def psf2d_estimates(psftype,ampc,xc,yc):
+def model2d_estimates(psftype,ampc,xc,yc):
     """
     Get initial estimates for parameters
 
     Parameters
     ----------
+    psftype : int
+       Type of PSF model: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic.
+    ampc : float
+       Initial guess of amplitude.
+    xc : float
+       Initial guess of central X coordinate.
+    yc : float
+       Initial guess of central Y coordinate.
 
     Returns
     -------
-
+    initpars : numpy array
+       The initial estimates
+    
     Examples
     --------
 
+    initpars = model2d_estimates(psftype,amp,xc,yc)
     
     """
     # Gaussian
@@ -2500,7 +2511,7 @@ def psf2d_estimates(psftype,ampc,xc,yc):
         return
 
 @njit
-def psf2d_bounds(psftype):
+def model2d_bounds(psftype):
     """
     Return upper and lower fitting bounds for the parameters.
 
@@ -2517,7 +2528,7 @@ def psf2d_bounds(psftype):
     Examples
     --------
 
-    bounds = psf2d_bounds(2)
+    bounds = model2d_bounds(2)
     
     """
     # Gaussian
@@ -2560,7 +2571,7 @@ def psf2d_bounds(psftype):
         return
     
 @njit
-def psf2d_maxsteps(psftype,pars):
+def model2d_maxsteps(psftype,pars):
     """
     Get maximum steps for parameters.
 
@@ -2579,7 +2590,7 @@ def psf2d_maxsteps(psftype,pars):
     Examples
     --------
 
-    maxsteps = psf2d_maxsteps(2,pars)
+    maxsteps = model2d_maxsteps(2,pars)
     
     """
     # Gaussian
@@ -2617,9 +2628,9 @@ def psf2d_maxsteps(psftype,pars):
         return
 
 @njit
-def psf2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
+def model2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
     """
-    Fit a single model to data.
+    Fit all parameters of a single 2D model to data.
 
     Parameters
     ----------
@@ -2660,7 +2671,7 @@ def psf2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
     Example
     -------
 
-    pars,perror,cov,flux,fluxerr,chisq = psf2dfit(im,err,x,y,1,100.0,5.5,6.5,False)
+    pars,perror,cov,flux,fluxerr,chisq = model2dfit(im,err,x,y,1,100.0,5.5,6.5,False)
 
     """
 
@@ -2681,10 +2692,10 @@ def psf2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
     npix = len(im1d)
     
     # Initial values
-    bestpar = psf2d_estimates(psftype,ampc,xc,yc)
+    bestpar = model2d_estimates(psftype,ampc,xc,yc)
     nparams = len(bestpar)
     nderiv = nparams
-    bounds = psf2d_bounds(psftype)
+    bounds = model2d_bounds(psftype)
 
     if verbose:
         print('bestpar=',bestpar)
@@ -2694,7 +2705,7 @@ def psf2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
     maxpercdiff = 1e10
     niter = 0
     while (niter<maxiter and maxpercdiff>minpercdiff):
-        model,deriv = apsf2d(x1d,y1d,psftype,bestpar,nderiv)
+        model,deriv = amodel2d(x1d,y1d,psftype,bestpar,nderiv)
         resid = im1d-model
         dbeta = qr_jac_solve(deriv,resid,weight=wt1d)
         
@@ -2705,7 +2716,7 @@ def psf2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
         # Update parameters
         last_bestpar = bestpar.copy()
         # limit the steps to the maximum step sizes and boundaries
-        maxsteps = psf2d_maxsteps(psftype,bestpar)
+        maxsteps = model2d_maxsteps(psftype,bestpar)
         bestpar = newlsqpars(bestpar,dbeta,bounds,maxsteps)
         
         # Check differences and changes
@@ -2722,7 +2733,7 @@ def psf2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
         last_dbeta = dbeta
         niter += 1
 
-    model,deriv = apsf2d(x1d,y1d,psftype,bestpar,nderiv)
+    model,deriv = amodeld(x1d,y1d,psftype,bestpar,nderiv)
     resid = im1d-model
     
     # Get covariance and errors
@@ -2730,16 +2741,156 @@ def psf2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
     perror = np.sqrt(np.diag(cov))
 
     # Now get the flux
-    flux = psf2d_flux(psftype,bestpar)
+    flux = model2d_flux(psftype,bestpar)
     fluxerr = perror[0]*(flux/bestpar[0]) 
     
     return bestpar,perror,cov,flux,fluxerr,chisq
 
+#@njit
+def unpackpsf(psf):
+    """
+    Unpack the PSF description that are in a 1D array.
+    
+    Parameters
+    ----------
+    psf : int
+       The PSF model description in a single 1D array.
+       If there is no lookup table, then
+       pars = [psftype, parameters[
+       where the types are: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic, 6-empirical
+       if there's a lookup table, then there are extract parameters
+       [psftype, parameters, npsfx,npsfy,psforder, nxhalf, nyhalf, raveled lookup table values]
+       where nxhalf and nyhalf are the center of the entire image in pixels
+       that's only needed when psforder is greater than 0
+
+    Returns
+    -------
+    psftype : int
+       The PSF type type: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic, 6-empirical
+    pars : numpy array
+       The analytical model parameters.
+    npsfx : int
+      Size of the PSF lookup table in the X-dimension
+    npsfy : int
+      Size of the PSF lookup table in the Y-dimension
+    psforder : int
+      Order of the spatial variations of the lookup table.
+    nxhalf : float
+      X-value of the center of the whole image
+    nyhalf : float
+      X-value of the center of the whole image.
+    lookup : numpy array
+       The unraveled lookup table.
+
+    Examples
+    --------
+
+    psftype,pars,npsfx,npsfy,psforder,nxhalf,nyhalf,lookup = unpackpsf(psf)
+    
+    """
+
+    npsf = len(psf)
+    psftype = int(psf[0])
+    if psftype <= 5:
+        nparsarr = [6,7,8,8,7]
+        npars = nparsarr[int-1]
+        pars = psf[1:1+npars]
+    else:
+        pars = np.zeros(1,float)
+        npars = 0
+    # There is a lookup table
+    if npsf>npars+1 or psftype==6:
+        npsfx,npsfy,psforder,nxhalf,nyhalf = psf[npars+1:npars+1+5]
+        npsfx = int(npsfx)
+        npsfy = int(npsfy)
+        psfoder = int(psforder)
+        lookup = psf[npars+1+5:]
+    else:
+        npsfx,npsfy,psforder,nxhalf,nyhalf = 0,0,0,0.0,0.0
+        
+    return psftype,pars,npsfx,npsfy,psforder,nxhalf,nyhalf,lookup
     
 @njit
-def psf2dfit2(im,err,psftype,ampc,xc,yc,verbose):
+def psf2d(x,y,psf,amp,xc,yc,deriv=False,verbose=False):
     """
-    Fit a single model to data.
+    Return a PSF model.
+
+    Parameters
+    ----------
+    x : numpy array
+       Array of X-values at which to evaluate the PSF model.
+    y : numpy array
+       Array of Y-values at which to evaluate the PSF model.
+    psf : int
+       The PSF model description in a single 1D array.
+       If there is no lookup table, then
+       pars = [psftype, parameters[
+       where the types are: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic, 6-empirical
+       if there's a lookup table, then there are extract parameters
+       [psftype, parameters, npsfx,npsfy,psforder, nxhalf, nyhalf, raveled lookup table values]
+       where nxhalf and nyhalf are the center of the entire image in pixels
+       that's only needed when psforder is greater than 0
+    ampc : float
+       PSF Amplitude.
+    xc : float
+       PSF central X coordinate.
+    yc : float
+       PSF central Y coordinate.
+    deriv : bool
+       Return derivatives as well.
+    verbose : bool
+       Verbose output to the screen.
+
+    Returns
+    -------
+    model : numpy array
+       PSF model.
+    derivatives : numpy array
+       Array of partial derivatives.
+    
+    Example
+    -------
+
+    model,derivatives = psf2d(x,y,psf,100.0,5.5,6.5,True,False)
+
+    """
+    
+    # Unpack psf parameters
+    psftype,pars,npsfx,npsfy,psforder,nxhalf,nyhalf,lookup = unpackpsf(psf)
+
+    # Get the analytic portion
+    if deriv==True:
+        nderiv = 3
+    else:
+        nderiv = 0
+    
+    # Gaussian
+    if psftype==1:
+        g,deriv = agaussian2d(x,y,pars,nderiv)
+    # Moffat
+    elif psftype==2:
+        g,deriv = amoffat2d(x,y,pars,nderiv)
+    # Penny
+    elif psftype==3:
+        g,deriv = apenny2d(x,y,pars,nderiv)
+    # Gausspow
+    elif psftype==4:
+        g,deriv = agausspow2d(x,y,pars,deriv)
+    # Sersic
+    elif psftype==5:
+        g,deriv = asersic2d(x,y,pars,deriv)
+    else:
+        print('psftype=',psftype,'not supported')
+        return
+
+    # Add lookup table portion
+    
+    return g,deriv
+
+@njit
+def psffit(im,err,x,y,psf,ampc,xc,yc,verbose):
+    """
+    Fit a PSF model to data.
 
     Parameters
     ----------
@@ -2747,8 +2898,19 @@ def psf2dfit2(im,err,psftype,ampc,xc,yc,verbose):
        Flux array.  Can be 1D or 2D array.
     err : numpy array
        Uncertainty array of im.  Same dimensions as im.
-    psftype : int
-       Type of PSF model: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic.
+    x : numpy array
+       Array of X-values for im.
+    y : numpy array
+       Array of Y-values for im.
+    psf : int
+       The PSF model description in a single 1D array.
+       If there is no lookup table, then
+       pars = [psftype, parameters[
+       where the types are: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic, 6-empirical
+       if there's a lookup table, then there are extract parameters
+       [psftype, parameters, npsfx,npsfy,psforder, nxhalf, nyhalf, raveled lookup table values]
+       where nxhalf and nyhalf are the center of the entire image in pixels
+       that's only needed when psforder is greater than 0
     ampc : float
        Initial guess of amplitude.
     xc : float
@@ -2774,28 +2936,86 @@ def psf2dfit2(im,err,psftype,ampc,xc,yc,verbose):
     Example
     -------
 
-    pars,perror,cov,flux,fluxerr = psf2dfit(im,err,1,100.0,5.5,6.5,False)
+    pars,perror,cov,flux,fluxerr = psffit(im,err,psf,100.0,5.5,6.5,False)
 
     """
-    # Gaussian
-    if psftype==1:
-        return gaussian2dfit(im,err,ampc,xc,yc,verbose)
-    # Moffat
-    elif psftype==2:
-        return moffat2d_fit(im,err,ampc,xc,yc,verbose)
-    # Penny
-    elif psftype==3:
-        return penny2d_fit(im,err,ampc,xc,yc,verbose)
-    # Gausspow
-    elif psftype==4:
-        return gausspow2d_fit(im,err,ampc,xc,yc,verbose)
-    # Sersic
-    elif psftype==5:
-        return sersic2d_fit(im,err,ampc,xc,yc,verbose)
+
+    # We are ONLY varying amplitude, xc, and yc
+
+    psftype = psf[0]
+    maxiter = 10
+    minpercdiff = 0.5
+
+    if im.ndim==2:
+        im1d = im.ravel()
+        err1d = err.ravel()
+        x1d = x.ravel()
+        y1d = y.ravel()
     else:
-        print('psftype=',psftype,'not supported')
-        return
+        im1d = im
+        err1d = err
+        x1d = x
+        y1d = y
+    wt1d = 1/err1d**2
+    npix = len(im1d)
     
+    # Initial values
+    bestpar = np.zeros(3,float)
+    bestpar[:] = [ampc,xc,yc]
+    bounds = np.zeros((3,2),float)
+    bounds[:,0] = [0.0, -10, -10]
+    bounds[:,1] = [1e30, 10,  10]
+
+    if verbose:
+        print('bestpar=',bestpar)
+    
+    # Iteration loop
+    maxpercdiff = 1e10
+    niter = 0
+    while (niter<maxiter and maxpercdiff>minpercdiff):
+        model,deriv = psf2d(x1d,y1d,psf,bestpar[0],bestpar[1],bestpar[2],True)
+        resid = im1d-model
+        dbeta = qr_jac_solve(deriv,resid,weight=wt1d)
+        
+        if verbose:
+            print(niter,bestpar)
+            print(dbeta)
+        
+        # Update parameters
+        last_bestpar = bestpar.copy()
+        # limit the steps to the maximum step sizes and boundaries
+        maxsteps = np.zeros(3,float)
+        maxsteps[:] = [0.2*bestpar[0],0.5,0.5]
+        bestpar = newlsqpars(bestpar,dbeta,bounds,maxsteps)
+        
+        # Check differences and changes
+        diff = np.abs(bestpar-last_bestpar)
+        denom = np.maximum(np.abs(bestpar.copy()),0.0001)
+        percdiff = diff.copy()/denom*100  # percent differences
+        maxpercdiff = np.max(percdiff)
+        chisq = np.sum((im1d-model)**2 * wt1d)/npix
+        if verbose:
+            print('chisq=',chisq)
+        #if verbose:
+        #    print(niter,percdiff,chisq)
+        #    print()
+        last_dbeta = dbeta
+        niter += 1
+
+    model,deriv = psf2d(x1d,y1d,psf,bestpar[0],bestpar[1],bestpar[2],True)
+    resid = im1d-model
+    
+    # Get covariance and errors
+    cov = jac_covariance(deriv,resid,wt1d)
+    perror = np.sqrt(np.diag(cov))
+
+    # Now get the flux
+    flux = model2d_flux(psftype,bestpar)
+    fluxerr = perror[0]*(flux/bestpar[0]) 
+    
+    return bestpar,perror,cov,flux,fluxerr,chisq
+
+
 ####################################################
 
 
