@@ -2746,7 +2746,7 @@ def model2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
     
     return bestpar,perror,cov,flux,fluxerr,chisq
 
-#@njit
+@njit
 def unpackpsf(psf):
     """
     Unpack the PSF description that are in a 1D array.
@@ -2788,12 +2788,11 @@ def unpackpsf(psf):
     psftype,pars,npsfx,npsfy,psforder,nxhalf,nyhalf,lookup = unpackpsf(psf)
     
     """
-
     npsf = len(psf)
     psftype = int(psf[0])
     if psftype <= 5:
-        nparsarr = [6,7,8,8,7]
-        npars = nparsarr[int-1]
+        nparsarr = [3,4,5,5,4]
+        npars = nparsarr[psftype-1]
         pars = psf[1:1+npars]
     else:
         pars = np.zeros(1,float)
@@ -2806,6 +2805,7 @@ def unpackpsf(psf):
         psfoder = int(psforder)
         lookup = psf[npars+1+5:]
     else:
+        lookup = np.zeros(1,float)
         npsfx,npsfy,psforder,nxhalf,nyhalf = 0,0,0,0.0,0.0
         
     return psftype,pars,npsfx,npsfy,psforder,nxhalf,nyhalf,lookup
@@ -2830,7 +2830,7 @@ def psf2d(x,y,psf,amp,xc,yc,deriv=False,verbose=False):
        [psftype, parameters, npsfx,npsfy,psforder, nxhalf, nyhalf, raveled lookup table values]
        where nxhalf and nyhalf are the center of the entire image in pixels
        that's only needed when psforder is greater than 0
-    ampc : float
+    amp : float
        PSF Amplitude.
     xc : float
        PSF central X coordinate.
@@ -2856,39 +2856,53 @@ def psf2d(x,y,psf,amp,xc,yc,deriv=False,verbose=False):
     """
     
     # Unpack psf parameters
-    psftype,pars,npsfx,npsfy,psforder,nxhalf,nyhalf,lookup = unpackpsf(psf)
+    psftype,psfpars,npsfx,npsfy,psforder,nxhalf,nyhalf,lookup = unpackpsf(psf)
 
     # Get the analytic portion
     if deriv==True:
         nderiv = 3
     else:
         nderiv = 0
-    
+
+    if psftype <= 5:
+        nparsarr = [6,7,8,8,7]
+        npars = nparsarr[psftype-1]
+        # Add amp, xc, yc to the parameters
+        pars = np.zeros(npars,float)
+        pars[:3] = [amp,xc,yc]
+        pars[3:] = psfpars
+        
     # Gaussian
     if psftype==1:
-        g,deriv = agaussian2d(x,y,pars,nderiv)
+        g,derivative = agaussian2d(x,y,pars,nderiv)
     # Moffat
     elif psftype==2:
-        g,deriv = amoffat2d(x,y,pars,nderiv)
+        g,derivative = amoffat2d(x,y,pars,nderiv)
     # Penny
     elif psftype==3:
-        g,deriv = apenny2d(x,y,pars,nderiv)
+        g,derivative = apenny2d(x,y,pars,nderiv)
     # Gausspow
     elif psftype==4:
-        g,deriv = agausspow2d(x,y,pars,deriv)
+        g,derivative = agausspow2d(x,y,pars,nderiv)
     # Sersic
     elif psftype==5:
-        g,deriv = asersic2d(x,y,pars,deriv)
+        g,derivative = asersic2d(x,y,pars,nderiv)
+    # Empirical
+    elif psftype==6:
+        print('Empirical type not supporte dyet')
+        g = np.zeros(1,float)
+        derivative = np.zeros((1,1),float)
     else:
         print('psftype=',psftype,'not supported')
-        return
+        g = np.zeros(1,float)
+        derivative = np.zeros((1,1),float)
 
     # Add lookup table portion
     
-    return g,deriv
+    return g,derivative
 
 @njit
-def psffit(im,err,x,y,psf,ampc,xc,yc,verbose):
+def psffit(im,err,x,y,psf,ampc,xc,yc,verbose=False):
     """
     Fit a PSF model to data.
 
@@ -2936,7 +2950,7 @@ def psffit(im,err,x,y,psf,ampc,xc,yc,verbose):
     Example
     -------
 
-    pars,perror,cov,flux,fluxerr = psffit(im,err,psf,100.0,5.5,6.5,False)
+    pars,perror,cov,flux,fluxerr = psffit(im,err,x,y,psf,100.0,5.5,6.5,False)
 
     """
 
@@ -3398,7 +3412,7 @@ def gausspsffit(im,err,gpars,ampc,xc,yc,verbose):
 
 
 @njit
-def psffit(im,err,ampc,xc,yc,verbose):
+def psffit_old(im,err,ampc,xc,yc,verbose):
     """ Fit all parameters of the Gaussian."""
     # xc/yc are with respect to the image origin (0,0)
     
