@@ -2844,7 +2844,7 @@ def model2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
 #########################################################################
 # Empirical PSF
 
-#@njit
+@njit
 def relcoord(x,y,shape):
     """
     Convert absolute X/Y coordinates to relative ones to use
@@ -2878,7 +2878,7 @@ def relcoord(x,y,shape):
     rely = (y-midpt[0])/shape[0]*2
     return relx,rely
 
-#@njit
+@njit
 def empirical(x, y, pars, data, imshape=None, deriv=False):
     """
     Evaluate an empirical PSF.
@@ -2959,7 +2959,7 @@ def empirical(x, y, pars, data, imshape=None, deriv=False):
     
     # Higher-order X/Y terms
     if npsforder>1:
-        relx,rely = relcoord(xc,yc,shape)
+        relx,rely = relcoord(xc,yc,imshape)
         coeff = np.array([1.0, relx, rely, relx*rely])
     else:
         coeff = np.array([1.0])
@@ -3028,27 +3028,20 @@ def unpackpsf(psf):
        The PSF type type: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic, 6-empirical
     pars : numpy array
        The analytical model parameters.
-    npsfx : int
-      Size of the PSF lookup table in the X-dimension
-    npsfy : int
-      Size of the PSF lookup table in the Y-dimension
-    psforder : int
-      Order of the spatial variations of the lookup table.
-    nxhalf : float
-      X-value of the center of the whole image
-    nyhalf : float
-      X-value of the center of the whole image.
     lookup : numpy array
        The unraveled lookup table.
+    imshape : numpy array
+       The size/shape of the whole image.
 
     Examples
     --------
 
-    psftype,pars,npsfx,npsfy,psforder,nxhalf,nyhalf,lookup = unpackpsf(psf)
+    psftype,pars,lookup,imshape = unpackpsf(psf)
     
     """
     npsf = len(psf)
     psftype = int(psf[0])
+    imshape = np.zeros(2,np.int32)
     if psftype <= 5:
         nparsarr = [3,4,5,5,4]
         npars = nparsarr[psftype-1]
@@ -3058,17 +3051,74 @@ def unpackpsf(psf):
         npars = 0
     # There is a lookup table
     if npsf>npars+1 or psftype==6:
-        npsfx,npsfy,psforder,nxhalf,nyhalf = psf[npars+1:npars+1+5]
+        npsfx,npsfy,psforder,nimx,nimy = psf[npars+1:npars+1+5]
         npsfx = int(npsfx)
         npsfy = int(npsfy)
-        psfoder = int(psforder)
+        psforder = int(psforder)
+        nimx = int(nimx)
+        nimy = int(nimy)
         lookup = psf[npars+1+5:]
+        imshape[:] = [nimy,nimx]
+        # Reshape the lookup table
+        lookup = lookup.reshape((npsfy,npsfx,psforder+1))
     else:
-        lookup = np.zeros(1,float)
-        npsfx,npsfy,psforder,nxhalf,nyhalf = 0,0,0,0.0,0.0
+        lookup = np.zeros((1,1,1),float)
         
-    return psftype,pars,npsfx,npsfy,psforder,nxhalf,nyhalf,lookup
-    
+    return psftype,pars,lookup,imshape
+
+@njit
+def packpsf(psftype,pars,lookup=None,imshape=None):
+    """ Put all of the PSF information into a 1D array."""
+    # Figure out how many elements we need in the array
+    npsf = 1
+    if psftype<=5:
+        npsf += len(pars)
+    if psftype==6 or npsfx>0:
+        npsf += 5 + lookup.size
+    psf = np.zeros(npsf,float)
+    # Add the information
+    psf[0] = psftype
+    count = 1
+    if psftype<=5:
+        psf[count:count+len(pars)] = pars
+        count += len(pars)
+    # Add lookup table/empirical PSF information
+    if lookup is not None:
+        if lookup.ndim==2:
+            npsfy,npsfx = lookup.shape
+            psforder = 0
+        else:
+            npsfy,npsfx,norder = lookup.shape
+            psforder = norder-1
+        if imshape is not None:
+            nimy,nimx = imshape
+        else:
+            nimy,nimx = 0,0
+        psf[count:count+5] = [npsfx,npsfy,psforder,nimx,nimy]
+        psf[count+5:] = lookup.ravel()
+    return psf
+
+@njit
+def psfinfo(psf):
+    """ Print out information about the PSF."""
+    psftype,pars,lookup,imshape = unpackpsf(psf)
+    names = ['Gaussian','Moffat','Penny','Gausspow','Sersic','Empirical']
+    print('PSF type =',psftype,' ('+names[psftype-1]+')')
+    if psftype <=5:
+        print('PARS =',pars)
+    if lookup.size > 1:
+        lshape = lookup.shape
+        npsfy,npsfx = lshape[:2]
+        if len(lshape)==2:
+            psforder = 0
+        else:
+            psforder = lshape[2]-1
+        print('Lookup dims = [',npsfx,npsfy,']')
+        print('PSF order =',psforder)
+        nimy,nimx = imshape
+        if psforder > 0:
+            print('Image size = [',nimx,nimy,']')
+
 @njit
 def psf2d(x,y,psf,amp,xc,yc,deriv=False,verbose=False):
     """
@@ -3107,15 +3157,15 @@ def psf2d(x,y,psf,amp,xc,yc,deriv=False,verbose=False):
     derivatives : numpy array
        Array of partial derivatives.
     
-    Example
-    -------
+    Examples
+    --------
 
     model,derivatives = psf2d(x,y,psf,100.0,5.5,6.5,True,False)
 
     """
     
     # Unpack psf parameters
-    psftype,psfpars,npsfx,npsfy,psforder,nxhalf,nyhalf,lookup = unpackpsf(psf)
+    psftype,psfpars,lookup,imshape = unpackpsf(psf)
 
     # Get the analytic portion
     if deriv==True:
@@ -3148,21 +3198,19 @@ def psf2d(x,y,psf,amp,xc,yc,deriv=False,verbose=False):
         g,derivative = asersic2d(x,y,pars,nderiv)
     # Empirical
     elif psftype==6:
-        print('Empirical type not supporte dyet')
-        g = np.zeros(1,float)
-        derivative = np.zeros((1,1),float)
+        g,derivative = empirical(x,y,np.array([amp,xc,yc]),lookup,imshape,nderiv)
     else:
         print('psftype=',psftype,'not supported')
         g = np.zeros(1,float)
         derivative = np.zeros((1,1),float)
 
     # Add lookup table portion
-    if psftype != 6 and npsfx > 0:
-        lookup = lookup.reshape((npsfy,npsfx,psforder+1))
-        eg,ederivative = empirical(x,y,pars,lookup,(nyhalf,nxhalf),(nderiv>0))
+    if psftype <= 5 and lookup.size > 1:
+        eg,ederivative = empirical(x,y,np.array([amp,xc,yc]),lookup,imshape,(nderiv>0))
         g[:] += eg
-        derivative[:,:,:] += ederivative
-        
+        # Make sure the model is positive everywhere
+        derivative[:,:] += ederivative
+    
     return g,derivative
 
 @njit
