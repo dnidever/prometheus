@@ -108,6 +108,100 @@ def gammaincinv05(a):
             
     return out
 
+@njit
+def linearinterp(data,x,y):
+    """
+    Linear interpolation.
+
+    Parameters
+    ----------
+    data : numpy array
+      The data to use for interpolation.
+    x : float
+      The X-value at which to perform the interpolation.
+    y : float
+      The Y-value at which to perform the interpolation.
+
+    Returns
+    -------
+    f : float
+       The interpolated value.
+    
+    Examples
+    --------
+
+    f = linearinterp(data,x,y)
+
+    """
+
+    
+    ny,nx = data.shape
+
+    # Out of bounds
+    if x<0 or x>(nx-1) or y<0 or y>(ny-1):
+        return 0.0
+
+    x1 = int(x)
+    if x1==nx-1:
+        x1 -= 1
+    x2 = x1+1
+    y1 = int(y)
+    if y1==ny-1:
+        y1 -= 1
+    y2 = y1+1
+
+    f11 = data[y1,x1]
+    f12 = data[y2,x1]
+    f21 = data[y1,x2]
+    f22 = data[y2,x2]
+    
+    # weighted mean
+    # denom = (x2-x1)*(y2-y1) = 1
+    w11 = (x2-x)*(y2-y)
+    w12 = (x2-x)*(y-y1)
+    w21 = (x-x1)*(y2-y)
+    w22 = (x-x1)*(y-y1)
+    f = w11*f11+w12*f12+w21*f21+w22*f22
+
+    return f
+
+@njit
+def alinearinterp(data,x,y):
+    """
+    Linear interpolation.
+
+    Parameters
+    ----------
+    data : numpy array
+      The data to use for interpolation.
+    x : numpy array
+      Array of X-value at which to perform the interpolation.
+    y : numpy array
+      Array of Y-value at which to perform the interpolation.
+
+    Returns
+    -------
+    f : numpy array
+       The interpolated values.
+    
+    Examples
+    --------
+
+    f = alinearinterp(data,x,y)
+
+    """
+
+    if x.ndim==2:
+        x1d = x.ravel()
+        y1d = y.ravel()
+    else:
+        x1d = x
+        y1d = y
+    npix = len(x1d)
+    f = np.zeros(npix,float)
+    for i in range(npix):
+        f[i] = linearinterp(data,x1d[i],y1d[i])
+    return f
 
 @njit
 def numba_linearinterp(binim,fullim,binsize):
@@ -2745,6 +2839,171 @@ def model2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
     fluxerr = perror[0]*(flux/bestpar[0]) 
     
     return bestpar,perror,cov,flux,fluxerr,chisq
+
+
+#########################################################################
+# Empirical PSF
+
+#@njit
+def relcoord(x,y,shape):
+    """
+    Convert absolute X/Y coordinates to relative ones to use
+    with the lookup table.
+
+    Parameters
+    ----------
+    x : numpy array
+      Input x-values of positions in an image.
+    y : numpy array
+      Input Y-values of positions in an image.
+    shape : tuple or list
+      Two-element tuple or list of the (Ny,Nx) size of the image.
+
+    Returns
+    -------
+    relx : numpy array
+      The relative x-values ranging from -1 to +1.
+    rely : numpy array
+      The relative y-values ranging from -1 to +1.
+
+    Example
+    -------
+
+    relx,rely = relcoord(x,y,shape)
+
+    """
+
+    midpt = np.array([shape[0]//2,shape[1]//2])
+    relx = (x-midpt[1])/shape[1]*2
+    rely = (y-midpt[0])/shape[0]*2
+    return relx,rely
+
+#@njit
+def empirical(x, y, pars, data, imshape=None, deriv=False):
+    """
+    Evaluate an empirical PSF.
+
+    Parameters
+    ----------
+    x : numpy array
+      Array of X-values of points for which to compute the empirical model.
+    y : numpy array
+      Array of Y-values of points for which to compute the empirical model.
+    pars : numpy array or list
+       Parameter list.  pars = [amplitude, x0, y0].
+    data : numpy array
+       The empirical PSF information.  This must be in the proper 2D (Ny,Nx)
+         or 3D shape (Ny,Nx,psforder+1).
+    imshape : numpy array
+       The (ny,nx) shape of the full image.  This is needed if the PSF is
+         spatially varying.
+    deriv : boolean, optional
+       Return the derivatives as well.
+
+    Returns
+    -------
+    g : numpy array
+      The empirical model for the input x/y values and parameters (same
+        shape as x/y).
+    derivative : numpy array
+      Array of derivatives of g relative to the input parameters.
+        This is only returned if deriv=True.
+
+    Example
+    -------
+
+    g = empirical(x,y,pars,data)
+
+    or
+
+    g,derivative = empirical(x,y,pars,data,deriv=True)
+
+    """
+
+
+    #psftype,pars,npsfx,npsfy,psforder,nxhalf,nyhalf,lookup = unpackpsf(psf)    
+
+    if data.ndim != 2 and data.ndim != 3:
+        raise Exception('data must be 2D or 3D')
+        
+    # Reshape the lookup table
+    if data.ndim == 2:
+        data3d = data.reshape((data.shape[0],data.shape[1],1))
+    else:
+        data3d = data
+    npsfy,npsfx,npsforder = data3d.shape
+    if npsfy % 2 == 0 or npsfx % 2 ==0:
+        raise Exception('Empirical PSF dimensions must be odd')
+    npsfyc = npsfy // 2
+    npsfxc = npsfx // 2
+    
+    # Parameters for the profile
+    amp = pars[0]
+    xc = pars[1]
+    yc = pars[2]
+    # xc/yc are positions within the large image
+
+    if x.ndim==2:
+        x1d = x.ravel()
+        y1d = y.ravel()
+    else:
+        x1d = x
+        y1d = y
+    npix = len(x1d)
+    
+    ## Relative positions
+    #  npsfyc/nsfpxc are the pixel coordinates at the center of
+    #  the lookup table
+    dx = x1d - xc + npsfxc
+    dy = y1d - yc + npsfyc
+    
+    # Higher-order X/Y terms
+    if npsforder>1:
+        relx,rely = relcoord(xc,yc,shape)
+        coeff = np.array([1.0, relx, rely, relx*rely])
+    else:
+        coeff = np.array([1.0])
+
+    # Perform the interpolation
+    g = np.zeros(npix,float)
+    # We must find the derivative with x0/y0 empirically
+    if deriv:
+        gxplus = np.zeros(npix,float)
+        gyplus = np.zeros(npix,float)        
+        xoff = 0.01
+        yoff = 0.01
+    for i in range(npsforder):
+        # spline is initialized with x,y, z(Nx,Ny)
+        # and evaluated with f(x,y)
+        # since we are using im(Ny,Nx), we have to evalute with f(y,x)
+        g[:] += alinearinterp(data3d[:,:,i],dx,dy) * coeff[i]
+        #g += farr[i](dy,dx,grid=False) * coeff[i]
+        if deriv:
+            gxplus[:] += alinearinterp(data3d[:,:,i],dx-xoff,dy) * coeff[i]
+            gyplus[:] += alinearinterp(data3d[:,:,i],dx,dy-yoff) * coeff[i]
+            #gxplus += farr[i](dy,dx-xoff,grid=False) * coeff[i]
+            #gyplus += farr[i](dy-yoff,dx,grid=False) * coeff[i]
+    g *= amp
+    if deriv:
+        gxplus *= amp
+        gyplus *= amp        
+
+    if deriv is True:
+        # We cannot use np.gradient() because the input x/y values
+        # might not be a regular grid
+        derivative = np.zeros((npix,3),float)
+        derivative[:,0] = g/amp
+        derivative[:,1] = (gxplus-g)/xoff
+        derivative[:,2] = (gyplus-g)/yoff
+    else:
+        derivative = np.zeros((1,1),float)
+    
+    return g,derivative
+
+
+#########################################################################
+# Generic PSF
+
 
 @njit
 def unpackpsf(psf):
