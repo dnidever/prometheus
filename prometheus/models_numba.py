@@ -3119,6 +3119,34 @@ def psfinfo(psf):
         if psforder > 0:
             print('Image size = [',nimx,nimy,']')
 
+#@njit
+def psf2d_fwhm(psf):
+    """
+    Return the FWHM of the PSF
+    """
+    psftype,psfpars,lookup,imshape = unpackpsf()
+    tpars = np.zeros(3+len(psfpars),float)
+    tpars[0] = 1.0
+    tpars[3:] = psfpars
+    fwhm = model2d_fwhm(psftype,tpars)
+    # Need to make the PSF if it is empirical or has a lookup table
+    
+    return fwhm
+
+#@njit
+def psf2d_flux(psf,amp,xc,yc):
+    """
+    Return the flux of the PSF
+    """
+    psftype,psfpars,lookup,imshape = unpackpsf()
+    tpars = np.zeros(3+len(psfpars),float)
+    tpars[:3] = [amp,xc,yc]
+    tpars[3:] = psfpars
+    flux = model2d_flux(psftype,tpars)
+    # Need to make the PSF if it is empirical or has a lookup table
+    
+    return flux
+            
 @njit
 def psf2d(x,y,psf,amp,xc,yc,deriv=False,verbose=False):
     """
