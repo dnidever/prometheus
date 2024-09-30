@@ -255,6 +255,168 @@ def numba_linearinterp(binim,fullim,binsize):
 
 
 
+@njit
+def inverse(a):
+    """ Safely take the inverse of a square 2D matrix."""
+    # This checks for zeros on the diagonal and "fixes" them.
+    
+    # If one of the dimensions is zero in the R matrix [Npars,Npars]
+    # then replace it with a "dummy" value.  A large value in R
+    # will give a small value in inverse of R.
+    #badpar, = np.where(np.abs(np.diag(a))<sys.float_info.min)
+    badpar = (np.abs(np.diag(a))<2e-300)
+    if np.sum(badpar)>0:
+        a[badpar] = 1e10
+    ainv = np.linalg.inv(a)
+    # What if the inverse fails???
+    # can we catch it in numba
+    # Fix values
+    a[badpar] = 0  # put values back
+    ainv[badpar] = 0
+    
+    return ainv
+
+@njit
+def qr_jac_solve(jac,resid,weight=None):
+    """ Solve part of a non-linear least squares equation using QR decomposition
+        using the Jacobian."""
+    # jac: Jacobian matrix, first derivatives, [Npix, Npars]
+    # resid: residuals [Npix]
+    # weight: weights, ~1/error**2 [Npix]
+    
+    # QR decomposition
+    if weight is None:
+        q,r = np.linalg.qr(jac)
+        rinv = inverse(r)
+        dbeta = rinv @ (q.T @ resid)
+    # Weights input, multiply resid and jac by weights        
+    else:
+        q,r = np.linalg.qr( jac * weight.reshape(-1,1) )
+        rinv = inverse(r)
+        dbeta = rinv @ (q.T @ (resid*weight))
+        
+    return dbeta
+
+@njit
+def checkbounds(pars,bounds):
+    """ Check the parameters against the bounds."""
+    # 0 means it's fine
+    # 1 means it's beyond the lower bound
+    # 2 means it's beyond the upper bound
+    npars = len(pars)
+    lbounds = bounds[:,0]
+    ubounds = bounds[:,1]
+    check = np.zeros(npars,np.int32)
+    check[pars<=lbounds] = 1
+    check[pars>=ubounds] = 2
+    return check
+
+@njit
+def limbounds(pars,bounds):
+    """ Limit the parameters to the boundaries."""
+    lbounds = bounds[:,0]
+    ubounds = bounds[:,1]
+    outpars = np.minimum(np.maximum(pars,lbounds),ubounds)
+    return outpars
+
+@njit
+def limsteps(steps,maxsteps):
+    """ Limit the parameter steps to maximum step sizes."""
+    signs = np.sign(steps)
+    outsteps = np.minimum(np.abs(steps),maxsteps)
+    outsteps *= signs
+    return outsteps
+
+@njit
+def newlsqpars(pars,steps,bounds,maxsteps):
+    """ Return new parameters that fit the constraints."""
+    # Limit the steps to maxsteps
+    limited_steps = limsteps(steps,maxsteps)
+        
+    # Make sure that these don't cross the boundaries
+    lbounds = bounds[:,0]
+    ubounds = bounds[:,1]
+    check = checkbounds(pars+limited_steps,bounds)
+    # Reduce step size for any parameters to go beyond the boundaries
+    badpars = (check!=0)
+    # reduce the step sizes until they are within bounds
+    newsteps = limited_steps.copy()
+    count = 0
+    maxiter = 2
+    while (np.sum(badpars)>0 and count<=maxiter):
+        newsteps[badpars] /= 2
+        newcheck = checkbounds(pars+newsteps,bounds)
+        badpars = (newcheck!=0)
+        count += 1
+            
+    # Final parameters
+    newparams = pars + newsteps
+            
+    # Make sure to limit them to the boundaries
+    check = checkbounds(newparams,bounds)
+    badpars = (check!=0)
+    if np.sum(badpars)>0:
+        # add a tiny offset so it doesn't fit right on the boundary
+        newparams = np.minimum(np.maximum(newparams,lbounds+1e-30),ubounds-1e-30)
+    return newparams
+
+
+@njit
+def newbestpars(bestpars,dbeta):
+    """ Get new pars from offsets."""
+    newpars = np.zeros(3,float)
+    maxchange = 0.5
+    # Amplitude
+    ampmin = bestpars[0]-maxchange*np.abs(bestpars[0])
+    ampmin = np.maximum(ampmin,0)
+    ampmax = bestpars[0]+np.abs(maxchange*bestpars[0])
+    newamp = clip(bestpars[0]+dbeta[0],ampmin,ampmax)
+    newpars[0] = newamp
+    # Xc, maxchange in pixels
+    xmin = bestpars[1]-maxchange
+    xmax = bestpars[1]+maxchange
+    newx = clip(bestpars[1]+dbeta[1],xmin,xmax)
+    newpars[1] = newx
+    # Yc
+    ymin = bestpars[2]-maxchange
+    ymax = bestpars[2]+maxchange
+    newy = clip(bestpars[2]+dbeta[2],ymin,ymax)
+    newpars[2] = newy
+    return newpars
+
+@njit
+def jac_covariance(jac,resid,wt):
+    """ Determine the covariance matrix. """
+    
+    npix,npars = jac.shape
+    
+    # Weights
+    #   If weighted least-squares then
+    #   J.T * W * J
+    #   where W = I/sig_i**2
+    if wt is not None:
+        wt2 = wt.reshape(-1,1) + np.zeros(npars)
+        hess = jac.T @ (wt2 * jac)
+    else:
+        hess = jac.T @ jac  # not weighted
+
+    # cov = H-1, covariance matrix is inverse of Hessian matrix
+    cov_orig = inverse(hess)
+
+    # Rescale to get an unbiased estimate
+    # cov_scaled = cov * (RSS/(m-n)), where m=number of measurements, n=number of parameters
+    # RSS = residual sum of squares
+    #  using rss gives values consistent with what curve_fit returns
+    # Use chi-squared, since we are doing the weighted least-squares and weighted Hessian
+    if wt is not None:
+        chisq = np.sum(resid**2 * wt)
+    else:
+        chisq = np.sum(resid**2)
+    cov = cov_orig * (chisq/(npix-npars))  # what MPFITFUN suggests, but very small
+        
+    return cov
+
+
 ###################################################################
 # Numba analytical PSF models
 
@@ -3369,470 +3531,4 @@ def psffit(im,err,x,y,psf,ampc,xc,yc,verbose=False):
     
     return bestpar,perror,cov,flux,fluxerr,chisq
 
-
-####################################################
-
-
-
-
-# Left to add:
-# -empirical
-
-
-####---------------------------------------
-
-
-@njit
-def gaussderiv(nx,ny,asemi,bsemi,theta,amp,xc,yc,nderiv):
-    """ Generate Gaussians PSF model and derivative."""
-    cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
-    deriv = np.zeros((ny,nx,nderiv),float)
-    for i in range(nx):
-        for j in range(ny):
-            deriv1 = gaussvalderiv(i,j,amp,xc,yc,asemi,bsemi,theta,cxx,cyy,cxy,nderiv)
-            #deriv1 = gaussvalderiv(i,j,amp,xc,yc,cxx,cyy,cxy,nderiv)
-            deriv[j,i,:] = deriv1
-    model = amp * deriv[:,:,0]
-    return model,deriv
-
-
-
-#def gaussfit(im,xc,yc,asemi,bsemi,theta,bbx0,bbx1,bby0,bby1,thresh=1e-3):
-def gaussfit(im,tab,thresh=1e-3):
-    """ Fit elliptical Gaussian profile to a source. """
-
-    gflux,apflux,npix = numba_gaussfit(im,tab['mnx'],tab['mny'],tab['asemi'],
-                                       tab['bsemi'],tab['theta'],tab['bbx0'].astype(float),
-                                       tab['bbx1'].astype(float),tab['bby0'].astype(float),
-                                       tab['bby1'].astype(float),thresh)
-
-    return gflux,apflux,npix
-    
-@njit
-def numba_gaussfit(im,xc,yc,asemi,bsemi,theta,bbx0,bbx1,bby0,bby1,thresh):
-    """ Fit elliptical Gaussian profile to a source. """
-
-    nsource = len(xc)
-    gflux = np.zeros(nsource,float)
-    apflux = np.zeros(nsource,float)
-    npix = np.zeros(nsource,dtype=np.int64)
-    for i in range(nsource):
-        if asemi[i]>0 and bsemi[i]>0:
-            gflux1,apflux1,npix1 = numba_gfit(im,xc[i],yc[i],asemi[i],bsemi[i],theta[i],
-                                              bbx0[i],bbx1[i],bby0[i],bby1[i],thresh)
-            gflux[i] = gflux1
-            apflux[i] = apflux1
-            npix[i] = npix1
-        
-    return gflux,apflux,npix
-    
-@njit
-def numba_gfit(im,xc,yc,asemi,bsemi,theta,bbx0,bbx1,bby0,bby1,thresh):
-    """ Fit elliptical Gaussian profile to a source. """
-
-    ny,nx = im.shape
-    nyb = int(bby1-bby0+1)
-    nxb = int(bbx1-bbx0+1)
-
-    if bsemi==0:
-        bsemi = 0.1
-    if asemi==0:
-        asemi = 0.1
-        
-    # Calculate sigx, sigy, cxx, cyy, cxy
-    cxx,cyy,cyy = gauss_abt2cxy(asemi,bsemi,theta)
-    #thetarad = np.deg2rad(theta)
-    #sintheta = np.sin(thetarad)
-    #costheta = np.cos(thetarad)
-    #sintheta2 = sintheta**2
-    #costheta2 = costheta**2
-    #asemi2 = asemi**2
-    #bsemi2 = bsemi**2
-    #cxx = costheta2/asemi2 + sintheta2/bsemi2
-    #cyy = sintheta2/asemi2 + costheta2/bsemi2
-    #cxy = 2*costheta*sintheta*(1/asemi2-1/bsemi2)
-    
-    # Simple linear regression
-    # https://en.wikipedia.org/wiki/Simple_linear_regression
-    # y = alpha + beta*x
-    # beta = Sum( (xi-xmn)*(yi-ymn) ) / Sum( (xi-xmn)**2 )
-    # alpha = ymn - beta*xmn
-    #
-    # without the intercept term
-    # y = beta*x
-    # beta = Sum(xi*yi ) / Sum(xi**2)
-
-    #model = np.zeros((nyb,nxb),float)
-
-    # thresh has to change with the size of the source
-    # if the source is larger then the value of the normalized
-    # Gaussian will be smaller
-    # We are now using a unit-amplitude Gaussian instead
-    
-    apflux = 0.0    # elliptical aperture flux
-    sumxy = 0.0
-    sumx2 = 0.0
-    npix = 0
-    for i in range(nxb):
-        x = i+int(bbx0)
-        for j in range(nyb):
-            y = j+int(bby0)
-            imval = im[y,x]
-            # Unit amplitude Gaussian value
-            gval = gaussval(x,y,xc,yc,cxx,cyy,cxy)
-            #model[j,i] = gval
-            if gval>thresh:
-                npix += 1
-                # Add to aperture flux
-                if imval>0:
-                    apflux += imval
-                # Calculate fit
-                # x is the model, y is the data
-                # beta is the flux amplitude
-                sumxy += gval*imval
-                sumx2 += gval**2
-
-    if sumx2 <= 0:
-        sumx2 = 1
-    beta = sumxy / sumx2
-
-    # Now multiply by the volume of the Gaussian
-    amp = asemi*bsemi*2*np.pi
-    gflux = amp * beta
-    
-    return gflux,apflux,npix
-
-@njit
-def inverse(a):
-    """ Safely take the inverse of a square 2D matrix."""
-    # This checks for zeros on the diagonal and "fixes" them.
-    
-    # If one of the dimensions is zero in the R matrix [Npars,Npars]
-    # then replace it with a "dummy" value.  A large value in R
-    # will give a small value in inverse of R.
-    #badpar, = np.where(np.abs(np.diag(a))<sys.float_info.min)
-    badpar = (np.abs(np.diag(a))<2e-300)
-    if np.sum(badpar)>0:
-        a[badpar] = 1e10
-    ainv = np.linalg.inv(a)
-    # What if the inverse fails???
-    # can we catch it in numba
-    # Fix values
-    a[badpar] = 0  # put values back
-    ainv[badpar] = 0
-    
-    return ainv
-
-@njit
-def qr_jac_solve(jac,resid,weight=None):
-    """ Solve part of a non-linear least squares equation using QR decomposition
-        using the Jacobian."""
-    # jac: Jacobian matrix, first derivatives, [Npix, Npars]
-    # resid: residuals [Npix]
-    # weight: weights, ~1/error**2 [Npix]
-    
-    # QR decomposition
-    if weight is None:
-        q,r = np.linalg.qr(jac)
-        rinv = inverse(r)
-        dbeta = rinv @ (q.T @ resid)
-    # Weights input, multiply resid and jac by weights        
-    else:
-        q,r = np.linalg.qr( jac * weight.reshape(-1,1) )
-        rinv = inverse(r)
-        dbeta = rinv @ (q.T @ (resid*weight))
-        
-    return dbeta
-
-@njit
-def checkbounds(pars,bounds):
-    """ Check the parameters against the bounds."""
-    # 0 means it's fine
-    # 1 means it's beyond the lower bound
-    # 2 means it's beyond the upper bound
-    npars = len(pars)
-    lbounds = bounds[:,0]
-    ubounds = bounds[:,1]
-    check = np.zeros(npars,np.int32)
-    check[pars<=lbounds] = 1
-    check[pars>=ubounds] = 2
-    return check
-
-@njit
-def limbounds(pars,bounds):
-    """ Limit the parameters to the boundaries."""
-    lbounds = bounds[:,0]
-    ubounds = bounds[:,1]
-    outpars = np.minimum(np.maximum(pars,lbounds),ubounds)
-    return outpars
-
-@njit
-def limsteps(steps,maxsteps):
-    """ Limit the parameter steps to maximum step sizes."""
-    signs = np.sign(steps)
-    outsteps = np.minimum(np.abs(steps),maxsteps)
-    outsteps *= signs
-    return outsteps
-
-@njit
-def newlsqpars(pars,steps,bounds,maxsteps):
-    """ Return new parameters that fit the constraints."""
-    # Limit the steps to maxsteps
-    limited_steps = limsteps(steps,maxsteps)
-        
-    # Make sure that these don't cross the boundaries
-    lbounds = bounds[:,0]
-    ubounds = bounds[:,1]
-    check = checkbounds(pars+limited_steps,bounds)
-    # Reduce step size for any parameters to go beyond the boundaries
-    badpars = (check!=0)
-    # reduce the step sizes until they are within bounds
-    newsteps = limited_steps.copy()
-    count = 0
-    maxiter = 2
-    while (np.sum(badpars)>0 and count<=maxiter):
-        newsteps[badpars] /= 2
-        newcheck = checkbounds(pars+newsteps,bounds)
-        badpars = (newcheck!=0)
-        count += 1
-            
-    # Final parameters
-    newparams = pars + newsteps
-            
-    # Make sure to limit them to the boundaries
-    check = checkbounds(newparams,bounds)
-    badpars = (check!=0)
-    if np.sum(badpars)>0:
-        # add a tiny offset so it doesn't fit right on the boundary
-        newparams = np.minimum(np.maximum(newparams,lbounds+1e-30),ubounds-1e-30)
-    return newparams
-
-
-# Fit analytic Gaussian profile first
-# x/y/amp
-
-
-@njit
-def newbestpars(bestpars,dbeta):
-    """ Get new pars from offsets."""
-    newpars = np.zeros(3,float)
-    maxchange = 0.5
-    # Amplitude
-    ampmin = bestpars[0]-maxchange*np.abs(bestpars[0])
-    ampmin = np.maximum(ampmin,0)
-    ampmax = bestpars[0]+np.abs(maxchange*bestpars[0])
-    newamp = clip(bestpars[0]+dbeta[0],ampmin,ampmax)
-    newpars[0] = newamp
-    # Xc, maxchange in pixels
-    xmin = bestpars[1]-maxchange
-    xmax = bestpars[1]+maxchange
-    newx = clip(bestpars[1]+dbeta[1],xmin,xmax)
-    newpars[1] = newx
-    # Yc
-    ymin = bestpars[2]-maxchange
-    ymax = bestpars[2]+maxchange
-    newy = clip(bestpars[2]+dbeta[2],ymin,ymax)
-    newpars[2] = newy
-    return newpars
-
-@njit
-def jac_covariance(jac,resid,wt):
-    """ Determine the covariance matrix. """
-    
-    npix,npars = jac.shape
-    
-    # Weights
-    #   If weighted least-squares then
-    #   J.T * W * J
-    #   where W = I/sig_i**2
-    if wt is not None:
-        wt2 = wt.reshape(-1,1) + np.zeros(npars)
-        hess = jac.T @ (wt2 * jac)
-    else:
-        hess = jac.T @ jac  # not weighted
-
-    # cov = H-1, covariance matrix is inverse of Hessian matrix
-    cov_orig = inverse(hess)
-
-    # Rescale to get an unbiased estimate
-    # cov_scaled = cov * (RSS/(m-n)), where m=number of measurements, n=number of parameters
-    # RSS = residual sum of squares
-    #  using rss gives values consistent with what curve_fit returns
-    # Use chi-squared, since we are doing the weighted least-squares and weighted Hessian
-    if wt is not None:
-        chisq = np.sum(resid**2 * wt)
-    else:
-        chisq = np.sum(resid**2)
-    cov = cov_orig * (chisq/(npix-npars))  # what MPFITFUN suggests, but very small
-        
-    return cov
-
-
-@njit
-def gausspsffit(im,err,gpars,ampc,xc,yc,verbose):
-    """ Fit a PSF to a source."""
-    # xc/yc are with respect to the image origin (0,0)
-    
-    # Solve for x, y, amplitude
-
-    maxiter = 10
-    minpercdiff = 0.5
-    
-    ny,nx = im.shape
-    #nyp,nxp = psf.shape
-
-    wt = 1/err**2
-    #wt /= np.sum(wt)
-    
-    # Gaussian parameters
-    asemi,bsemi,theta = gpars
-    cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
-    #volume = asemi*bsemi*2*np.pi
-
-    # Initial values
-    bestpar = np.zeros(3,float)
-    bestpar[0] = ampc
-    bestpar[1] = xc
-    bestpar[2] = yc
-    
-    # Iteration loop
-    maxpercdiff = 1e10
-    niter = 0
-    while (niter<maxiter and maxpercdiff>minpercdiff):
-        model,deriv = gaussderiv(nx,ny,asemi,bsemi,theta,
-                                 bestpar[0],bestpar[1],bestpar[2],3)
-        resid = im-model
-        dbeta = qr_jac_solve(deriv.reshape(ny*nx,3),resid.ravel(),weight=wt.ravel())
-
-        if verbose:
-            print(niter,bestpar)
-            print(dbeta)
-        
-        # Update parameters
-        last_bestpar = bestpar.copy()
-        # limit the steps to the maximum step sizes and boundaries
-        #if bounds is not None or maxsteps is not None:
-        #    bestpar = newpars(bestpar,dbeta,bounds,maxsteps)
-        bounds = np.zeros((3,2),float)
-        bounds[:,0] = [0.00,0,0]
-        bounds[:,1] = [1e30,nx,ny]
-        maxsteps = np.zeros(3,float)
-        maxsteps[:] = [0.5*bestpar[0],0.5,0.5]
-        bestpar = newlsqpars(bestpar,dbeta,bounds,maxsteps)
-        #bestpar = newbestpars(bestpar,dbeta)
-        #else:
-        #bestpar += 0.5*dbeta
-        
-        # Check differences and changes
-        diff = np.abs(bestpar-last_bestpar)
-        denom = np.maximum(np.abs(bestpar.copy()),0.0001)
-        percdiff = diff.copy()/denom*100  # percent differences
-        maxpercdiff = np.max(percdiff)
-        chisq = np.sum((im-model)**2/err**2)/(nx*ny)
-        if verbose:
-            print(niter,percdiff,chisq)
-            print()
-        last_dbeta = dbeta
-        niter += 1
-
-    model,deriv = gaussderiv(nx,ny,asemi,bsemi,theta,
-                             bestpar[0],bestpar[1],bestpar[2],3)        
-    resid = im-model
-    
-    # Get covariance and errors
-    cov = jac_covariance(deriv.reshape(ny*nx,3),resid.ravel(),wt.ravel())
-    perror = np.sqrt(np.diag(cov))
-
-    # Now get the flux, multiply by the volume of the Gaussian
-    gvolume = asemi*bsemi*2*np.pi
-    flux = bestpar[0]*gvolume
-    fluxerr = perror[0]*gvolume
-    
-    return bestpar,perror,cov,flux,fluxerr
-
-
-@njit
-def psffit_old(im,err,ampc,xc,yc,verbose):
-    """ Fit all parameters of the Gaussian."""
-    # xc/yc are with respect to the image origin (0,0)
-    
-    # Solve for x, y, amplitude and asemi/bsemi/theta
-
-    maxiter = 10
-    minpercdiff = 0.5
-    
-    ny,nx = im.shape
-
-    wt = 1/err**2
-
-    asemi = 2.5
-    bsemi = 2.4
-    theta = 0.1
-
-    # theta in radians
-    
-    # Initial values
-    bestpar = np.zeros(6,float)
-    bestpar[0] = ampc
-    bestpar[1] = xc
-    bestpar[2] = yc
-    bestpar[3] = asemi
-    bestpar[4] = bsemi
-    bestpar[5] = theta
-    
-    # Iteration loop
-    maxpercdiff = 1e10
-    niter = 0
-    while (niter<maxiter and maxpercdiff>minpercdiff):
-        #model,deriv = gaussderiv(nx,ny,bestpar[3],bestpar[4],bestpar[5],
-        #                         bestpar[0],bestpar[1],bestpar[2],6)
-        model,deriv = gaussderiv(xx,yy,bestpars,6)
-        resid = im-model
-        dbeta = qr_jac_solve(deriv.reshape(ny*nx,6),resid.ravel(),weight=wt.ravel())
-        
-        if verbose:
-            print(niter,bestpar)
-            print(dbeta)
-        
-        # Update parameters
-        last_bestpar = bestpar.copy()
-        # limit the steps to the maximum step sizes and boundaries
-        #if bounds is not None or maxsteps is not None:
-        #    bestpar = newpars(bestpar,dbeta,bounds,maxsteps)
-        bounds = np.zeros((6,2),float)
-        bounds[:,0] = [0.00, 0, 0, 0.1, 0.1, -180]
-        bounds[:,1] = [1e30,nx,ny, nx//2, ny//2, 180]
-        maxsteps = np.zeros(6,float)
-        maxsteps[:] = [0.5*bestpar[0],0.5,0.5,0.5,0.5,2.0]
-        bestpar = newlsqpars(bestpar,dbeta,bounds,maxsteps)
-        
-        # Check differences and changes
-        diff = np.abs(bestpar-last_bestpar)
-        denom = np.maximum(np.abs(bestpar.copy()),0.0001)
-        percdiff = diff.copy()/denom*100  # percent differences
-        maxpercdiff = np.max(percdiff)
-        chisq = np.sum((im-model)**2/err**2)/(nx*ny)
-        if verbose:
-            print('chisq=',chisq)
-        #if verbose:
-        #    print(niter,percdiff,chisq)
-        #    print()
-        last_dbeta = dbeta
-        niter += 1
-
-    model,deriv = gaussderiv(nx,ny,bestpar[3],bestpar[4],bestpar[5],
-                             bestpar[0],bestpar[1],bestpar[2],6)
-    resid = im-model
-    
-    # Get covariance and errors
-    cov = jac_covariance(deriv.reshape(ny*nx,6),resid.ravel(),wt.ravel())
-    perror = np.sqrt(np.diag(cov))
-
-    # Now get the flux, multiply by the volume of the Gaussian
-    asemi,bsemi,theta = bestpar[3],bestpar[4],bestpar[5]
-    gvolume = asemi*bsemi*2*np.pi
-    flux = bestpar[0]*gvolume
-    fluxerr = perror[0]*gvolume
-    
-    return bestpar,perror,cov,flux,fluxerr
 
