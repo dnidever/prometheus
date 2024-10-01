@@ -7,9 +7,24 @@ import scipy.special as sc
 from dlnpyutils import utils as dln
 import numba
 from numba import njit,types
+from numba.experimental import jitclass
 from . import leastsquares as lsq
 
 PI = 3.141592653589793
+
+@njit
+def meshgrid(x,y):
+    """ Implementation of numpy's meshgrid function."""
+    nx = len(x)
+    ny = len(y)
+    dtype = np.array(x[0]*y[0]).dtype
+    xx = np.zeros((ny,nx),dtype)
+    for i in range(ny):
+        xx[i,:] = x
+    yy = np.zeros((ny,nx),dtype)
+    for i in range(nx):
+        yy[:,i] = y
+    return xx,yy
 
 @njit
 def aclip(val,minval,maxval):
@@ -108,6 +123,112 @@ def gammaincinv05(a):
             
     return out
 
+@njit
+def gaussfwhm(im):
+    """
+    Use the Gaussian equation Area
+    Volume = A*2*pi*sigx*sigy
+    to estimate the FWHM.
+    """
+    volume = np.sum(im)
+    ht = np.max(im)
+    sigma = np.sqrt(volume/(ht*2*np.pi))
+    fwhm = 2.35*sigma
+    return fwhm
+
+@njit
+def contourfwhm(im):
+    """                                                                                         
+    Measure the FWHM of a PSF or star image using contours.                                     
+                                                                                                
+    Parameters                                                                                  
+    ----------                                                                                  
+    im : numpy array                                                                            
+     The 2D image of a star.                                                                    
+                                                                                                
+    Returns                                                                                     
+    -------                                                                                     
+    fwhm : float                                                                                
+       The full-width at half maximum.                                                          
+                                                                                                
+    Example                                                                                     
+    -------                                                                                     
+                                                                                                
+    fwhm = contourfwhm(im)                                                                      
+                                                                                                
+    """
+    # get contour at half max and then get average radius                                       
+    ny,nx = im.shape
+    xcen = nx//2
+    ycen = ny//2
+    xx,yy = np.meshgrid(np.arange(nx)-nx//2,np.arange(ny)-ny//2)
+    rr = np.sqrt(xx**2+yy**2)
+
+    # Get half-flux radius                                                                      
+    hfrad = hfluxrad(im)
+    # mask the image to only 2*half-flux radius                                                 
+    mask = (rr<2*hfrad)
+
+    # Find contours at a constant value of 0.5                                                  
+    contours = measure.find_contours(im*mask, 0.5*np.max(im))
+    # If there are multiple contours, find the one that                                         
+    #   encloses the center                                                                     
+    if len(contours)>1:
+        for i in range(len(contours)):
+            x1 = contours[i][:,0]
+            y1 = contours[i][:,1]
+            inside = coords.isPointInPolygon(x1,y1,xcen,ycen)
+            if inside:
+                contours = contours[i]
+                break
+    else:
+        contours = contours[0]   # first level                                                  
+    xc = contours[:,0]
+    yc = contours[:,1]
+    r = np.sqrt((xc-nx//2)**2+(yc-ny//2)**2)
+    fwhm = np.mean(r)*2
+    return fwhm
+
+#@njuit
+def imfwhm(im):
+    """                                                                                         
+    Measure the FWHM of a PSF or star image.                                                    
+                                                                                                
+    Parameters                                                                                  
+    ----------                                                                                  
+    im : numpy array                                                                            
+      The image of a star.                                                                      
+                                                                                                
+    Returns                                                                                     
+    -------                                                                                     
+    fwhm : float                                                                                
+      The full-width at half maximum of the star.                                               
+                                                                                                
+    Example                                                                                     
+    -------                                                                                     
+                                                                                                
+    fwhm = imfwhm(im)                                                                           
+                                                                                                
+    """
+    ny,nx = im.shape
+    xx,yy = np.meshgrid(np.arange(nx)-nx//2,np.arange(ny)-ny//2)
+    rr = np.sqrt(xx**2+yy**2)
+    centerf = im[ny//2,nx//2]
+    si = np.argsort(rr.ravel())
+    rsi = rr.ravel()[si]
+    fsi = im.ravel()[si]
+    ind, = np.where(fsi<0.5*centerf)
+    bestr = np.min(rsi[ind])
+    bestind = ind[np.argmin(rsi[ind])]
+    # fit a robust line to the neighboring points                                               
+    gd, = np.where(np.abs(rsi-bestr) < 1.0)
+    coef,absdev = ladfit.ladfit(rsi[gd],fsi[gd])
+    # where does the line cross y=0.5                                                           
+    bestr2 = (0.5-coef[0])/coef[1]
+    fwhm = 2*bestr2
+    return fwhm
+
+    
 @njit
 def linearinterp(data,x,y):
     """
@@ -415,6 +536,75 @@ def jac_covariance(jac,resid,wt):
     cov = cov_orig * (chisq/(npix-npars))  # what MPFITFUN suggests, but very small
         
     return cov
+
+def starbbox(coords,imshape,radius):
+    """                                                                                         
+    Return the boundary box for a star given radius and image size.                             
+                                                                                                
+    Parameters                                                                                  
+    ----------                                                                                  
+    coords: list or tuple                                                                       
+       Central coordinates (xcen,ycen) of star (*absolute* values).                             
+    imshape: list or tuple                                                                      
+       Image shape (ny,nx) values.  Python images are (Y,X).                                    
+    radius: float                                                                               
+       Radius in pixels.                                                                        
+                                                                                                
+    Returns                                                                                     
+    -------                                                                                     
+    bbox : BoundingBox object                                                                   
+       Bounding box of the x/y ranges.                                                          
+       Upper values are EXCLUSIVE following the python convention.                              
+                                                                                                
+    """
+
+    # Star coordinates                                                                          
+    xcen,ycen = coords
+    ny,nx = imshape   # python images are (Y,X)                                                 
+    xlo = np.maximum(int(np.floor(xcen-radius)),0)
+    xhi = np.minimum(int(np.ceil(xcen+radius+1)),nx)
+    ylo = np.maximum(int(np.floor(ycen-radius)),0)
+    yhi = np.minimum(int(np.ceil(ycen+radius+1)),ny)
+
+    return BoundingBox(xlo,xhi,ylo,yhi)
+
+def bbox2xy(bbox):
+    """                                                                                         
+    Convenience method to convert boundary box of X/Y limits to 2-D X and Y arrays.  The upper limits
+    are EXCLUSIVE following the python convention.                                              
+                                                                                                
+    Parameters                                                                                  
+    ----------                                                                                  
+    bbox : BoundingBox object                                                                   
+      A BoundingBox object defining a rectangular region of an image.                           
+                                                                                                
+    Returns                                                                                     
+    -------                                                                                     
+    x : numpy array                                                                             
+      The 2D array of X-values of the bounding box region.                                      
+    y : numpy array                                                                             
+      The 2D array of Y-values of the bounding box region.                                      
+                                                                                                
+    Example                                                                                     
+    -------                                                                                     
+                                                                                                
+    x,y = bbox2xy(bbox)                                                                         
+                                                                                                
+    """
+    if isinstance(bbox,BoundingBox):
+        x0,x1 = bbox.xrange
+        y0,y1 = bbox.yrange
+    else:
+        x0,x1 = bbox[0]
+        y0,y1 = bbox[1]
+    dx = np.arange(x0,x1)
+    nxpix = len(dx)
+    dy = np.arange(y0,y1)
+    nypix = len(dy)
+    # Python images are (Y,X)                                                                   
+    x = dx.reshape(1,-1)+np.zeros(nypix,int).reshape(-1,1)   # broadcasting is faster           
+    y = dy.reshape(-1,1)+np.zeros(nxpix,int)
+    return x,y
 
 
 ###################################################################
@@ -753,7 +943,7 @@ def gaussian2dfit(im,err,ampc,xc,yc,verbose):
     ny,nx = im.shape
     im1d = im.ravel()
 
-    x2d,y2d = np.meshgrid(np.arange(nx),np.arange(ny))
+    x2d,y2d = meshgrid(np.arange(nx),np.arange(ny))
     x1d = x2d.ravel()
     y1d = y2d.ravel()
     
@@ -1132,7 +1322,7 @@ def moffat2dfit(im,err,ampc,xc,yc,verbose):
     ny,nx = im.shape
     im1d = im.ravel()
 
-    x2d,y2d = np.meshgrid(np.arange(nx),np.arange(ny))
+    x2d,y2d = meshgrid(np.arange(nx),np.arange(ny))
     x1d = x2d.ravel()
     y1d = y2d.ravel()
     
@@ -1550,7 +1740,7 @@ def penny2dfit(im,err,ampc,xc,yc,verbose):
     ny,nx = im.shape
     im1d = im.ravel()
 
-    x2d,y2d = np.meshgrid(np.arange(nx),np.arange(ny))
+    x2d,y2d = meshgrid(np.arange(nx),np.arange(ny))
     x1d = x2d.ravel()
     y1d = y2d.ravel()
     
@@ -1983,7 +2173,7 @@ def gausspow2dfit(im,err,ampc,xc,yc,verbose):
     ny,nx = im.shape
     im1d = im.ravel()
 
-    x2d,y2d = np.meshgrid(np.arange(nx),np.arange(ny))
+    x2d,y2d = meshgrid(np.arange(nx),np.arange(ny))
     x1d = x2d.ravel()
     y1d = y2d.ravel()
     
@@ -2677,27 +2867,27 @@ def model2d_fwhm(psftype,pars):
     # Gaussian
     if psftype==1:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
-        g,deriv = gaussian2d_fwhm(pars)
+        fwhm = gaussian2d_fwhm(pars)
     # Moffat
     elif psftype==2:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
-        g,deriv = moffat2d_fwhm(pars)
+        fwhm = moffat2d_fwhm(pars)
     # Penny
     elif psftype==3:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
-        g,deriv = penny2d_fwhm(pars)
+        fwhm = penny2d_fwhm(pars)
     # Gausspow
     elif psftype==4:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
-        g,deriv = gausspow2d_fwhm(pars)
+        fwhm = gausspow2d_fwhm(pars)
     # Sersic
     elif psftype==5:
         # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
-        g,deriv = sersic2d_fwhm(pars)
+        fwhm = sersic2d_fwhm(pars)
     else:
         print('psftype=',psftype,'not supported')
 
-    return g,deriv
+    return fwhm
 
 
 @njit
@@ -3532,3 +3722,404 @@ def psffit(im,err,x,y,psf,ampc,xc,yc,verbose=False):
     return bestpar,perror,cov,flux,fluxerr,chisq
 
 
+#########################################################################
+# PSF Classes
+
+spec = [
+    ('ixmin', types.int32),
+    ('ixmax', types.int32),
+    ('iymin', types.int32),
+    ('iymax', types.int32),
+]
+@jitclass(spec)
+class BoundingBox(object):
+
+    def __init__(self, ixmin, ixmax, iymin, iymax):
+        for value in (ixmin, ixmax, iymin, iymax):
+            if not isinstance(value, (int, np.integer)):
+                raise TypeError('ixmin, ixmax, iymin, and iymax must all be '
+                                'integers')
+
+        if ixmin > ixmax:
+            raise ValueError('ixmin must be <= ixmax')
+        if iymin > iymax:
+            raise ValueError('iymin must be <= iymax')
+
+        self.ixmin = ixmin
+        self.ixmax = ixmax
+        self.iymin = iymin
+        self.iymax = iymax
+
+    @property
+    def xrange(self):
+        return (self.ixmin,self.ixmax)
+
+    @property
+    def yrange(self):
+        return (self.iymin,self.iymax)
+
+    @property
+    def data(self):
+        return [(self.ixmin,self.ixmax),(self.iymin,self.iymax)]
+
+    def __getitem__(self,item):
+        return self.data[item]
+
+    def reset(self):
+        """ Forget the original coordinates."""
+        self.ixmax -= self.ixmin
+        self.iymax -= self.iymin
+        self.ixmin = 0
+        self.iymin = 0
+    
+
+# PSF Gaussian class
+
+spec = [
+    ('npix', types.int32),                # a simple scalar field
+    ('mpars', types.float64[:]),          # an array field
+    ('_params', types.float64[:]),
+    ('radius', types.int32),
+    ('verbose', types.boolean),
+    ('niter', types.int32),
+    ('_unitfootflux', types.float64),
+    ('lookup', types.float64[:,:,:]),
+    ('_bounds', types.float64[:,:]),
+    ('_steps', types.float64[:]),
+    #('labels', types.ListType(types.string)),
+]
+
+@jitclass(spec)
+#class PSFGaussian(PSFBase):
+class PSFGaussian(object):    
+
+    # Initalize the object
+    def __init__(self,mpars=None,npix=51,verbose=False):
+        # MPARS are the model parameters
+        #  mpars = [xsigma, ysigma, theta]
+        if mpars is None:
+            mpars = np.array([1.0,1.0,0.0])
+        if len(mpars)!=3:
+            raise ValueError('3 parameters required')
+        # mpars = [xsigma, ysigma, theta]
+        if mpars[0]<=0 or mpars[1]<=0:
+            raise ValueError('sigma parameters must be >0')
+
+        # npix must be odd                                                                      
+        if npix%2==0: npix += 1
+        self._params = np.atleast_1d(mpars)
+        #self.binned = binned
+        self.npix = npix
+        self.radius = npix//2
+        self.verbose = verbose
+        self.niter = 0
+        self._unitfootflux = np.nan  # unit flux in footprint                                     
+        self.lookup = np.zeros((npix,npix,3),float)+np.nan
+        # Set the bounds
+        self._bounds = np.zeros((2,3),float)
+        self._bounds[0,:] = [0.0,0.0,-np.inf]
+        self._bounds[1,:] = [np.inf,np.inf,np.inf]
+        # Set step sizes
+        self._steps = np.array([0.5,0.5,0.2])
+        # Labels
+        #self.labels = ['xsigma','ysigma','theta']
+
+    @property
+    def params(self):
+        """ Return the PSF model parameters."""
+        return self._params
+
+    @params.setter
+    def params(self,value):
+        """ Set the PSF model parameters."""
+        self._params = value
+
+    @property
+    def haslookup(self):
+        """ Check if there is a lookup table."""
+        return (np.isfinite(self.lookup[0,0,0])==True)
+        
+    def starbbox(self,coords,imshape,radius=np.nan):
+        """                                                                                     
+        Return the boundary box for a star given radius and image size.                         
+                                                                                                
+        Parameters                                                                              
+        ----------                                                                              
+        coords: list or tuple                                                                   
+           Central coordinates (xcen,ycen) of star (*absolute* values).                         
+        imshape: list or tuple                                                                  
+            Image shape (ny,nx) values.  Python images are (Y,X).                               
+        radius: float, optional                                                                 
+            Radius in pixels.  Default is psf.npix//2.                                          
+                                                                                                
+        Returns                                                                                 
+        -------                                                                                 
+        bbox : BoundingBox object                                                               
+          Bounding box of the x/y ranges.                                                       
+          Upper values are EXCLUSIVE following the python convention.                           
+                                                                                                
+        """
+        if np.isfinite(radius)==False:
+            radius = self.npix//2
+        return starbbox(coords,imshape,radius)
+
+    def bbox2xy(self,bbox):
+        """                                                                                     
+        Convenience method to convert boundary box of X/Y limits to 2-D X and Y arrays.
+        The upper limits are EXCLUSIVE following the python convention.
+        """
+        return bbox2xy(bbox)
+
+    #def __str__(self):
+    #    """ String representation of the PSF."""
+    #    return 'PSFGaussian('+str(list(self.params))+',npix='+str(self.npix)+',lookup='+str(self.haslookup)+') FWHM='+str(self.fwhm())
+
+    @property
+    def unitfootflux(self):
+        """ Return the unit flux inside the footprint."""
+        if np.isfinite(self._unitfootflux)==False:
+            xx,yy = meshgrid(np.arange(self.npix),np.arange(self.npix))
+            pars = np.zeros(6,float)
+            pars[0] = 1.0
+            pars[3:] = self.params
+            foot = self.evaluate(xx,yy,pars)
+            self._unitfootflux = np.sum(foot) # sum up footprint flux                         
+        return self._unitfootflux
+    
+    def fwhm(self,pars=None):
+        """ Return the FWHM of the model."""
+        if pars is None:
+            pars = np.zeros(6,float)
+            pars[0] = 1.0
+            pars[3:] = self.params
+        return gaussian2d_fwhm(pars)
+
+    def flux(self,pars=np.array([1.0]),footprint=False):
+        """ Return the flux/volume of the model given the amp or parameters."""
+        if len(pars)==1:
+            amp = pars[0]
+            pars = np.zeros(6,float)
+            pars[0] = amp
+            pars[3:] = self.params
+        if footprint:
+            return self.unitfootflux*pars[0]
+        else:
+            return gaussian2d_flux(pars)        
+    
+    def evaluate(self,x, y, pars, deriv=False, nderiv=0):
+        """Two dimensional Gaussian model function"""
+        # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+        g,_ = agaussian2d(x, y, pars, nderiv=nderiv)
+        return g
+    
+    def deriv(self,x, y, pars, binned=None, nderiv=None):
+        """Two dimensional Gaussian model derivative with respect to parameters"""
+        g, derivative = agaussian2d(x, y, pars, nderiv=nderiv)
+        return derivative            
+
+
+# Generic PSF class
+
+spec = [
+    ('psftype', types.int32),
+    ('mpars', types.float64[:]),
+    ('npix', types.int32),
+    ('_params', types.float64[:]),
+    ('radius', types.int32),
+    ('verbose', types.boolean),
+    ('niter', types.int32),
+    ('_unitfootflux', types.float64),
+    ('lookup', types.float64[:,:,:]),
+    ('_bounds', types.float64[:,:]),
+    ('_steps', types.float64[:]),
+    ('coords', types.float64[:]),
+    ('imshape', types.int32[:]),
+    ('order', types.int32),
+]
+
+@jitclass(spec)
+class PSF(object):    
+
+    # Initalize the object
+    def __init__(self,psftype,mpars,npix=51,imshape=np.array([0,0],np.int32),order=0,verbose=False):
+        # MPARS are the model parameters
+        self.psftype = psftype
+        # npix must be odd                                                                      
+        if npix%2==0: npix += 1
+        self._params = np.atleast_1d(mpars)
+        self.npix = npix
+        self.radius = npix//2
+        self.imshape = imshape
+        self.order = 0
+        self.verbose = verbose
+        self.niter = 0
+        self._unitfootflux = np.nan  # unit flux in footprint                                     
+        self.lookup = np.zeros((npix,npix,3),float)+np.nan
+        # Set the bounds
+        self._bounds = np.zeros((2,3),float)
+        self._bounds[0,:] = [0.0,0.0,-np.inf]
+        self._bounds[1,:] = [np.inf,np.inf,np.inf]
+        # Set step sizes
+        self._steps = np.array([0.5,0.5,0.2])
+        
+    @property
+    def nparams(self):
+        numparams = [3,4,5,5,4]
+        return numparams[self.psftype-1]
+        
+    @property
+    def params(self):
+        """ Return the PSF model parameters."""
+        return self._params
+
+    @property
+    def name(self):
+        """ Return the name of the PSF type. """
+        if self.psftype==1:
+            return "Gaussian"
+        elif self.psftype==2:
+            return "Moffat"
+        elif self.psftype==3:
+            return "Penny"
+        elif self.psftype==4:
+            return "Gausspow"
+        elif self.psftype==5:
+            return "Sersic"
+        elif self.psftype==6:
+            return "Empirical"
+        
+    @params.setter
+    def params(self,value):
+        """ Set the PSF model parameters."""
+        self._params = value
+
+    @property
+    def haslookup(self):
+        """ Check if there is a lookup table."""
+        return (np.isfinite(self.lookup[0,0,0])==True)
+        
+    def starbbox(self,coords,imshape,radius=np.nan):
+        """                                                                                     
+        Return the boundary box for a star given radius and image size.                         
+                                                                                                
+        Parameters                                                                              
+        ----------                                                                              
+        coords: list or tuple                                                                   
+           Central coordinates (xcen,ycen) of star (*absolute* values).                         
+        imshape: list or tuple                                                                  
+            Image shape (ny,nx) values.  Python images are (Y,X).                               
+        radius: float, optional                                                                 
+            Radius in pixels.  Default is psf.npix//2.                                          
+                                                                                                
+        Returns                                                                                 
+        -------                                                                                 
+        bbox : BoundingBox object                                                               
+          Bounding box of the x/y ranges.                                                       
+          Upper values are EXCLUSIVE following the python convention.                           
+                                                                                                
+        """
+        if np.isfinite(radius)==False:
+            radius = self.npix//2
+        return starbbox(coords,imshape,radius)
+
+    def bbox2xy(self,bbox):
+        """                                                                                     
+        Convenience method to convert boundary box of X/Y limits to 2-D X and Y arrays.
+        The upper limits are EXCLUSIVE following the python convention.
+        """
+        return bbox2xy(bbox)
+
+    def __str__(self):
+        """ String representation of the PSF."""
+        return 'PSF('+self.name+',npix='+str(self.npix)+',lookup='+str(self.haslookup)+') FWHM='+str(self.fwhm())
+
+    @property
+    def unitfootflux(self):
+        """ Return the unit flux inside the footprint."""
+        if np.isfinite(self._unitfootflux)==False:
+            xx,yy = meshgrid(np.arange(self.npix),np.arange(self.npix))
+            pars = np.zeros(3,float)
+            pars[0] = 1.0
+            foot = self.model(xx,yy,pars,deriv=False)
+            self._unitfootflux = np.sum(foot) # sum up footprint flux                         
+        return self._unitfootflux
+    
+    def fwhm(self,pars=np.array([1.0])):
+        """ Return the FWHM of the model."""
+        tpars = np.zeros(3+self.nparams,float)
+        tpars[0] = pars[0]
+        tpars[3:] = self.params
+        if self.psftype <= 5:
+            fwhm = model2d_fwhm(self.psftype,tpars)
+        else:
+            xx,yy = meshgrid(np.arange(self.npix),np.arange(self.npix))
+            tpars = np.zeros(3,float)
+            tpars[0] = pars[0]
+            foot = self.model(xx,yy,tpars)
+            fwhm = gaussfwhm(foot)
+        return fwhm
+
+    def flux(self,pars=np.array([1.0]),footprint=False):
+        """ Return the flux/volume of the model given the amp or parameters."""
+        if len(pars)<3:
+            amp = pars[0]
+            pars = np.zeros(3+self.nparams,float)
+            pars[0] = amp
+            pars[3:] = self.params
+        if footprint:
+            return self.unitfootflux*pars[0]
+        else:
+            if self.psftype <= 5:
+                flux = model2d_flux(self.psftype,pars)
+            else:
+                xx,yy = meshgrid(np.arange(self.npix),np.arange(self.npix))
+                tpars = np.zeros(3,float)
+                tpars[0] = pars[0]
+                foot = self.model(xx,yy,tpars)
+                flux = np.sum(foot)
+            return flux   
+
+    def evaluate(self,x, y, pars):
+        """Two dimensional model function and derivatives"""
+        # Get the analytic portion
+        nderiv = 3
+        if len(pars) != 3:
+            raise Exception('pars must have 3 elements [amp,xc,yc]')
+        #amp,xc,yc = pars
+        if self.psftype <= 5:
+            # Add amp, xc, yc to the parameters
+            allpars = np.zeros(3+self.nparams,float)
+            allpars[:3] = pars
+            allpars[3:] = self.params
+            g,derivative = amodel2d(x,y,self.psftype,allpars,nderiv)
+        elif self.psftype == 6:
+            g,derivative = empirical(x,y,pars,self.lookup,self.imshape,deriv=True)
+
+        # Add lookup table portion
+        if self.psftype <= 5 and self.haslookup:
+            eg,ederivative = empirical(x,y,pars,self.lookup,self.imshape,deriv=True)
+            g[:] += eg
+            # Make sure the model is positive everywhere
+            derivative[:,:] += ederivative
+
+        return g,derivative
+
+    def model(self,x, y, pars, deriv=False):
+        """Two dimensional PSF model."""
+        g, _ = self.evaluate(x, y, pars)
+        return g
+        
+    def deriv(self,x, y, pars):
+        """Two dimensional PSF derivative with respect to parameters"""
+        _, derivative = self.evaluate(x, y, pars)
+        return derivative
+
+    def packpsf(self):
+        """ Return the packed PSF array."""
+        if self.psftype <= 5:
+            if self.haslookup:
+                return packpsf(self.psftype,self.pars,self.lookup,self.imshape)
+            else:
+                return packpsf(self.psftype,self.pars)
+        else:
+            return packpsf(self.psftype,0,self.lookup,self.imshape)
