@@ -672,9 +672,17 @@ class CCDData(CCD):
         if type(binsize) is int:
             binsize = [binsize,binsize]
         nbinpix = binsize[0]*binsize[1]
-        self.data = dln.rebin(self.data,binsize=binsize,tot=tot)
+        # If error does NOT exist yet and not summing, then make it
+        # otherwise we cannot use poisson statistics after averaging
+        if (hasattr(self,'_error') is False or self._error is None) and tot==False:
+            e = self.error   # calculated error behind the scenes
+        self.data = dln.rebin(self.data,binsize=binsize,tot=tot)            
         if self._error is not None:
-            self._error = np.sqrt(dln.rebin(self._error**2,binsize=binsize,tot=tot))
+            binerror = dln.rebin(self._error**2,binsize=binsize,tot=True)
+            if tot==False:
+                binerror /= nbinpix**2
+            binerror = np.sqrt(binerror)
+            self._error = binerror
         if self.mask is not None:
             newmask = dln.rebin(self.mask.astype(int),binsize=binsize,tot=True)
             newmask = (newmask > 0.5*nbinpix)
