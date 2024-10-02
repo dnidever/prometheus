@@ -1,6 +1,7 @@
 import os
 import numpy as np
-from numba import njit,types
+from numba import njit,types,from_dtype
+from numba.experimental import jitclass
 from . import models_numba as mnb
 
 # Fit a PSF model to multiple stars in an image
@@ -176,6 +177,727 @@ def mkempirical(cube,order=0,coords=None,shape=None,lookup=False):
                 
     return fpars,nbadstar,rms
 
+@njit
+def starbbox(coords,imshape,radius):
+    """                                                                                         
+    Return the boundary box for a star given radius and image size.                             
+                                                                                                
+    Parameters                                                                                  
+    ----------                                                                                  
+    coords: list or tuple                                                                       
+       Central coordinates (xcen,ycen) of star (*absolute* values).                             
+    imshape: list or tuple                                                                      
+       Image shape (ny,nx) values.  Python images are (Y,X).                                    
+    radius: float                                                                               
+       Radius in pixels.                                                                        
+                                                                                                
+    Returns                                                                                     
+    -------                                                                                     
+    bbox : BoundingBox object                                                                   
+       Bounding box of the x/y ranges.                                                          
+       Upper values are EXCLUSIVE following the python convention.                              
+                                                                                                
+    """
+
+    # Star coordinates                                                                          
+    xcen,ycen = coords
+    ny,nx = imshape   # python images are (Y,X)                                                 
+    xlo = np.maximum(int(np.floor(xcen-radius)),0)
+    xhi = np.minimum(int(np.ceil(xcen+radius+1)),nx)
+    ylo = np.maximum(int(np.floor(ycen-radius)),0)
+    yhi = np.minimum(int(np.ceil(ycen+radius+1)),ny)
+    return np.array([xlo,xhi,ylo,yhi])
+
+@njit
+def sliceinsert(array,lo,insert):
+    """ Insert array values."""
+    n = insert.size
+    for i in range(n):
+        j = i + lo
+        array[j] = insert[i]
+    # array is updated in place
+
+
+@njit
+def getstar(image,error,xcen,ycen,fitradius):
+    """ Return the image/error/x/y arrays for the star."""
+    nfitpix = int(np.ceil(fitradius))
+    bbox = starbbox((xcen,ycen),image.shape,nfitpix)
+    flux = image[bbox[2]:bbox[3]+1,bbox[0]:bbox[1]+1].copy()
+    err = error[bbox[2]:bbox[3]+1,bbox[0]:bbox[1]+1].copy()
+    nflux = flux.size
+    nx = bbox[1]-bbox[0]+1
+    ny = bbox[3]-bbox[2]+1
+    imdata = np.zeros(nflux,float)
+    errdata = np.zeros(nflux,float)
+    xdata = np.zeros(nflux,np.int32)
+    ydata = np.zeros(nflux,np.int32)
+    count = 0
+    for i in range(nx):
+        x = i + bbox[0]
+        for j in range(ny):
+            y = j + bbox[2]
+            imdata[count] = flux[j,i]
+            errdata[count] = error[j,i]
+            xdata[count] = x
+            ydata[count] = y
+            count += 1
+    return imdata,errdata,xdata,ydata    
+
+
+@njit
+def getstar2(image,error,xcen,ycen,fitradius):
+    """ Return the image/error/x/y arrays for the star."""
+    # always return the same size
+    nfitpix = int(np.ceil(fitradius))
+    npix = 2*nfitpix+1
+    bbox = starbbox((xcen,ycen),image.shape,nfitpix)
+    #flux = image[bbox[2]:bbox[3]+1,bbox[0]:bbox[1]+1].copy()
+    #err = error[bbox[2]:bbox[3]+1,bbox[0]:bbox[1]+1].copy()
+    #nflux = flux.size
+    nx = bbox[1]-bbox[0]+1
+    ny = bbox[3]-bbox[2]+1
+    #print(bbox)
+    #print(nx,ny)
+    xstart = bbox[0]
+    ystart = bbox[2]
+    if nx < npix:
+        # left edge
+        if bbox[0]==0:
+            xstart = bbox[1]-npix
+        # right edge
+        else:
+            xstart = 0
+    if ny < npix:
+        # bottom edge
+        if bbox[2]==0:
+            ystart = bbox[3]-npix
+        # top edge
+        else:
+            ystart = 0
+    #print(xstart,ystart)
+    imdata = np.zeros(npix*npix,float)+np.nan
+    errdata = np.zeros(npix*npix,float)+np.nan
+    xdata = np.zeros(npix*npix,np.int32)
+    ydata = np.zeros(npix*npix,np.int32)
+    count = 0
+    for i in range(npix):
+        x = i + xstart
+        for j in range(npix):
+            y = j + ystart
+            xdata[count] = x
+            ydata[count] = y
+            if x>=bbox[0] and x<=bbox[1] and y>=bbox[2] and y<=bbox[3]:
+                imdata[count] = image[y,x]
+                errdata[count] = error[y,x]
+            count += 1
+    return imdata,errdata,xdata,ydata,bbox
+
+@njit
+def collatestars2(image,error,starx,stary,fitradius):
+    nstars = len(starx)
+    nfitpix = int(np.ceil(fitradius))
+    npix = 2*nfitpix+1
+    # Get xdata, ydata, error
+    imdata = np.zeros((nstars,npix*npix),float)
+    errdata = np.zeros((nstars,npix*npix),float)
+    xdata = np.zeros((nstars,npix*npix),np.int32)
+    ydata = np.zeros((nstars,npix*npix),np.int32)
+    bbox = np.zeros((nstars,4),np.int32)
+    for i in range(nstars):
+        imdata1,errdata1,xdata1,ydata1,bbox1 = getstar2(image,error,starx[i],stary[i],fitradius)
+        imdata[i,:] = imdata1
+        errdata[i,:] = errdata1
+        xdata[i,:] = xdata1
+        ydata[i,:] = ydata1
+        bbox[i,:] = bbox1
+    return imdata,errdata,xdata,ydata,bbox
+
+
+@njit
+def collatestars(image,error,starx,stary,fitradius):
+    nstars = len(starx)
+    nfitpix = int(np.ceil(fitradius))
+    # Get xdata, ydata, error
+    maxpix = nstars*(2*nfitpix+1)**2
+    imdata = np.zeros(maxpix,float)
+    errdata = np.zeros(maxpix,float)
+    xdata = np.zeros(maxpix,np.int32)
+    ydata = np.zeros(maxpix,np.int32)
+    nimdata = np.zeros(nstars,np.int32)
+    bboxdata = np.zeros((nstars,4),float)
+    #pixcount = 0
+    #for i in range(nstars):
+    #    xcen = starx[i]
+    #    ycen = stary[i]
+    #    bbox = starbbox((xcen,ycen),image.shape,nfitpix)
+    #    #bboxdata[i,:] = bbox
+    #    #print(bbox[2],bbox[3]+1,bbox[0],bbox[1]+1)
+    #    flux = image[bbox[2]:bbox[3]+1,bbox[0]:bbox[1]+1].copy()
+    #    err = error[bbox[2]:bbox[3]+1,bbox[0]:bbox[1]+1].copy()
+    #    flux1d = flux.ravel()
+    #    error1d = error.ravel()
+    #    nflux1d = len(flux1d)
+    #    sliceinsert(imdata,pixcount,flux1d)
+    #    sliceinsert(errdata,pixcount,error1d)
+    #    pixcount += nflux1d
+    #    nimdata[i] = nflux1d
+    #imdata = imdata[:pixcount]
+    #errdata = errdata[:pixcount]
+    #    
+    #return imdata,errdata,nimdata
+
+    count = 0
+    for i in range(nstars):
+        xcen = starx[i]
+        ycen = stary[i]
+        bbox = starbbox((xcen,ycen),image.shape,nfitpix)
+        imdata1,errdata1,xdata1,ydata1 = getstar(image,error,xcen,ycen,fitradius)
+        nim = len(imdata1)
+        nimdata[i] = nim
+        sliceinsert(imdata,count,imdata1)
+        sliceinsert(errdata,count,errdata1)
+        sliceinsert(xdata,count,xdata1)
+        sliceinsert(ydata,count,ydata1)
+        count += nim
+    imdata = imdata[:count]
+    errdata = errdata[:count]
+    xdata = xdata[:count]
+    ydata = ydata[:count]
+        
+    return imdata,errdata,xdata,ydata,nimdata,bboxdata
+
+@njit
+def getfitstar(image,error,xcen,ycen,fitradius):
+    """ Get the fitting pixels for a single star."""
+    nfitpix = int(np.ceil(fitradius))
+    bbox = starbbox((xcen,ycen),image.shape,nfitpix)
+    flux = image[bbox[2]:bbox[3]+1,bbox[0]:bbox[1]+1].copy()
+    err = error[bbox[2]:bbox[3]+1,bbox[0]:bbox[1]+1].copy()
+    nflux = flux.size
+    nx = bbox[1]-bbox[0]+1
+    ny = bbox[3]-bbox[2]+1
+    imdata = np.zeros(nflux,float)
+    errdata = np.zeros(nflux,float)
+    xdata = np.zeros(nflux,np.int32)
+    ydata = np.zeros(nflux,np.int32)
+    count = 0
+    for i in range(nx):
+        x = i + bbox[0]
+        for j in range(ny):
+            y = j + bbox[2]
+            r = np.sqrt((x-xcen)**2 + (y-ycen)**2)
+            if r <= fitradius:
+                imdata[count] = flux[j,i]
+                errdata[count] = error[j,i]
+                xdata[count] = x
+                ydata[count] = y
+                count += 1
+    imdata = imdata[:count]
+    errdata = errdata[:count]
+    xdata = xdata[:count]
+    ydata = ydata[:count]
+    return imdata,errdata,xdata,ydata
+
+        
+@njit
+def collatefitstars(image,error,starx,stary,fwhm):
+    nstars = len(starx)
+    fitradius = fwhm*1.5
+    nfitpix = int(np.ceil(fitradius))
+    # Get xdata, ydata, error
+    maxpix = nstars*(2*nfitpix+1)**2
+    imdata = np.zeros(maxpix,float)
+    errdata = np.zeros(maxpix,float)
+    xdata = np.zeros(maxpix,np.int32)
+    ydata = np.zeros(maxpix,np.int32)
+    nimdata = np.zeros(nstars,np.int32)
+    bboxdata = np.zeros((nstars,4),float)
+    count = 0
+    for i in range(nstars):
+        xcen = starx[i]
+        ycen = stary[i]
+        bbox = starbbox((xcen,ycen),image.shape,nfitpix)
+        imdata1,errdata1,xdata1,ydata1 = getfitstar(image,error,xcen,ycen,fitradius)
+        nim = len(imdata1)
+        nimdata[i] = nim
+        sliceinsert(imdata,count,imdata1)
+        sliceinsert(errdata,count,errdata1)
+        sliceinsert(xdata,count,xdata1)
+        sliceinsert(ydata,count,ydata1)
+        count += nim
+    imdata = imdata[:count]
+    errdata = errdata[:count]
+    xdata = xdata[:count]
+    ydata = ydata[:count]
+        
+    return imdata,errdata,xdata,ydata,nimdata,bboxdata
+
+
+    
+kv_ty = (types.int64, types.unicode_type)
+spec = [
+    ('psftype', types.int32),
+    ('params', types.float64[:]),
+    ('lookup', types.float64[:,:,:]),
+    ('order', types.int32),
+    ('fwhm', types.float64),
+    ('image', types.float64[:,:]),
+    ('error', types.float64[:,:]),
+    ('starinit', types.float64[:,:]),
+    ('nstars', types.int32),
+    ('niter', types.int32),
+    ('npsfpix', types.int32),
+    ('nx', types.int32),
+    ('ny', types.int32),
+    ('fitradius', types.float64),
+    ('nfitpix', types.int32),
+    ('staramp', types.float64[:]),
+    ('starxcen', types.float64[:]),
+    ('starycen', types.float64[:]),
+    ('starchisq', types.float64[:]),
+    ('starrms', types.float64[:]),
+    ('starnpix', types.int32[:]),
+    #('psf', types.),
+    #('d', types.DictType(*kv_ty)),
+    #('l', types.ListType(types.float64))])
+    #('psftype', types.int32),
+    #('mpars', types.float64[:]),
+    ('npix', types.int32),
+    ('_params', types.float64[:]),
+    ('radius', types.int32),
+    ('verbose', types.boolean),
+    ('niter', types.int32),
+    ('_unitfootflux', types.float64),
+    ('lookup', types.float64[:,:,:]),
+    ('_bounds', types.float64[:,:]),
+    ('_steps', types.float64[:]),
+    ('coords', types.float64[:]),
+    ('imshape', types.int32[:]),
+    ('order', types.int32),
+]
+
+@jitclass(spec)
+class PSFFitter(object):
+
+    def __init__(self,psf,image,error,starx,stary,starflux,fitradius=np.nan,verbose=False):
+        self.verbose = verbose
+        self.psftype = psf.psftype
+        self.params = psf.params
+        self.lookup = psf.lookup
+        self.order = psf.order
+        self.fwhm = psf.fwhm()
+        self.image = image.astype(np.float64)
+        self.error = error.astype(np.float64)
+        nstars = len(starx)
+        self.starinit = np.zeros((nstars,3),float)
+        self.starinit[:,0] = starx
+        self.starinit[:,1] = stary
+        self.starinit[:,2] = starflux
+        self.nstars = nstars
+        self.niter = 0
+        self.npsfpix = psf.npix
+        ny,nx = image.shape
+        self.nx = nx
+        self.ny = ny
+        if np.isfinite(fitradius)==False:
+            fitradius = self.fwhm*1.5
+        #    if type(psf)==models.PSFPenny:
+        #        fitradius = psf.fwhm()*1.5
+        #    else:
+        #        fitradius = psf.fwhm()
+        self.fitradius = fitradius
+        self.nfitpix = int(np.ceil(fitradius))  # +/- nfitpix
+        self.staramp = np.zeros(self.nstars,float)
+        self.staramp[:] = starflux/(2*np.pi*(self.fwhm/2.35)**2)
+        # if 'amp' in tab.colnames:
+        #     self.staramp[:] = tab['amp'].copy()
+        # else:
+        #     # estimate amp from flux and fwhm
+        #     # area under 2D Gaussian is 2*pi*A*sigx*sigy
+        #     amp = tab['flux']/(2*np.pi*(tab['fwhm']/2.35)**2)
+        #     self.staramp[:] = np.maximum(amp,0)   # make sure it's positive
+        # # Original X/Y values
+        #self.starxcenorig = np.zeros(self.nstars,float)
+        #self.starxcenorig[:] = tab['x'].copy()
+        #self.starycenorig = np.zeros(self.nstars,float)
+        #self.starycenorig[:] = tab['y'].copy()
+        # current best-fit values
+        self.starxcen = np.zeros(self.nstars,float)
+        self.starxcen[:] = self.starinit[:,0].copy()
+        self.starycen = np.zeros(self.nstars,float)
+        self.starycen[:] = self.starinit[:,1].copy()
+        self.starchisq = np.zeros(self.nstars,float)
+        self.starrms = np.zeros(self.nstars,float)
+        self.starnpix = np.zeros(self.nstars,np.int32)
+
+        # Get xdata, ydata, error
+        maxpix = self.nstars*(2*self.nfitpix+1)**2
+        print(maxpix)
+        imdata = np.zeros(maxpix,float)
+        errdata = np.zeros(maxpix,float)
+        nimdata = np.zeros(self.nstars,np.int32)
+        #imdatastart = np.zeros(self.nstars,np.int32)
+        bboxdata = np.zeros((self.nstars,4),float)
+        npixdata = np.zeros(maxpix,np.int32)
+        xlist = np.zeros(maxpix,float)
+        ylist = np.zeros(maxpix,float)
+        pixstart = np.zeros(maxpix,float)
+        imfitdata = np.zeros(self.nstars*(2*self.nfitpix+1)**2,float)
+        erfitdata = np.zeros(self.nstars*(2*self.nfitpix+1)**2,float)
+        pixcount = 0
+        count = 0
+        nstarpix = 0
+        for i in range(self.nstars):
+            xcen = self.starxcen[i]
+            ycen = self.starycen[i]
+            bbox = starbbox((xcen,ycen),image.shape,self.nfitpix)
+            print('bbox=',bbox)
+            # bbox = psf.starbbox((xcen,ycen),image.shape,radius=self.nfitpix)
+            #flux = bbox.slice(image)
+            print(bbox[2],bbox[3]+1,bbox[0],bbox[1]+1)
+            flux = image[bbox[2]:bbox[3]+1,bbox[0]:bbox[1]+1].copy()
+            # flux = image.data[bbox.slices]-image.sky[bbox.slices]
+            #err = bbox.slice(error)
+            err = error[bbox[2]:bbox[3]+1,bbox[0]:bbox[1]+1].copy()
+            #nstarpix = flux.size
+            flux1d = flux.ravel()
+            error1d = error.ravel()
+            #nflux1d = len(flux1d)
+            nflux1d = flux.shape[0]*flux.shape[1]
+            print(len(imdata),pixcount,len(flux1d))
+            sliceinsert(imdata,pixcount,flux1d)
+            sliceinsert(errdata,pixcount,error1d)
+            #for j in range(nflux1d):
+            #    jj = j+pixcount
+            #    imdata[jj] = flux1d[j]
+            #    errdata[jj] = error1d[j]
+            #nimdata[i] = nflux1d
+            #pixcount += nimdata[i]
+            # Trim to only the pixels that we want to fit
+            #flux = im.data.copy()-im.sky.copy()
+            #err = im.error.copy()
+            # Zero-out anything beyond the fitting radius
+            #x,y = psf.bbox2xy(bbox)
+            #print(bbox.ixmin,bbox.ixmax)
+            #print(bbox.iymin,bbox.iymax)
+            #x,y = mnb.meshgrid(np.arange(bbox.ixmin,bbox.ixmax+1),
+            #                   np.arange(bbox.iymin,bbox.iymax+1))
+            #x,y = bbox.xy()
+            #rr = np.sqrt( (x-xcen)**2 + (y-ycen)**2 )
+            # Use image mask
+            #  mask=True for bad values
+        #     if image.mask is not None:           
+        #         gdmask = (rr<=self.fitradius) & (image.mask[y,x]==False)
+        #     else:
+        #         gdmask = rr<=self.fitradius                
+        #     x = x[gdmask]  # raveled
+        #     y = y[gdmask]
+        #     flux = flux[gdmask]
+        #     err = err[gdmask]
+        #     npix = len(flux)
+        #     self.starnpix[i] = npix
+        #     imflatten[count:count+npix] = flux
+        #     errflatten[count:count+npix] = err
+        #     pixstart.append(count)
+        #     xlist.append(x)
+        #     ylist.append(y)
+        #     npixdata.append(npix)
+        #     count += npix
+
+        # self.imdata = imdata
+        # self.bboxdata = bboxdata            
+        # imflatten = imflatten[0:count]    # remove extra elements
+        # errflatten = errflatten[0:count]
+        # self.imflatten = imflatten
+        # self.errflatten = errflatten
+        # self.ntotpix = count
+        # self.xlist = xlist
+        # self.ylist = ylist
+        # self.npix = npixdata
+        # self.pixstart = pixstart
+
+    # def model(self,x,*args,refit=True,verbose=False):
+    #     """ model function."""
+    #     # input the model parameters
+        
+    #     if self.verbose:
+    #         print('model: '+str(self.niter)+' '+str(args))
+        
+    #     psf = self.psf.copy()
+    #     if type(psf)!=models.PSFEmpirical:
+    #         psf._params = list(args)
+
+    #     # Limit the parameters to the boundaries
+    #     if type(psf)!=models.PSFEmpirical:
+    #         lbnds,ubnds = psf.bounds
+    #         for i in range(len(psf.params)):
+    #             psf._params[i] = np.minimum(np.maximum(args[i],lbnds[i]),ubnds[i])
+                
+    #     # Loop over the stars and generate the model image
+    #     allim = np.zeros(self.ntotpix,float)
+    #     pixcnt = 0
+    #     for i in range(self.nstars):
+    #         image = self.imdata[i]
+    #         amp = self.staramp[i]
+    #         xcenorig = self.starxcenorig[i]   
+    #         ycenorig = self.starycenorig[i]
+    #         xcen = self.starxcen[i]   
+    #         ycen = self.starycen[i]            
+    #         bbox = self.bboxdata[i]
+    #         x = self.xlist[i]
+    #         y = self.ylist[i]
+    #         pixstart = self.pixstart[i]
+    #         npix = self.npix[i]
+    #         flux = self.imflatten[pixstart:pixstart+npix]
+    #         err = self.errflatten[pixstart:pixstart+npix]
+
+    #         x0orig = xcenorig - bbox.ixmin
+    #         y0orig = ycenorig - bbox.iymin
+    #         x0 = xcen - bbox.ixmin
+    #         y0 = ycen - bbox.iymin            
+            
+    #         # Fit amp/xcen/ycen if niter=1
+    #         if refit:
+    #             #if (self.niter<=1): # or self.niter%3==0):
+    #             if self.niter>-1:
+    #                 # force the positions to stay within +/-2 pixels of the original values
+    #                 bounds = (np.array([0,np.maximum(x0orig-2,0),np.maximum(y0orig-2,0),-np.inf]),
+    #                           np.array([np.inf,np.minimum(x0orig+2,bbox.shape[1]-1),np.minimum(y0orig+2,bbox.shape[0]-1),np.inf]))
+    #                 # the image still has sky in it, use sky (nosky=False)
+    #                 if np.isfinite(psf.fwhm())==False:
+    #                     print('nan fwhm')
+    #                     import pdb; pdb.set_trace()
+    #                 pars,perror,model = psf.fit(image,[amp,x0,y0],nosky=False,retpararray=True,niter=5,bounds=bounds)
+    #                 xcen += (pars[1]-x0)
+    #                 ycen += (pars[2]-y0)
+    #                 amp = pars[0]                    
+    #                 self.staramp[i] = amp
+    #                 self.starxcen[i] = xcen
+    #                 self.starycen[i] = ycen
+    #                 model = psf(x,y,pars=[amp,xcen,ycen])
+    #                 if verbose:
+    #                     print('Star '+str(i)+' Refitting all parameters')
+    #                     print(str([amp,xcen,ycen]))
+
+    #                 #pars2,model2,mpars2 = psf.fit(image,[amp,x0,y0],nosky=False,niter=5,allpars=True)
+    #                 #import pdb; pdb.set_trace()
+                        
+    #             # Only fit amp if niter>1
+    #             #   do it empirically
+    #             else:
+    #                 #im1 = psf(pars=[1.0,xcen,ycen],bbox=bbox)
+    #                 #wt = 1/image.error**2
+    #                 #amp = np.median(image.data[mask]/im1[mask])                
+    #                 model1 = psf(x,y,pars=[1.0,xcen,ycen])
+    #                 wt = 1/err**2
+    #                 amp = np.median(flux/model1)
+    #                 #amp = np.median(wt*flux/model1)/np.median(wt)
+
+    #                 self.staramp[i] = amp
+    #                 model = model1*amp
+    #                 #self.starxcen[i] = pars2[1]+xy[0][0]
+    #                 #self.starycen[i] = pars2[2]+xy[1][0]       
+    #                 #print(count,self.starxcen[i],self.starycen[i])
+    #                 # updating the X/Y values after the first iteration
+    #                 #  causes problems.  bounces around too much
+
+    #                 if verbose:
+    #                     print('Star '+str(i)+' Refitting amp empirically')
+    #                     print(str(amp))
+                        
+    #                 #if i==1: print(amp)
+    #                 #if self.niter==2:
+    #                 #    import pdb; pdb.set_trace()
+
+    #         # No refit of stellar parameters
+    #         else:
+    #             model = psf(x,y,pars=[amp,xcen,ycen])
+
+    #         #if self.niter>1:
+    #         #    import pdb; pdb.set_trace()
+                
+    #         # Relculate reduced chi squared
+    #         chisq = np.sum((flux-model.ravel())**2/err**2)/npix
+    #         self.starchisq[i] = chisq
+    #         # chi value, RMS of the residuals as a fraction of the amp
+    #         rms = np.sqrt(np.mean(((flux-model.ravel())/self.staramp[i])**2))
+    #         self.starrms[i] = rms
+            
+    #         #model = psf(x,y,pars=[amp,xcen,ycen])
+    #         # Zero-out anything beyond the fitting radius
+    #         #im[mask] = 0.0
+    #         #npix = im.size
+    #         #npix = len(x)
+    #         allim[pixcnt:pixcnt+npix] = model.flatten()
+    #         pixcnt += npix
+
+    #         #import pdb; pdb.set_trace()
+            
+    #     self.niter += 1
+            
+    #     return allim
+
+    # def jac(self,x,*args,retmodel=False,refit=True):
+    #     """ jacobian."""
+    #     # input the model parameters
+
+    #     if self.verbose:
+    #         print('jac: '+str(self.niter)+' '+str(args))
+        
+    #     psf = self.psf.copy()
+    #     psf._params = list(args)
+    
+    #     # Loop over the stars and generate the derivatives
+    #     #-------------------------------------------------
+
+    #     # Initalize output arrays
+    #     allderiv = np.zeros((self.ntotpix,len(psf.params)),float)
+    #     if retmodel:
+    #         allim = np.zeros(self.ntotpix,float)
+    #     pixcnt = 0
+
+    #     # Need to run model() to calculate amp/xcen/ycen for first couple iterations
+    #     #if self.niter<=1 and refit:
+    #     #    dum = self.model(x,*args,refit=refit)
+    #     dum = self.model(x,*args,refit=True) #,verbose=True)            
+            
+    #     for i in range(self.nstars):
+    #         amp = self.staramp[i]
+    #         xcen = self.starxcen[i]            
+    #         ycen = self.starycen[i]
+    #         bbox = self.bboxdata[i]
+    #         x = self.xlist[i]
+    #         y = self.ylist[i]
+    #         pixstart = self.pixstart[i]
+    #         npix = self.npix[i]
+    #         flux = self.imflatten[pixstart:pixstart+npix]
+    #         err = self.errflatten[pixstart:pixstart+npix]
+    #         xdata = np.vstack((x,y))
+            
+    #         # Get the model and derivative
+    #         allpars = np.concatenate((np.array([amp,xcen,ycen]),np.array(args)))
+    #         m,deriv = psf.jac(xdata,*allpars,allpars=True,retmodel=True)
+    #         #if retmodel:
+    #         #    m,deriv = psf.jac(xdata,*allpars,allpars=True,retmodel=True)
+    #         #else:
+    #         #    deriv = psf.jac(xdata,*allpars,allpars=True)                
+    #         deriv = np.delete(deriv,[0,1,2],axis=1)  # remove stellar ht/xc/yc columns
+
+    #         # Solve for the best amp, and then scale the derivatives (all scale with amp)
+    #         #if self.niter>1 and refit:
+    #         #    newamp = amp*np.median(flux/m)
+    #         #    self.staramp[i] = newamp
+    #         #    m *= (newamp/amp)
+    #         #    deriv *= (newamp/amp)
+
+    #         #if i==1: print(amp,newamp)
+    #         #import pdb; pdb.set_trace()
+
+    #         npix,dum = deriv.shape
+    #         allderiv[pixcnt:pixcnt+npix,:] = deriv
+    #         if retmodel:
+    #             allim[pixcnt:pixcnt+npix] = m
+    #         pixcnt += npix
+            
+    #     if retmodel:
+    #         return allim,allderiv
+    #     else:
+    #         return allderiv
+
+    # def linesearch(self,xdata,bestpar,dbeta,m,jac):
+    #     # Perform line search along search gradient
+    #     flux = self.imflatten
+    #     # Weights
+    #     wt = 1/self.errflatten**2
+        
+    #     start_point = bestpar
+    #     search_gradient = dbeta
+    #     def obj_func(pp,m=None):
+    #         """ chisq given the parameters."""
+    #         if m is None:
+    #             m = self.model(xdata,*pp)                        
+    #         chisq = np.sum((flux.ravel()-m.ravel())**2 * wt.ravel())
+    #         #print('obj_func: pp=',pp)
+    #         #print('obj_func: chisq=',chisq)
+    #         return chisq
+    #     def obj_grad(pp,m=None,jac=None):
+    #         """ Gradient of chisq wrt the parameters."""
+    #         if m is None or jac is None:
+    #             m,jac = self.jac(xdata,*pp,retmodel=True)
+    #         # d chisq / d parj = np.sum( 2*jac_ij*(m_i-d_i))/sig_i**2)
+    #         dchisq = np.sum( 2*jac * (m.ravel()-flux.ravel()).reshape(-1,1)
+    #                          * wt.ravel().reshape(-1,1),axis=0)
+    #         #print('obj_grad: pp=',pp)
+    #         #print('obj_grad: dchisq=',dchisq)            
+    #         return dchisq
+
+    #     # Inside model() the parameters are limited to the PSF bounds()
+    #     f0 = obj_func(start_point,m=m)
+    #     # Do our own line search with three points and a quadratic fit.
+    #     f1 = obj_func(start_point+0.5*search_gradient)
+    #     f2 = obj_func(start_point+search_gradient)
+    #     alpha = dln.quadratic_bisector(np.array([0.0,0.5,1.0]),np.array([f0,f1,f2]))
+    #     alpha = np.minimum(np.maximum(alpha,0.0),1.0)  # 0<alpha<1
+    #     if ~np.isfinite(alpha):
+    #         alpha = 1.0
+    #     # Use scipy.optimize.line_search()
+    #     #grad0 = obj_grad(start_point,m=m,jac=jac)        
+    #     #alpha,fc,gc,new_fval,old_fval,new_slope = line_search(obj_func, obj_grad, start_point, search_gradient, grad0,f0,maxiter=3)
+    #     #if alpha is None:  # did not converge
+    #     #    alpha = 1.0
+    #     pars_new = start_point + alpha * search_gradient
+    #     new_dbeta = alpha * search_gradient
+    #     return alpha,new_dbeta
+
+    # def mklookup(self,order=0):
+    #     """ Make an empirical look-up table for the residuals."""
+
+    #     # Make the empirical EPSF
+    #     cube = self.psf.resid(self.tab,self.image,fillvalue=np.nan)
+    #     coords = (self.tab['x'].data,self.tab['y'].data)
+    #     epsf,nbadstar,rms = mkempirical(cube,order=order,coords=coords,shape=self.image.shape,lookup=True)
+    #     lookup = models.PSFEmpirical(epsf,imshape=self.image.shape,order=order,lookup=True)
+
+    #     # DAOPHOT does some extra analysis to make sure the flux
+    #     # in the residual component is okay
+
+    #     # -make sure
+    #     #  -to take the total flux into account (not varying across image)
+    #     #  -make sure the amp=1 at center
+    #     #  -make sure all PSF values are >=0
+                             
+    #     # Add the lookup table to the PSF model
+    #     self.psf.lookup = lookup
+
+    #     #import pdb; pdb.set_trace()
+        
+        
+    # def starmodel(self,star=None,pars=None):
+    #     """ Generate 2D star model images that can be compared to the original cutouts.
+    #          if star=None, then it will return all of them as a list."""
+
+    #     psf = self.psf.copy()
+    #     if pars is not None:
+    #         psf._params = pars
+        
+    #     model = []
+    #     if star is None:
+    #         star = np.arange(self.nstars)
+    #     else:
+    #         star = [star]
+
+    #     for i in star:
+    #         image = self.imdata[i]
+    #         amp = self.staramp[i]
+    #         xcen = self.starxcen[i]   
+    #         ycen = self.starycen[i]
+    #         bbox = self.bboxdata[i]
+    #         model1 = psf(pars=[amp,xcen,ycen],bbox=bbox)
+    #         model.append(model1)
+    #     return model
+
+
 
 #@njit
 def fitpsf(psf,image,tab,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
@@ -208,8 +930,8 @@ def fitpsf(psf,image,tab,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
 
     Returns
     -------
-    newpsf : PSF object
-       New PSF object with the best-fit model parameters.
+    newpsf : numpy array
+       New PSF array with the best-fit model parameters.
     pars : numpy array
        Array of best-fit model parameters
     perror : numpy array
@@ -241,7 +963,7 @@ def fitpsf(psf,image,tab,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
     #-----------------------------
 
     # Empirical PSF - done differently
-    if type(psf)==mnb.PSFEmpirical:
+    if psf.psftype==6:
         cube1 = starcube(tab,image,npix=psf.npix,fillvalue=np.nan)
         coords = (tab['x'].data,tab['y'].data)
         epsf1,nbadstar1,rms1 = mkempirical(cube1,order=psf.order,coords=coords,shape=psf._shape)

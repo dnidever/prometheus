@@ -537,6 +537,7 @@ def jac_covariance(jac,resid,wt):
         
     return cov
 
+@njit
 def starbbox(coords,imshape,radius):
     """                                                                                         
     Return the boundary box for a star given radius and image size.                             
@@ -3765,6 +3766,14 @@ class BoundingBox(object):
     def __getitem__(self,item):
         return self.data[item]
 
+    def slice(self,array):
+        """ Return slice of array."""
+        return array[self.iymin:self.iymax+1,self.ixmin:self.ixmax+1]
+
+    def xy(self):
+        """ Return 2D X/Y arrays."""
+        return meshgrid(np.arange(self.ixmin,self.ixmax+1),np.arange(self.iymin,self.iymax+1))
+    
     def reset(self):
         """ Forget the original coordinates."""
         self.ixmax -= self.ixmin
