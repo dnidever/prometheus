@@ -6,7 +6,7 @@ import scipy.special as sc
 #import numba_special  # The import generates Numba overloads for special
 from dlnpyutils import utils as dln
 import numba
-from numba import njit,types
+from numba import jit,njit,types
 from numba.experimental import jitclass
 from . import leastsquares as lsq
 
@@ -3180,7 +3180,7 @@ def model2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
         last_dbeta = dbeta
         niter += 1
 
-    model,deriv = amodeld(x1d,y1d,psftype,bestpar,nderiv)
+    model,deriv = amodel2d(x1d,y1d,psftype,bestpar,nderiv)
     resid = im1d-model
     
     # Get covariance and errors
@@ -3500,6 +3500,8 @@ def psf2d_flux(psf,amp,xc,yc):
     
     return flux
 
+#@njit
+#@jit('Tuple((float64[:], float64[:]))(int32[:],int32[:],float64[:],int32,float64[:],float64[:,:,:],int32[:],boolean,boolean)',nopython=True)
 @njit
 def psf(x,y,pars,psftype,psfparams,lookup,imshape,deriv=False,verbose=False):
     """
@@ -3550,7 +3552,8 @@ def psf(x,y,pars,psftype,psfparams,lookup,imshape,deriv=False,verbose=False):
         nderiv = 0
 
     if psftype <= 5:
-        nparsarr = [6,7,8,8,7]
+        nparsarr = np.zeros(5,np.int32)
+        nparsarr[:] = [6,7,8,8,7]
         npars = nparsarr[psftype-1]
         # Add amp, xc, yc to the parameters
         allpars = np.zeros(npars,float)
@@ -3581,11 +3584,11 @@ def psf(x,y,pars,psftype,psfparams,lookup,imshape,deriv=False,verbose=False):
         derivative = np.zeros((1,1),float)
 
     # Add lookup table portion
-    if psftype <= 5 and lookup.size > 1:
-        eg,ederivative = empirical(x,y,pars,lookup,imshape,(nderiv>0))
-        g[:] += eg
-        # Make sure the model is positive everywhere
-        derivative[:,:] += ederivative
+    #if psftype <= 5 and lookup.size > 1:
+    #    eg,ederivative = empirical(x,y,pars,lookup,imshape,(nderiv>0))
+    #    g[:] += eg
+    #    # Make sure the model is positive everywhere
+    #    derivative[:,:] += ederivative
     
     return g,derivative
 
@@ -3659,18 +3662,22 @@ def psffit(im,err,x,y,pars,psftype,psfparams,lookup,imshape=None,verbose=False):
     bestpar = np.zeros(3,float)
     bestpar[:] = pars
     bounds = np.zeros((3,2),float)
-    bounds[:,0] = [0.0, -10, -10]
-    bounds[:,1] = [1e30, 10,  10]
-
+    bounds[0,:] = [0.0,1e30]
+    bounds[1,:] = [np.maximum(pars[1]-10,np.min(x)),
+                   np.minimum(pars[1]+10,np.max(x))]
+    bounds[2,:] = [np.maximum(pars[2]-10,np.min(y)),
+                   np.minimum(pars[2]+10,np.max(y))]
+    
     if verbose:
         print('bestpar=',bestpar)
-    
+        print('bounds=',bounds)
+        
     # Iteration loop
     maxpercdiff = 1e10
     niter = 0
     while (niter<maxiter and maxpercdiff>minpercdiff):
-        model,deriv = psf(x,y,bestpar[:3],psftype,psfparams,lookup,imshape,True)
-        #model,deriv = psf(x1d,y1d,psf,bestpar[0],bestpar[1],bestpar[2],True)
+        # psf(x,y,pars,psftype,psfparams,lookup,imshape
+        model,deriv = psf(x1d,y1d,bestpar[:3],psftype,psfparams,lookup,imshape,True)
         resid = im1d-model
         dbeta = qr_jac_solve(deriv,resid,weight=wt1d)
         
@@ -3699,7 +3706,7 @@ def psffit(im,err,x,y,pars,psftype,psfparams,lookup,imshape=None,verbose=False):
         last_dbeta = dbeta
         niter += 1
 
-    model,deriv = psf(x,y,bestpar[:3],psftype,psfparams,lookup,imshape,True)
+    model,deriv = psf(x1d,y1d,bestpar[:3],psftype,psfparams,lookup,imshape,True)
     #model,deriv = psf2d(x1d,y1d,psf,bestpar[0],bestpar[1],bestpar[2],True)
     resid = im1d-model
     
