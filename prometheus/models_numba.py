@@ -3499,7 +3499,220 @@ def psf2d_flux(psf,amp,xc,yc):
     # Need to make the PSF if it is empirical or has a lookup table
     
     return flux
-            
+
+@njit
+def psf(x,y,pars,psftype,psfparams,lookup,imshape,deriv=False,verbose=False):
+    """
+    Return a PSF model.
+
+    Parameters
+    ----------
+    x : numpy array
+       Array of X-values at which to evaluate the PSF model.
+    y : numpy array
+       Array of Y-values at which to evaluate the PSF model.
+    pars : numpy array
+       Amplitude, xcen, ycen of the model.
+    psftype : int
+       PSF type.
+    psfparams : numpy array
+       Analytical model parameters.
+    lookup : numpy array
+       Empirical lookup table.
+    imshape : numpy array
+       Shape of the whole image.
+    deriv : bool
+       Return derivatives as well.
+    verbose : bool
+       Verbose output to the screen.
+
+    Returns
+    -------
+    model : numpy array
+       PSF model.
+    derivatives : numpy array
+       Array of partial derivatives.
+    
+    Examples
+    --------
+
+    model,derivatives = psf2d(x,y,pars,1,psfparams,lookup,imshape)
+
+    """
+    
+    # Unpack psf parameters
+    #psftype,psfpars,lookup,imshape = unpackpsf(psf)
+
+    # Get the analytic portion
+    if deriv==True:
+        nderiv = 3
+    else:
+        nderiv = 0
+
+    if psftype <= 5:
+        nparsarr = [6,7,8,8,7]
+        npars = nparsarr[psftype-1]
+        # Add amp, xc, yc to the parameters
+        allpars = np.zeros(npars,float)
+        allpars[:3] = pars
+        allpars[3:] = psfparams
+        
+    # Gaussian
+    if psftype==1:
+        g,derivative = agaussian2d(x,y,allpars,nderiv)
+    # Moffat
+    elif psftype==2:
+        g,derivative = amoffat2d(x,y,allpars,nderiv)
+    # Penny
+    elif psftype==3:
+        g,derivative = apenny2d(x,y,allpars,nderiv)
+    # Gausspow
+    elif psftype==4:
+        g,derivative = agausspow2d(x,y,allpars,nderiv)
+    # Sersic
+    elif psftype==5:
+        g,derivative = asersic2d(x,y,allpars,nderiv)
+    # Empirical
+    elif psftype==6:
+        g,derivative = empirical(x,y,pars,lookup,imshape,nderiv)
+    else:
+        print('psftype=',psftype,'not supported')
+        g = np.zeros(1,float)
+        derivative = np.zeros((1,1),float)
+
+    # Add lookup table portion
+    if psftype <= 5 and lookup.size > 1:
+        eg,ederivative = empirical(x,y,pars,lookup,imshape,(nderiv>0))
+        g[:] += eg
+        # Make sure the model is positive everywhere
+        derivative[:,:] += ederivative
+    
+    return g,derivative
+
+@njit
+def psffit(im,err,x,y,pars,psftype,psfparams,lookup,imshape=None,verbose=False):
+    """
+    Fit a PSF model to data.
+
+    Parameters
+    ----------
+    im : numpy array
+       Flux array.  Can be 1D or 2D array.
+    err : numpy array
+       Uncertainty array of im.  Same dimensions as im.
+    x : numpy array
+       Array of X-values for im.
+    y : numpy array
+       Array of Y-values for im.
+    pars : numpy array
+       Initial guess of amplitude, xcen, ycen of the model.
+    psftype : int
+       PSF type.
+    psfparams : numpy array
+       Analytical model parameters.
+    lookup : numpy array
+       Empirical lookup table.
+    imshape : numpy array
+       Shape of the whole image.
+    verbose : bool
+       Verbose output to the screen.
+
+    Returns
+    -------
+    pars : numpy array
+       Best fit pararmeters.
+    perror : numpy array
+       Uncertainties in pars.
+    pcov : numpy array
+       Covariance matrix.
+    flux : float
+       Best fit flux.
+    fluxerr : float
+       Uncertainty in flux.
+    
+    Example
+    -------
+
+    pars,perror,cov,flux,fluxerr = psffit(im,err,x,y,psf,100.0,5.5,6.5,False)
+
+    """
+
+    # We are ONLY varying amplitude, xc, and yc
+
+    maxiter = 10
+    minpercdiff = 0.5
+
+    if im.ndim==2:
+        im1d = im.ravel()
+        err1d = err.ravel()
+        x1d = x.ravel()
+        y1d = y.ravel()
+    else:
+        im1d = im
+        err1d = err
+        x1d = x
+        y1d = y
+    wt1d = 1/err1d**2
+    npix = len(im1d)
+    
+    # Initial values
+    bestpar = np.zeros(3,float)
+    bestpar[:] = pars
+    bounds = np.zeros((3,2),float)
+    bounds[:,0] = [0.0, -10, -10]
+    bounds[:,1] = [1e30, 10,  10]
+
+    if verbose:
+        print('bestpar=',bestpar)
+    
+    # Iteration loop
+    maxpercdiff = 1e10
+    niter = 0
+    while (niter<maxiter and maxpercdiff>minpercdiff):
+        model,deriv = psf(x,y,bestpar[:3],psftype,psfparams,lookup,imshape,True)
+        #model,deriv = psf(x1d,y1d,psf,bestpar[0],bestpar[1],bestpar[2],True)
+        resid = im1d-model
+        dbeta = qr_jac_solve(deriv,resid,weight=wt1d)
+        
+        if verbose:
+            print(niter,bestpar)
+            print(dbeta)
+        
+        # Update parameters
+        last_bestpar = bestpar.copy()
+        # limit the steps to the maximum step sizes and boundaries
+        maxsteps = np.zeros(3,float)
+        maxsteps[:] = [0.2*bestpar[0],0.5,0.5]
+        bestpar = newlsqpars(bestpar,dbeta,bounds,maxsteps)
+        
+        # Check differences and changes
+        diff = np.abs(bestpar-last_bestpar)
+        denom = np.maximum(np.abs(bestpar.copy()),0.0001)
+        percdiff = diff.copy()/denom*100  # percent differences
+        maxpercdiff = np.max(percdiff)
+        chisq = np.sum((im1d-model)**2 * wt1d)/npix
+        if verbose:
+            print('chisq=',chisq)
+        #if verbose:
+        #    print(niter,percdiff,chisq)
+        #    print()
+        last_dbeta = dbeta
+        niter += 1
+
+    model,deriv = psf(x,y,bestpar[:3],psftype,psfparams,lookup,imshape,True)
+    #model,deriv = psf2d(x1d,y1d,psf,bestpar[0],bestpar[1],bestpar[2],True)
+    resid = im1d-model
+    
+    # Get covariance and errors
+    cov = jac_covariance(deriv,resid,wt1d)
+    perror = np.sqrt(np.diag(cov))
+
+    # Now get the flux
+    flux = model2d_flux(psftype,bestpar)
+    fluxerr = perror[0]*(flux/bestpar[0]) 
+    
+    return bestpar,perror,cov,flux,fluxerr,chisq
+
 @njit
 def psf2d(x,y,psf,amp,xc,yc,deriv=False,verbose=False):
     """
@@ -3595,7 +3808,7 @@ def psf2d(x,y,psf,amp,xc,yc,deriv=False,verbose=False):
     return g,derivative
 
 @njit
-def psffit(im,err,x,y,psf,ampc,xc,yc,verbose=False):
+def psf2dfit(im,err,x,y,psf,ampc,xc,yc,verbose=False):
     """
     Fit a PSF model to data.
 
