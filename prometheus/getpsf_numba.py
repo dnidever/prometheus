@@ -643,18 +643,21 @@ class PSFFitter(object):
             pars[0] = self.staramp[i]
             pars[1] = self.starxcen[i]
             pars[2] = self.starycen[i]
-            #g,_ = self.psffit(xdata1,ydata1,pars,args,lookup,deriv=False)
             pout = mnb.psffit(im1,err1,xdata1,ydata1,pars,self.psftype,psfparams,
                               self.lookup,self.imshape,self.verbose)
             bestpar,perror,cov,flux,fluxerr,chisq = pout
-            print(i,bestpar)
+            rchisq = chisq/len(xdata1)
+            model,der = mnb.psf(xdata1,ydata1,pars,self.psftype,psfparams,
+                                self.lookup,self.imshape)
+            rms = np.sqrt(np.mean(((im1-model)/bestpar[0])**2))
+            print(i,bestpar,rchisq,rms)
             
             # Update stellar parameters
-            #self.staramp[i] = bestpar[0]
-            #self.staxcen[i] = bestpar[1]
-            #self.staycen[i] = bestpar[2]
-            #self.starchisq[i] = chisq
-            ##self.starrms[i] = rms
+            self.staramp[i] = bestpar[0]
+            self.starxcen[i] = bestpar[1]
+            self.starycen[i] = bestpar[2]
+            self.starchisq[i] = rchisq
+            self.starrms[i] = rms
             
     
     # def jac(self,x,*args,retmodel=False,refit=True):
