@@ -1,10 +1,36 @@
 import os
 import numpy as np
+import time
 from numba import njit,types,from_dtype
 from numba.experimental import jitclass
 from . import models_numba as mnb
 
 # Fit a PSF model to multiple stars in an image
+
+@njit
+def quadratic_bisector(x,y):
+    """ Calculate the axis of symmetric or bisector of parabola"""
+    #https://www.azdhs.gov/documents/preparedness/state-laboratory/lab-licensure-certification/technical-resources/
+    #    calibration-training/12-quadratic-least-squares-regression-calib.pdf
+    #quadratic regression statistical equation
+    n = len(x)
+    if n<3:
+        return None
+    Sxx = np.sum(x**2) - np.sum(x)**2/n
+    Sxy = np.sum(x*y) - np.sum(x)*np.sum(y)/n
+    Sxx2 = np.sum(x**3) - np.sum(x)*np.sum(x**2)/n
+    Sx2y = np.sum(x**2 * y) - np.sum(x**2)*np.sum(y)/n
+    Sx2x2 = np.sum(x**4) - np.sum(x**2)**2/n
+    #a = ( S(x^2*y)*S(xx)-S(xy)*S(xx^2) ) / ( S(xx)*S(x^2x^2) - S(xx^2)^2 )
+    #b = ( S(xy)*S(x^2x^2) - S(x^2y)*S(xx^2) ) / ( S(xx)*S(x^2x^2) - S(xx^2)^2 )
+    denom = Sxx*Sx2x2 - Sxx2**2
+    if denom==0:
+        return np.nan
+    a = ( Sx2y*Sxx - Sxy*Sxx2 ) / denom
+    b = ( Sxy*Sx2x2 - Sx2y*Sxx2 ) / denom
+    if a==0:
+        return np.nan
+    return -b/(2*a)
 
 #@njit
 def starcube(tab,image,npix=51,fillvalue=np.nan):
@@ -324,10 +350,11 @@ def getfitstar(image,error,xcen,ycen,fitradius):
     nflux = flux.size
     nx = bbox[1]-bbox[0]
     ny = bbox[3]-bbox[2]
-    imdata = np.zeros(npix*npix,float)+np.nan
-    errdata = np.zeros(npix*npix,float)+np.nan
+    imdata = np.zeros(npix*npix,float)
+    errdata = np.ones(npix*npix,float)
     xdata = np.zeros(npix*npix,np.int32)-1
     ydata = np.zeros(npix*npix,np.int32)-1
+    mask = np.zeros(npix*npix,np.int32)
     count = 0
     for j in range(ny):
         y = j + bbox[2]
@@ -339,8 +366,9 @@ def getfitstar(image,error,xcen,ycen,fitradius):
                 errdata[count] = error[j,i]
                 xdata[count] = x
                 ydata[count] = y
+                mask[count] = 1
                 count += 1
-    return imdata,errdata,xdata,ydata,count
+    return imdata,errdata,xdata,ydata,count,mask
         
 @njit
 def collatefitstars(image,error,starx,stary,fitradius):
@@ -348,24 +376,26 @@ def collatefitstars(image,error,starx,stary,fitradius):
     npix = int(np.floor(2*fitradius))+2
     # Get xdata, ydata, error
     maxpix = nstars*(npix)**2
-    imdata = np.zeros((nstars,npix*npix),float)+np.nan
-    errdata = np.zeros((nstars,npix*npix),float)+np.nan
+    imdata = np.zeros((nstars,npix*npix),float)
+    errdata = np.zeros((nstars,npix*npix),float)
     xdata = np.zeros((nstars,npix*npix),np.int32)
     ydata = np.zeros((nstars,npix*npix),np.int32)
+    mask = np.zeros((nstars,npix*npix),np.int32)
     ndata = np.zeros(nstars,np.int32)
     bbox = np.zeros((nstars,4),np.int32)
     for i in range(nstars):
         xcen = starx[i]
         ycen = stary[i]
         bb = starbbox((xcen,ycen),image.shape,fitradius)
-        imdata1,errdata1,xdata1,ydata1,n1 = getfitstar(image,error,xcen,ycen,fitradius)
+        imdata1,errdata1,xdata1,ydata1,n1,mask1 = getfitstar(image,error,xcen,ycen,fitradius)
         imdata[i,:] = imdata1
         errdata[i,:] = errdata1
         xdata[i,:] = xdata1
         ydata[i,:] = ydata1
+        mask[i,:] = mask1
         ndata[i] = n1
         bbox[i,:] = bb
-    return imdata,errdata,xdata,ydata,bbox,ndata
+    return imdata,errdata,xdata,ydata,bbox,ndata,mask
 
 @njit
 def unpackfitstar(imdata,errdata,xdata,ydata,bbox,ndata,istar):
@@ -417,6 +447,7 @@ spec = [
     ('starfit_errdata', types.float64[:,:]),
     ('starfit_xdata', types.int32[:,:]),
     ('starfit_ydata', types.int32[:,:]),
+    ('starfit_mask', types.int32[:,:]),
     ('starfit_bbox', types.int32[:,:]),
     ('starfit_ndata', types.int32[:]),
     ('npix', types.int32),
@@ -435,13 +466,13 @@ spec = [
 @jitclass(spec)
 class PSFFitter(object):
 
-    def __init__(self,psf,image,error,starx,stary,starflux,fitradius=np.nan,verbose=False):
+    def __init__(self,psftype,psfparams,image,error,starx,stary,starflux,fitradius,verbose=False):
         self.verbose = verbose
-        self.psftype = psf.psftype
-        self.params = psf.params
-        self.lookup = psf.lookup
-        self.order = psf.order
-        self.fwhm = psf.fwhm()
+        self.psftype = psftype
+        self.params = psfparams
+        #self.lookup = psf.lookup
+        #self.order = psf.order
+        #self.fwhm = psf.fwhm()
         self.image = image.astype(np.float64)
         self.error = error.astype(np.float64)
         self.imshape = np.zeros(2,np.int32)
@@ -453,16 +484,16 @@ class PSFFitter(object):
         self.starinit[:,2] = starflux
         self.nstars = nstars
         self.niter = 0
-        self.npsfpix = psf.npix
+        #self.npsfpix = psf.npix
         ny,nx = image.shape
         self.nx = nx
         self.ny = ny
-        if np.isfinite(fitradius)==False:
-            fitradius = self.fwhm*1.5
+        #if np.isfinite(fitradius)==False:
+        #    fitradius = self.fwhm*1.5
         self.fitradius = fitradius
         self.nfitpix = int(np.floor(2*fitradius))+2  # max pixels 
         self.staramp = np.zeros(self.nstars,float)
-        self.staramp[:] = starflux/(2*np.pi*(self.fwhm/2.35)**2)
+        self.staramp[:] = starflux/(2*fitradius+1)**2
         # current best-fit values
         self.starxcen = np.zeros(self.nstars,float)
         self.starxcen[:] = self.starinit[:,0].copy()
@@ -483,12 +514,13 @@ class PSFFitter(object):
         self.star_shape = shape
         
         # Get fitting information for all the stars
-        fimdata,ferrdata,fxdata,fydata,fbbox,fndata = collatefitstars(image,error,self.starxcen,
-                                                                      self.starycen,fitradius)
+        fimdata,ferrdata,fxdata,fydata,fbbox,fndata,fmask = collatefitstars(image,error,self.starxcen,
+                                                                            self.starycen,fitradius)
         self.starfit_imdata = fimdata
         self.starfit_errdata = ferrdata
         self.starfit_xdata = fxdata
         self.starfit_ydata = fydata
+        self.starfit_mask = fmask
         self.starfit_bbox = fbbox
         self.starfit_ndata = fndata
 
@@ -511,22 +543,29 @@ class PSFFitter(object):
         
         if self.verbose:
             print('model: '+str(self.niter)+' ',args)
-        
+        nparsarr = np.array([6,7,8,8,7])
+        npars = nparsarr[self.psftype-1]
         # Loop over the stars and generate the model image
-        lookup = np.zeros((1,1,1),float)
         allmodel = np.zeros(self.star_imdata.shape,float)
         maxpix = self.star_imdata.shape[1]
         for i in range(self.nstars):
             im1,err1,xdata1,ydata1,bbox1,n1 = self.unpackfitstar(i)
-            pars = np.zeros(3,float)
-            pars[0] = self.staramp[i]
-            pars[1] = self.starxcen[i]
-            pars[2] = self.starycen[i]
-            g,_ = self.psf(xdata1,ydata1,pars,args,lookup,deriv=False)
+            allpars = np.zeros(npars,float)
+            allpars[0] = self.staramp[i]
+            allpars[1] = self.starxcen[i]
+            allpars[2] = self.starycen[i]
+            allpars[3:] = args
+            print(i,allpars)
+            g,_ = mnb.amodel2d(xdata1,ydata1,self.psftype,allpars,0)
             allmodel[i,:len(g)] = g
         return allmodel
 
-
+    def chisq(self,pars):
+        """ Create the model and return chisq for this set of PSF parameters."""
+        m = self.model(np.arange(10),pars)
+        chisq = np.sum((self.starfit_imdata-m)**2/self.starfit_errdata**2)        
+        return chisq
+        
     
             #image = self.imdata[i]
             #amp = self.staramp[i]
@@ -660,118 +699,112 @@ class PSFFitter(object):
             self.starrms[i] = rms
             
     
-    # def jac(self,x,*args,retmodel=False,refit=True):
-    #     """ jacobian."""
-    #     # input the model parameters
+    def jac(self,x,args,refit=True):
+        """ jacobian."""
+        # input the model parameters        
+        if self.verbose:
+            print('model: '+str(self.niter)+' ',args)
+        # Loop over the stars and generate the model image
+        nparsarr = np.array([6,7,8,8,7])
+        npars = nparsarr[self.psftype-1]
+        allmodel = np.zeros(self.star_imdata.shape,float)
+        maxpix = self.star_imdata.shape[1]
+        allderiv = np.zeros((self.nstars,maxpix,npars),float)
+        for i in range(self.nstars):
+            im1,err1,xdata1,ydata1,bbox1,n1 = self.unpackfitstar(i)
+            allpars = np.zeros(npars,float)
+            allpars[0] = self.staramp[i]
+            allpars[1] = self.starxcen[i]
+            allpars[2] = self.starycen[i]
+            allpars[3:] = args
+            g,d = mnb.amodel2d(xdata1,ydata1,self.psftype,allpars,npars)
+            print(len(g))
+            print(d.shape)
+            allmodel[i,:len(g)] = g
+            allderiv[i,:len(g),:] = d
+        # Trim off the stellar parameter (amp/xc/yc) derivatives
+        allderiv = allderiv[:,:,3:]
+        return allmodel,allderiv
 
-    #     if self.verbose:
-    #         print('jac: '+str(self.niter)+' '+str(args))
+
+
+        # if self.verbose:
+        #     print('jac: '+str(self.niter)+' ',args)
         
-    #     psf = self.psf.copy()
-    #     psf._params = list(args)
+        # psf = self.psf.copy()
+        # psf._params = list(args)
     
-    #     # Loop over the stars and generate the derivatives
-    #     #-------------------------------------------------
+        # # Loop over the stars and generate the derivatives
+        # #-------------------------------------------------
 
-    #     # Initalize output arrays
-    #     allderiv = np.zeros((self.ntotpix,len(psf.params)),float)
-    #     if retmodel:
-    #         allim = np.zeros(self.ntotpix,float)
-    #     pixcnt = 0
+        # # Initalize output arrays
+        # allderiv = np.zeros((self.ntotpix,len(psf.params)),float)
+        # if retmodel:
+        #     allim = np.zeros(self.ntotpix,float)
+        # pixcnt = 0
 
-    #     # Need to run model() to calculate amp/xcen/ycen for first couple iterations
-    #     #if self.niter<=1 and refit:
-    #     #    dum = self.model(x,*args,refit=refit)
-    #     dum = self.model(x,*args,refit=True) #,verbose=True)            
+        # # Need to run model() to calculate amp/xcen/ycen for first couple iterations
+        # #if self.niter<=1 and refit:
+        # #    dum = self.model(x,*args,refit=refit)
+        # dum = self.model(x,*args,refit=True) #,verbose=True)            
             
-    #     for i in range(self.nstars):
-    #         amp = self.staramp[i]
-    #         xcen = self.starxcen[i]            
-    #         ycen = self.starycen[i]
-    #         bbox = self.bboxdata[i]
-    #         x = self.xlist[i]
-    #         y = self.ylist[i]
-    #         pixstart = self.pixstart[i]
-    #         npix = self.npix[i]
-    #         flux = self.imflatten[pixstart:pixstart+npix]
-    #         err = self.errflatten[pixstart:pixstart+npix]
-    #         xdata = np.vstack((x,y))
+        # for i in range(self.nstars):
+        #     amp = self.staramp[i]
+        #     xcen = self.starxcen[i]            
+        #     ycen = self.starycen[i]
+        #     bbox = self.bboxdata[i]
+        #     x = self.xlist[i]
+        #     y = self.ylist[i]
+        #     pixstart = self.pixstart[i]
+        #     npix = self.npix[i]
+        #     flux = self.imflatten[pixstart:pixstart+npix]
+        #     err = self.errflatten[pixstart:pixstart+npix]
+        #     xdata = np.vstack((x,y))
             
-    #         # Get the model and derivative
-    #         allpars = np.concatenate((np.array([amp,xcen,ycen]),np.array(args)))
-    #         m,deriv = psf.jac(xdata,*allpars,allpars=True,retmodel=True)
-    #         #if retmodel:
-    #         #    m,deriv = psf.jac(xdata,*allpars,allpars=True,retmodel=True)
-    #         #else:
-    #         #    deriv = psf.jac(xdata,*allpars,allpars=True)                
-    #         deriv = np.delete(deriv,[0,1,2],axis=1)  # remove stellar ht/xc/yc columns
+        #     # Get the model and derivative
+        #     allpars = np.concatenate((np.array([amp,xcen,ycen]),np.array(args)))
+        #     m,deriv = psf.jac(xdata,*allpars,allpars=True,retmodel=True)
+        #     #if retmodel:
+        #     #    m,deriv = psf.jac(xdata,*allpars,allpars=True,retmodel=True)
+        #     #else:
+        #     #    deriv = psf.jac(xdata,*allpars,allpars=True)                
+        #     deriv = np.delete(deriv,[0,1,2],axis=1)  # remove stellar ht/xc/yc columns
 
-    #         # Solve for the best amp, and then scale the derivatives (all scale with amp)
-    #         #if self.niter>1 and refit:
-    #         #    newamp = amp*np.median(flux/m)
-    #         #    self.staramp[i] = newamp
-    #         #    m *= (newamp/amp)
-    #         #    deriv *= (newamp/amp)
+        #     # Solve for the best amp, and then scale the derivatives (all scale with amp)
+        #     #if self.niter>1 and refit:
+        #     #    newamp = amp*np.median(flux/m)
+        #     #    self.staramp[i] = newamp
+        #     #    m *= (newamp/amp)
+        #     #    deriv *= (newamp/amp)
 
-    #         #if i==1: print(amp,newamp)
-    #         #import pdb; pdb.set_trace()
+        #     #if i==1: print(amp,newamp)
+        #     #import pdb; pdb.set_trace()
 
-    #         npix,dum = deriv.shape
-    #         allderiv[pixcnt:pixcnt+npix,:] = deriv
-    #         if retmodel:
-    #             allim[pixcnt:pixcnt+npix] = m
-    #         pixcnt += npix
+        #     npix,dum = deriv.shape
+        #     allderiv[pixcnt:pixcnt+npix,:] = deriv
+        #     if retmodel:
+        #         allim[pixcnt:pixcnt+npix] = m
+        #     pixcnt += npix
             
-    #     if retmodel:
-    #         return allim,allderiv
-    #     else:
-    #         return allderiv
+        # return allim,allderiv
 
-    # def linesearch(self,xdata,bestpar,dbeta,m,jac):
-    #     # Perform line search along search gradient
-    #     flux = self.imflatten
-    #     # Weights
-    #     wt = 1/self.errflatten**2
-        
-    #     start_point = bestpar
-    #     search_gradient = dbeta
-    #     def obj_func(pp,m=None):
-    #         """ chisq given the parameters."""
-    #         if m is None:
-    #             m = self.model(xdata,*pp)                        
-    #         chisq = np.sum((flux.ravel()-m.ravel())**2 * wt.ravel())
-    #         #print('obj_func: pp=',pp)
-    #         #print('obj_func: chisq=',chisq)
-    #         return chisq
-    #     def obj_grad(pp,m=None,jac=None):
-    #         """ Gradient of chisq wrt the parameters."""
-    #         if m is None or jac is None:
-    #             m,jac = self.jac(xdata,*pp,retmodel=True)
-    #         # d chisq / d parj = np.sum( 2*jac_ij*(m_i-d_i))/sig_i**2)
-    #         dchisq = np.sum( 2*jac * (m.ravel()-flux.ravel()).reshape(-1,1)
-    #                          * wt.ravel().reshape(-1,1),axis=0)
-    #         #print('obj_grad: pp=',pp)
-    #         #print('obj_grad: dchisq=',dchisq)            
-    #         return dchisq
+    def linesearch(self,bestpar,dbeta):
+        # Perform line search along search gradient
 
-    #     # Inside model() the parameters are limited to the PSF bounds()
-    #     f0 = obj_func(start_point,m=m)
-    #     # Do our own line search with three points and a quadratic fit.
-    #     f1 = obj_func(start_point+0.5*search_gradient)
-    #     f2 = obj_func(start_point+search_gradient)
-    #     alpha = dln.quadratic_bisector(np.array([0.0,0.5,1.0]),np.array([f0,f1,f2]))
-    #     alpha = np.minimum(np.maximum(alpha,0.0),1.0)  # 0<alpha<1
-    #     if ~np.isfinite(alpha):
-    #         alpha = 1.0
-    #     # Use scipy.optimize.line_search()
-    #     #grad0 = obj_grad(start_point,m=m,jac=jac)        
-    #     #alpha,fc,gc,new_fval,old_fval,new_slope = line_search(obj_func, obj_grad, start_point, search_gradient, grad0,f0,maxiter=3)
-    #     #if alpha is None:  # did not converge
-    #     #    alpha = 1.0
-    #     pars_new = start_point + alpha * search_gradient
-    #     new_dbeta = alpha * search_gradient
-    #     return alpha,new_dbeta
+        # Inside model() the parameters are limited to the PSF bounds()
+        f0 = self.chisq(bestpar)
+        f1 = self.chisq(bestpar+0.5*dbeta)
+        f2 = self.chisq(bestpar+dbeta)
+        print(f0,f1,f2)
+        alpha = quadratic_bisector(np.array([0.0,0.5,1.0]),np.array([f0,f1,f2]))
+        alpha = np.minimum(np.maximum(alpha,0.0),1.0)  # 0<alpha<1
+        if np.isfinite(alpha)==False:
+            alpha = 1.0
 
+        pars_new = bestpar + alpha * dbeta
+        new_dbeta = alpha * dbeta
+        return alpha,new_dbeta
+    
     # def mklookup(self,order=0):
     #     """ Make an empirical look-up table for the residuals."""
 
@@ -822,8 +855,8 @@ class PSFFitter(object):
 
 
 #@njit
-def fitpsf(psf,image,tab,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
-           verbose=False):
+def fitpsf(psftype,psfparams,image,error,tab,fitradius,method='qr',maxiter=10,
+           minpercdiff=1.0,verbose=False):
     """
     Fit PSF model to stars in an image.
 
@@ -869,151 +902,154 @@ def fitpsf(psf,image,tab,fitradius=None,method='qr',maxiter=10,minpercdiff=1.0,
     """
 
     t0 = time.time()
-    print = utils.getprintfunc() # Get print function to be used locally, allows for easy logging   
+    #print = utils.getprintfunc() # Get print function to be used locally, allows for easy logging   
 
     # Initialize the output catalog best-fitting values for the PSF stars
     dt = np.dtype([('id',int),('amp',float),('x',float),('y',float),('npix',int),('rms',float),
                    ('chisq',float),('ixmin',int),('ixmax',int),('iymin',int),('iymax',int)])
     psftab = np.zeros(len(tab),dtype=dt)
-    if 'id' in tab.colnames:
-        psftab['id'] = tab['id']
-    else:
-        psftab['id'] = np.arange(len(tab))+1
-    
 
     # Fitting the PSF to the stars
     #-----------------------------
 
-    # Empirical PSF - done differently
-    if psf.psftype==6:
-        cube1 = starcube(tab,image,npix=psf.npix,fillvalue=np.nan)
-        coords = (tab['x'].data,tab['y'].data)
-        epsf1,nbadstar1,rms1 = mkempirical(cube1,order=psf.order,coords=coords,shape=psf._shape)
-        initpsf = mnb.PSFEmpirical(epsf1,imshape=image.shape,order=psf.order)
-        pf = PSFFitter(initpsf,image,tab,fitradius=fitradius,verbose=False)
-        # Fit the amp, xcen, ycen properly
-        xdata = np.arange(pf.ntotpix)
-        out = pf.model(xdata,[])
-        # Put information into the psftab table
-        psftab['amp'] = pf.staramp
-        psftab['x'] = pf.starxcen
-        psftab['y'] = pf.starycen
-        psftab['chisq'] = pf.starchisq
-        psftab['rms'] = pf.starrms
-        psftab['npix'] = pf.starnpix    
-        for i in range(len(tab)):
-            bbox = pf.bboxdata[i]
-            psftab['ixmin'][i] = bbox.ixmin
-            psftab['ixmax'][i] = bbox.ixmax
-            psftab['iymin'][i] = bbox.iymin
-            psftab['iymax'][i] = bbox.iymax        
-        psftab = Table(psftab)
-        # Remake the empirical EPSF    
-        cube = starcube(psftab,image,npix=psf.npix,fillvalue=np.nan)
-        epsf,nbadstar,rms = mkempirical(cube,order=psf.order,coords=coords,shape=psf._shape)
-        newpsf = mnb.PSFEmpirical(epsf,imshape=image.shape,order=psf.order)
-        if verbose:
-            print('Median RMS: '+str(np.median(pf.starrms)))
-            print('dt = %.2f sec' % (time.time()-t0))
-        return newpsf, None, None, psftab, pf
+    # # Empirical PSF - done differently
+    # if psf.psftype==6:
+    #     cube1 = starcube(tab,image,npix=psf.npix,fillvalue=np.nan)
+    #     coords = (tab['x'].data,tab['y'].data)
+    #     epsf1,nbadstar1,rms1 = mkempirical(cube1,order=psf.order,coords=coords,shape=psf._shape)
+    #     initpsf = mnb.PSFEmpirical(epsf1,imshape=image.shape,order=psf.order)
+    #     pf = PSFFitter(initpsf,image,tab,fitradius=fitradius,verbose=False)
+    #     # Fit the amp, xcen, ycen properly
+    #     xdata = np.arange(pf.ntotpix)
+    #     out = pf.model(xdata,[])
+    #     # Put information into the psftab table
+    #     psftab['amp'] = pf.staramp
+    #     psftab['x'] = pf.starxcen
+    #     psftab['y'] = pf.starycen
+    #     psftab['chisq'] = pf.starchisq
+    #     psftab['rms'] = pf.starrms
+    #     psftab['npix'] = pf.starnpix    
+    #     for i in range(len(tab)):
+    #         bbox = pf.bboxdata[i]
+    #         psftab['ixmin'][i] = bbox.ixmin
+    #         psftab['ixmax'][i] = bbox.ixmax
+    #         psftab['iymin'][i] = bbox.iymin
+    #         psftab['iymax'][i] = bbox.iymax        
+    #     psftab = Table(psftab)
+    #     # Remake the empirical EPSF    
+    #     cube = starcube(psftab,image,npix=psf.npix,fillvalue=np.nan)
+    #     epsf,nbadstar,rms = mkempirical(cube,order=psf.order,coords=coords,shape=psf._shape)
+    #     newpsf = mnb.PSFEmpirical(epsf,imshape=image.shape,order=psf.order)
+    #     if verbose:
+    #         print('Median RMS: '+str(np.median(pf.starrms)))
+    #         print('dt = %.2f sec' % (time.time()-t0))
+    #     return newpsf, None, None, psftab, pf
 
-    
-    pf = PSFFitter(psf,image,tab,fitradius=fitradius,verbose=False) #verbose)
-    xdata = np.arange(pf.ntotpix)
-    initpar = psf.params.copy()
-    method = str(method).lower()
-    
+    starx = tab['x']
+    stary = tab['y']
+    starflux = tab['flux']
+    pf = PSFFitter(psftype,psfparams,image,error,starx,stary,starflux,fitradius,verbose=False)
+    initpar = psfparams.copy()
+    #method = str(method).lower()
+    xdata = np.arange(10)  # dummy
 
     # Iterate
-    count = 0
+    niter = 0
     percdiff = 1e10
     bestpar = initpar.copy()
-
+    
     dchisq = -1
     oldchisq = 1e30
-    bounds = psf.bounds
-    maxsteps = psf._steps
-    while (count<maxiter and percdiff>minpercdiff and dchisq<0):
+    bounds = mnb.model2d_bounds(psftype)
+    bounds = bounds[3:,:]
+    while (niter<maxiter and percdiff>minpercdiff and dchisq<0):
+        # Fit the stellar parameters first
+        pf.fitstars(xdata,bestpar)
         # Get the Jacobian and model
-        m,jac = pf.jac(xdata,*bestpar,retmodel=True)
-        chisq = np.sum((pf.imflatten-m)**2/pf.errflatten**2)
-        dy = pf.imflatten-m
+        m,jac = pf.jac(xdata,bestpar)
+        chisq = np.sum((pf.starfit_imdata-m)**2/pf.starfit_errdata**2)
+        dy = (pf.starfit_imdata-m).ravel()
         # Weights
-        wt = 1/pf.errflatten**2
+        wt = 1/pf.starfit_errdata**2
+        wt = wt.ravel()
+        jac = jac.reshape((jac.shape[0]*jac.shape[1],jac.shape[2]))
+        m = m.ravel()
         # Solve Jacobian
-        dbeta = lsq.jac_solve(jac,dy,method=method,weight=wt)
+        dbeta = mnb.qr_jac_solve(jac,dy,weight=wt)
 
         # Perform line search
-        alpha,new_dbeta = pf.linesearch(xdata,bestpar,dbeta,m,jac)
+        alpha,new_dbeta = pf.linesearch(bestpar,dbeta)
             
         if verbose:
             print('  pars = '+str(bestpar))
             print('  dbeta = '+str(dbeta))
 
-        # Update the parameters
+        # Update parameters
         oldpar = bestpar.copy()
-        #bestpar = psf.newpars(bestpar,dbeta,bounds,maxsteps)
-        bestpar = psf.newpars(bestpar,new_dbeta,bounds,maxsteps)  
+        # limit the steps to the maximum step sizes and boundaries
+        maxsteps = mnb.model2d_maxsteps(psftype,bestpar)
+        maxsteps = maxsteps[3:]
+        bestpar = mnb.newlsqpars(bestpar,new_dbeta,bounds,maxsteps)
+        
+        # Update the parameters 
         diff = np.abs(bestpar-oldpar)
         denom = np.abs(oldpar.copy())
-        denom[denom==0] = 1.0  # deal with zeros
+        bad, = np.where(denom==0)
+        if len(bad)>0:
+            denom[bad] = 1.0  # deal with zeros
         percdiff = np.max(diff/denom*100)
         dchisq = chisq-oldchisq
         percdiffchisq = dchisq/oldchisq*100
         oldchisq = chisq
-        count += 1
+        niter += 1
             
         if verbose:
-            print('  '+str(count+1)+' '+str(bestpar)+' '+str(percdiff)+' '+str(chisq))
-                
-    # Make the best model
-    bestmodel = pf.model(xdata,*bestpar)
+            print('  '+str(niter+1)+' ',bestpar,' '+str(percdiff)+' '+str(chisq))
+
+    # Fit the stellar parameters first
+    pf.fitstars(xdata,bestpar)
+    # Get the Jacobian and model
+    m,jac = pf.jac(xdata,bestpar)
+    chisq = np.sum((pf.starfit_imdata-m)**2/pf.starfit_errdata**2)
+    dy = (pf.starfit_imdata-m).ravel()
+    # Weights
+    wt = 1/pf.starfit_errdata**2
+    wt = wt.ravel()
+    jac = jac.reshape((jac.shape[0]*jac.shape[1],jac.shape[2]))
 
     # Estimate uncertainties
-    if method != 'curve_fit':
-        # Calculate covariance matrix
-        cov = lsq.jac_covariance(jac,dy,wt=wt)
-        perror = np.sqrt(np.diag(cov))
-                
+    # Calculate covariance matrix
+    cov = mnb.jac_covariance(jac,dy,wt=wt)
+    perror = np.sqrt(np.diag(cov))
+
     pars = bestpar
     if verbose:
         print('Best-fitting parameters: '+str(pars))
         print('Errors: '+str(perror))
         print('Median RMS: '+str(np.median(pf.starrms)))
 
-    # create the best-fitting PSF
-    newpsf = psf.copy()
-    newpsf._params = pars                
-
     # Output best-fitting values for the PSF stars as well
     dt = np.dtype([('id',int),('amp',float),('x',float),('y',float),('npix',int),('rms',float),
                    ('chisq',float),('ixmin',int),('ixmax',int),('iymin',int),('iymax',int)])
     psftab = np.zeros(len(tab),dtype=dt)
-    if 'id' in tab.colnames:
-        psftab['id'] = tab['id']
-    else:
-        psftab['id'] = np.arange(len(tab))+1
+    psftab['id'] = np.arange(len(tab))+1
     psftab['amp'] = pf.staramp
     psftab['x'] = pf.starxcen
     psftab['y'] = pf.starycen
     psftab['chisq'] = pf.starchisq
     psftab['rms'] = pf.starrms
-    psftab['npix'] = pf.starnpix    
+    psftab['npix'] = pf.starfit_ndata
     for i in range(len(tab)):
-        bbox = pf.bboxdata[i]
-        psftab['ixmin'][i] = bbox.ixmin
-        psftab['ixmax'][i] = bbox.ixmax
-        psftab['iymin'][i] = bbox.iymin
-        psftab['iymax'][i] = bbox.iymax        
-    psftab = Table(psftab)
+        bbox = pf.star_bbox[i,:]
+        psftab['ixmin'][i] = bbox[0]
+        psftab['ixmax'][i] = bbox[1]
+        psftab['iymin'][i] = bbox[2]
+        psftab['iymax'][i] = bbox[3]
     
     if verbose:
         print('dt = %.2f sec' % (time.time()-t0))
-        
-    # Make the star models
-    #starmodels = pf.starmodel(pars=pars)
     
-    return newpsf, pars, perror, psftab, pf
+    return pars, perror, cov, psftab, pf
 
 
 #@njit
