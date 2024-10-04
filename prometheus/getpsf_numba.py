@@ -862,12 +862,16 @@ def fitpsf(psftype,psfparams,image,error,tab,fitradius,method='qr',maxiter=10,
 
     Parameters
     ----------
-    psf : PSF object
+    psftype : PSF object
        PSF object with initial parameters to use.
-    image : CCDData object
+    psfparams : numpy array
+       PSF object with initial parameters to use.
+    image : numpy array
        Image to use to fit PSF model to stars.
-    tab : table
-       Catalog with initial amp/x/y values for the stars to use to fit the PSF.
+    error : numpy array
+       Uncertainties in image.
+    tab : numpy structured array
+       Table with initial amp/x/y values for the stars to use to fit the PSF.
     fitradius : float, table
        The fitting radius.  If none is input then the initial PSF FWHM will be used.
     method : str, optional
@@ -885,19 +889,23 @@ def fitpsf(psftype,psfparams,image,error,tab,fitradius,method='qr',maxiter=10,
 
     Returns
     -------
-    newpsf : numpy array
-       New PSF array with the best-fit model parameters.
     pars : numpy array
        Array of best-fit model parameters
     perror : numpy array
        Uncertainties in "pars".
+    pcov : numpy array
+       Covariances of the best-ft parameters.
     psftab : table
        Table of best-fitting amp/xcen/ycen values for the PSF stars.
-
+    rchisq : float
+       Reduced chi-squared of the best-fit.
+    pf : PSFFitter object
+       PSFFitter object.
+    
     Example
     -------
 
-    newpsf,pars,perror,psftab = fitpsf(psf,image,tab)
+    pars,perror,pcov,psftab,rchisq,pf = fitpsf(psftype,psfparams,image,error,tab,fitradius)
 
     """
 
@@ -1016,11 +1024,12 @@ def fitpsf(psftype,psfparams,image,error,tab,fitradius,method='qr',maxiter=10,
     wt = 1/pf.starfit_errdata**2
     wt = wt.ravel()
     jac = jac.reshape((jac.shape[0]*jac.shape[1],jac.shape[2]))
-
+    rchisq = chisq/np.sum(pf.starfit_ndata)
+    
     # Estimate uncertainties
     # Calculate covariance matrix
-    cov = mnb.jac_covariance(jac,dy,wt=wt)
-    perror = np.sqrt(np.diag(cov))
+    pcov = mnb.jac_covariance(jac,dy,wt=wt)
+    perror = np.sqrt(np.diag(pcov))
 
     pars = bestpar
     if verbose:
@@ -1049,7 +1058,7 @@ def fitpsf(psftype,psfparams,image,error,tab,fitradius,method='qr',maxiter=10,
     if verbose:
         print('dt = %.2f sec' % (time.time()-t0))
     
-    return pars, perror, cov, psftab, pf
+    return pars, perror, pcov, psftab, rchisq, pf
 
 
 #@njit
