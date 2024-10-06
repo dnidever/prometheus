@@ -8,120 +8,7 @@ from dlnpyutils import utils as dln
 import numba
 from numba import jit,njit,types
 from numba.experimental import jitclass
-from . import leastsquares as lsq
-
-PI = 3.141592653589793
-
-@njit
-def meshgrid(x,y):
-    """ Implementation of numpy's meshgrid function."""
-    nx = len(x)
-    ny = len(y)
-    dtype = np.array(x[0]*y[0]).dtype
-    xx = np.zeros((ny,nx),dtype)
-    for i in range(ny):
-        xx[i,:] = x
-    yy = np.zeros((ny,nx),dtype)
-    for i in range(nx):
-        yy[:,i] = y
-    return xx,yy
-
-@njit
-def aclip(val,minval,maxval):
-    newvals = np.zeros(len(val),float)
-    for i in range(len(val)):
-        if val[i] < minval:
-            nval = minval
-        elif val[i] > maxval:
-            nval = maxval
-        else:
-            nval = val[i]
-        newvals[i] = nval
-    return newvals
-
-@njit
-def clip(val,minval,maxval):
-    if val < minval:
-        nval = minval
-    elif val > maxval:
-        nval = maxval
-    else:
-        nval = val
-    return nval
-
-@njit
-def drop_imag(z):
-    EPSILON = 1e-07    
-    if abs(z.imag) <= EPSILON:
-        z = z.real
-    return z
-
-@njit
-def gamma(z):
-    # Gamma function for a single z value
-    # Using the Lanczos approximation
-    # https://en.wikipedia.org/wiki/Lanczos_approximation
-    g = 7
-    n = 9
-    p = [
-        0.99999999999980993,
-        676.5203681218851,
-        -1259.1392167224028,
-        771.32342877765313,
-        -176.61502916214059,
-        12.507343278686905,
-        -0.13857109526572012,
-        9.9843695780195716e-6,
-        1.5056327351493116e-7
-    ]
-    if z < 0.5:
-        y = PI / (np.sin(PI * z) * gamma(1 - z))  # Reflection formula
-    else:
-        z -= 1
-        x = p[0]
-        for i in range(1, len(p)):
-            x += p[i] / (z + i)
-        t = z + g + 0.5
-        y = np.sqrt(2 * PI) * t ** (z + 0.5) * np.exp(-t) * x
-    return y
-
-@njit
-def gammaincinv05(a):
-    """ gammaincinv(a,0.5) """
-    n = np.array([1.00e-03, 1.12e-01, 2.23e-01, 3.34e-01, 4.45e-01, 5.56e-01,
-                  6.67e-01, 7.78e-01, 8.89e-01, 1.00e+00, 2.00e+00, 3.00e+00,
-                  4.00e+00, 5.00e+00, 6.00e+00, 7.00e+00, 8.00e+00, 9.00e+00,
-                  1.00e+01, 1.10e+01, 1.20e+01])
-
-    y = np.array([5.24420641e-302, 1.25897478e-003, 3.03558724e-002, 9.59815712e-002,
-                  1.81209305e-001, 2.76343765e-001, 3.76863377e-001, 4.80541354e-001,
-                  5.86193928e-001, 6.93147181e-001, 1.67834699e+000, 2.67406031e+000,
-                  3.67206075e+000, 4.67090888e+000, 5.67016119e+000, 6.66963707e+000,
-                  7.66924944e+000, 8.66895118e+000, 9.66871461e+000, 1.06685224e+001,
-                  1.16683632e+001])
-    # Lower edge
-    if a < n[0]:
-        out = 0.0
-    # Upper edge
-    elif a > n[-1]:
-        # linear approximation to large values
-        # coef = np.array([ 0.99984075, -0.32972584])
-        out = 0.99984075*a-0.32972584
-    # Interpolate values
-    else:
-        ind = np.searchsorted(n,a)
-        # exact match
-        if n[ind]==a:
-            out = y[ind]
-        # At beginning
-        elif ind==0:
-            slp = (y[1]-y[0])/(n[1]-n[0])
-            out = slp*(a-n[0])+y[0]
-        else:
-            slp = (y[ind]-y[ind-1])/(n[ind]-n[ind-1])
-            out = slp*(a-n[ind-1])+y[ind-1]
-            
-    return out
+from . import leastsquares as lsq, utils_numba as utils
 
 @njit
 def gaussfwhm(im):
@@ -228,101 +115,6 @@ def imfwhm(im):
     fwhm = 2*bestr2
     return fwhm
 
-    
-@njit
-def linearinterp(data,x,y):
-    """
-    Linear interpolation.
-
-    Parameters
-    ----------
-    data : numpy array
-      The data to use for interpolation.
-    x : float
-      The X-value at which to perform the interpolation.
-    y : float
-      The Y-value at which to perform the interpolation.
-
-    Returns
-    -------
-    f : float
-       The interpolated value.
-    
-    Examples
-    --------
-
-    f = linearinterp(data,x,y)
-
-    """
-
-    
-    ny,nx = data.shape
-
-    # Out of bounds
-    if x<0 or x>(nx-1) or y<0 or y>(ny-1):
-        return 0.0
-
-    x1 = int(x)
-    if x1==nx-1:
-        x1 -= 1
-    x2 = x1+1
-    y1 = int(y)
-    if y1==ny-1:
-        y1 -= 1
-    y2 = y1+1
-
-    f11 = data[y1,x1]
-    f12 = data[y2,x1]
-    f21 = data[y1,x2]
-    f22 = data[y2,x2]
-    
-    # weighted mean
-    # denom = (x2-x1)*(y2-y1) = 1
-    w11 = (x2-x)*(y2-y)
-    w12 = (x2-x)*(y-y1)
-    w21 = (x-x1)*(y2-y)
-    w22 = (x-x1)*(y-y1)
-    f = w11*f11+w12*f12+w21*f21+w22*f22
-
-    return f
-
-@njit
-def alinearinterp(data,x,y):
-    """
-    Linear interpolation.
-
-    Parameters
-    ----------
-    data : numpy array
-      The data to use for interpolation.
-    x : numpy array
-      Array of X-value at which to perform the interpolation.
-    y : numpy array
-      Array of Y-value at which to perform the interpolation.
-
-    Returns
-    -------
-    f : numpy array
-       The interpolated values.
-    
-    Examples
-    --------
-
-    f = alinearinterp(data,x,y)
-
-    """
-
-    if x.ndim==2:
-        x1d = x.ravel()
-        y1d = y.ravel()
-    else:
-        x1d = x
-        y1d = y
-    npix = len(x1d)
-    f = np.zeros(npix,float)
-    for i in range(npix):
-        f[i] = linearinterp(data,x1d[i],y1d[i])
-    return f
 
 @njit
 def numba_linearinterp(binim,fullim,binsize):
@@ -373,50 +165,6 @@ def numba_linearinterp(binim,fullim,binsize):
     #fullim[-binsize:,-binsize:] = binsize[-1,-1]
 
     return fullim
-
-
-
-@njit
-def inverse(a):
-    """ Safely take the inverse of a square 2D matrix."""
-    # This checks for zeros on the diagonal and "fixes" them.
-    
-    # If one of the dimensions is zero in the R matrix [Npars,Npars]
-    # then replace it with a "dummy" value.  A large value in R
-    # will give a small value in inverse of R.
-    #badpar, = np.where(np.abs(np.diag(a))<sys.float_info.min)
-    badpar = (np.abs(np.diag(a))<2e-300)
-    if np.sum(badpar)>0:
-        a[badpar] = 1e10
-    ainv = np.linalg.inv(a)
-    # What if the inverse fails???
-    # can we catch it in numba
-    # Fix values
-    a[badpar] = 0  # put values back
-    ainv[badpar] = 0
-    
-    return ainv
-
-@njit
-def qr_jac_solve(jac,resid,weight=None):
-    """ Solve part of a non-linear least squares equation using QR decomposition
-        using the Jacobian."""
-    # jac: Jacobian matrix, first derivatives, [Npix, Npars]
-    # resid: residuals [Npix]
-    # weight: weights, ~1/error**2 [Npix]
-    
-    # QR decomposition
-    if weight is None:
-        q,r = np.linalg.qr(jac)
-        rinv = inverse(r)
-        dbeta = rinv @ (q.T @ resid)
-    # Weights input, multiply resid and jac by weights        
-    else:
-        q,r = np.linalg.qr( jac * weight.reshape(-1,1) )
-        rinv = inverse(r)
-        dbeta = rinv @ (q.T @ (resid*weight))
-        
-    return dbeta
 
 @njit
 def checkbounds(pars,bounds):
@@ -481,7 +229,6 @@ def newlsqpars(pars,steps,bounds,maxsteps):
         newparams = np.minimum(np.maximum(newparams,lbounds+1e-30),ubounds-1e-30)
     return newparams
 
-
 @njit
 def newbestpars(bestpars,dbeta):
     """ Get new pars from offsets."""
@@ -504,38 +251,6 @@ def newbestpars(bestpars,dbeta):
     newy = clip(bestpars[2]+dbeta[2],ymin,ymax)
     newpars[2] = newy
     return newpars
-
-@njit
-def jac_covariance(jac,resid,wt):
-    """ Determine the covariance matrix. """
-    
-    npix,npars = jac.shape
-    
-    # Weights
-    #   If weighted least-squares then
-    #   J.T * W * J
-    #   where W = I/sig_i**2
-    if wt is not None:
-        wt2 = wt.reshape(-1,1) + np.zeros(npars)
-        hess = jac.T @ (wt2 * jac)
-    else:
-        hess = jac.T @ jac  # not weighted
-
-    # cov = H-1, covariance matrix is inverse of Hessian matrix
-    cov_orig = inverse(hess)
-
-    # Rescale to get an unbiased estimate
-    # cov_scaled = cov * (RSS/(m-n)), where m=number of measurements, n=number of parameters
-    # RSS = residual sum of squares
-    #  using rss gives values consistent with what curve_fit returns
-    # Use chi-squared, since we are doing the weighted least-squares and weighted Hessian
-    if wt is not None:
-        chisq = np.sum(resid**2 * wt)
-    else:
-        chisq = np.sum(resid**2)
-    cov = cov_orig * (chisq/(npix-npars))  # what MPFITFUN suggests, but very small
-        
-    return cov
 
 @njit
 def starbbox(coords,imshape,radius):

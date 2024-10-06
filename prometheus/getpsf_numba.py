@@ -1,39 +1,13 @@
 import os
 import numpy as np
-import time
 from numba import njit,types,from_dtype
 from numba.experimental import jitclass
-from . import models_numba as mnb
+from . import models_numba as mnb, utils_numba as utils
 
 # Fit a PSF model to multiple stars in an image
 
 @njit
-def quadratic_bisector(x,y):
-    """ Calculate the axis of symmetric or bisector of parabola"""
-    #https://www.azdhs.gov/documents/preparedness/state-laboratory/lab-licensure-certification/technical-resources/
-    #    calibration-training/12-quadratic-least-squares-regression-calib.pdf
-    #quadratic regression statistical equation
-    n = len(x)
-    if n<3:
-        return None
-    Sxx = np.sum(x**2) - np.sum(x)**2/n
-    Sxy = np.sum(x*y) - np.sum(x)*np.sum(y)/n
-    Sxx2 = np.sum(x**3) - np.sum(x)*np.sum(x**2)/n
-    Sx2y = np.sum(x**2 * y) - np.sum(x**2)*np.sum(y)/n
-    Sx2x2 = np.sum(x**4) - np.sum(x**2)**2/n
-    #a = ( S(x^2*y)*S(xx)-S(xy)*S(xx^2) ) / ( S(xx)*S(x^2x^2) - S(xx^2)^2 )
-    #b = ( S(xy)*S(x^2x^2) - S(x^2y)*S(xx^2) ) / ( S(xx)*S(x^2x^2) - S(xx^2)^2 )
-    denom = Sxx*Sx2x2 - Sxx2**2
-    if denom==0:
-        return np.nan
-    a = ( Sx2y*Sxx - Sxy*Sxx2 ) / denom
-    b = ( Sxy*Sx2x2 - Sx2y*Sxx2 ) / denom
-    if a==0:
-        return np.nan
-    return -b/(2*a)
-
-#@njit
-def starcube(tab,image,npix=51,fillvalue=np.nan):
+def starcube(tab,image,error,npix=51,fillvalue=np.nan):
     """
     Produce a cube of cutouts of stars.
 
@@ -64,7 +38,7 @@ def starcube(tab,image,npix=51,fillvalue=np.nan):
     nstars = len(tab)
     nhpix = npix//2
     cube = np.zeros((npix,npix,nstars),float)
-    xx,yy = np.meshgrid(np.arange(npix)-nhpix,np.arange(npix)-nhpix)
+    xx,yy = mnb.meshgrid(np.arange(npix)-nhpix,np.arange(npix)-nhpix)
     rr = np.sqrt(xx**2+yy**2)        
     x = xx[0,:]
     y = yy[:,0]
@@ -72,26 +46,30 @@ def starcube(tab,image,npix=51,fillvalue=np.nan):
         xcen = tab['x'][i]            
         ycen = tab['y'][i]
         bbox = mnb.starbbox((xcen,ycen),image.shape,nhpix)
-        im = image[bbox.slices]
-        flux = image.data[bbox.slices]-image.sky[bbox.slices]
-        err = image.error[bbox.slices]
-        if 'amp' in tab.columns:
-            amp = tab['amp'][i]
-        elif 'peak' in tab.columns:
-            amp = tab['peak'][i]
-        else:
-            amp = flux[int(np.round(ycen)),int(np.round(xcen))]
-        xim,yim = np.meshgrid(im.x,im.y)
-        xim = xim.astype(float)-xcen
-        yim = yim.astype(float)-ycen
-        # We need to interpolate this onto the grid
-        f = RectBivariateSpline(yim[:,0],xim[0,:],flux/amp)
+        flux = bbox.slice(image)
+        err = bbox.slice(error)
+        amp = tab['peak'][i]
+        xim,yim = bbox.xy()
+        xim = xim-xcen
+        yim = yim-ycen
+        # Need to interpolate onto a regular grid
         im2 = np.zeros((npix,npix),float)+np.nan
-        xcover = (x>=bbox.ixmin-xcen) & (x<=bbox.ixmax-1-xcen)
-        xmin,xmax = dln.minmax(np.where(xcover)[0])
-        ycover = (y>=bbox.iymin-ycen) & (y<=bbox.iymax-1-ycen)
-        ymin,ymax = dln.minmax(np.where(ycover)[0])            
-        im2[ymin:ymax+1,xmin:xmax+1] = f(y[ycover],x[xcover],grid=True)
+        xind, = np.where((x>=bbox.ixmin-xcen) & (x<=bbox.ixmax-1-xcen))
+        xmin,xmax = np.min(xind),np.max(xind)
+        yind, = np.where((y>=bbox.iymin-ycen) & (y<=bbox.iymax-1-ycen))
+        ymin,ymax = np.min(yind),np.max(yind)
+        # xx/yy are relative coordinates for the final interpolated image
+        #       i.e. [-3, -2, -1, 0, 1, 2, 3]
+        # xim/yim are relative coordinates for the original flux image
+        # for the interpolation we need coordinates relative to to (0,0) of the
+        #    flux image
+        fnx = xmax-xmin+1
+        fny = ymax-ymin+1
+        fxx = xx[ymin:ymax+1,xmin:xmax+1]-xim[0,0]   # relative to flux origin
+        fyy = yy[ymin:ymax+1,xmin:xmax+1]-yim[0,0]
+        fim = mnb.alinearinterp(flux,fxx,fyy)
+        fim = fim.reshape((fny,fnx))
+        im2[ymin:ymax+1,xmin:xmax+1] = fim
         # Stuff it into 3D array
         cube[:,:,i] = im2
     return cube
@@ -145,14 +123,14 @@ def mkempirical(cube,order=0,coords=None,shape=None,lookup=False):
     nhpix = ny//2
     
     # Do outlier rejection in each pixel
-    med = np.nanmedian(cube,axis=2)
+    med = median3d(cube,axis=2,ignore_nan=True)
     bad = ~np.isfinite(med)
     if np.sum(bad)>0:
-        med[bad] = np.nanmedian(med)
-    sig = dln.mad(cube,axis=2)
+        med[bad] = median(med)
+    sig = mad3d(cube,axis=2,ignore_nan=True)
     bad = ~np.isfinite(sig)
     if np.sum(bad)>0:
-        sig[bad] = np.nanmedian(sig)        
+        sig[bad] = median(sig,ignore_nan=True)
     # Mask outlier points
     outliers = ((np.abs(cube-med.reshape((med.shape)+(-1,)))>3*sig.reshape((med.shape)+(-1,)))
                 & np.isfinite(cube))
@@ -168,7 +146,7 @@ def mkempirical(cube,order=0,coords=None,shape=None,lookup=False):
     goodpix = macube.count(axis=(0,1))
     rms = np.sqrt(np.nansum((cube-medim.reshape((medim.shape)+(-1,)))**2,axis=(0,1))/goodpix)
 
-    xx,yy = np.meshgrid(np.arange(npix)-nhpix,np.arange(npix)-nhpix)
+    xx,yy = mnb.meshgrid(np.arange(npix)-nhpix,np.arange(npix)-nhpix)
     rr = np.sqrt(xx**2+yy**2)        
     x = xx[0,:]
     y = yy[:,0]
@@ -555,7 +533,6 @@ class PSFFitter(object):
             allpars[1] = self.starxcen[i]
             allpars[2] = self.starycen[i]
             allpars[3:] = args
-            print(i,allpars)
             g,_ = mnb.amodel2d(xdata1,ydata1,self.psftype,allpars,0)
             allmodel[i,:len(g)] = g
         return allmodel
@@ -689,7 +666,7 @@ class PSFFitter(object):
             model,der = mnb.psf(xdata1,ydata1,pars,self.psftype,psfparams,
                                 lookup,self.imshape)
             rms = np.sqrt(np.mean(((im1-model)/bestpar[0])**2))
-            print(i,bestpar,rchisq,rms)
+            #print(i,bestpar,rchisq,rms)
             
             # Update stellar parameters
             self.staramp[i] = bestpar[0]
@@ -718,75 +695,11 @@ class PSFFitter(object):
             allpars[2] = self.starycen[i]
             allpars[3:] = args
             g,d = mnb.amodel2d(xdata1,ydata1,self.psftype,allpars,npars)
-            print(len(g))
-            print(d.shape)
             allmodel[i,:len(g)] = g
             allderiv[i,:len(g),:] = d
         # Trim off the stellar parameter (amp/xc/yc) derivatives
         allderiv = allderiv[:,:,3:]
         return allmodel,allderiv
-
-
-
-        # if self.verbose:
-        #     print('jac: '+str(self.niter)+' ',args)
-        
-        # psf = self.psf.copy()
-        # psf._params = list(args)
-    
-        # # Loop over the stars and generate the derivatives
-        # #-------------------------------------------------
-
-        # # Initalize output arrays
-        # allderiv = np.zeros((self.ntotpix,len(psf.params)),float)
-        # if retmodel:
-        #     allim = np.zeros(self.ntotpix,float)
-        # pixcnt = 0
-
-        # # Need to run model() to calculate amp/xcen/ycen for first couple iterations
-        # #if self.niter<=1 and refit:
-        # #    dum = self.model(x,*args,refit=refit)
-        # dum = self.model(x,*args,refit=True) #,verbose=True)            
-            
-        # for i in range(self.nstars):
-        #     amp = self.staramp[i]
-        #     xcen = self.starxcen[i]            
-        #     ycen = self.starycen[i]
-        #     bbox = self.bboxdata[i]
-        #     x = self.xlist[i]
-        #     y = self.ylist[i]
-        #     pixstart = self.pixstart[i]
-        #     npix = self.npix[i]
-        #     flux = self.imflatten[pixstart:pixstart+npix]
-        #     err = self.errflatten[pixstart:pixstart+npix]
-        #     xdata = np.vstack((x,y))
-            
-        #     # Get the model and derivative
-        #     allpars = np.concatenate((np.array([amp,xcen,ycen]),np.array(args)))
-        #     m,deriv = psf.jac(xdata,*allpars,allpars=True,retmodel=True)
-        #     #if retmodel:
-        #     #    m,deriv = psf.jac(xdata,*allpars,allpars=True,retmodel=True)
-        #     #else:
-        #     #    deriv = psf.jac(xdata,*allpars,allpars=True)                
-        #     deriv = np.delete(deriv,[0,1,2],axis=1)  # remove stellar ht/xc/yc columns
-
-        #     # Solve for the best amp, and then scale the derivatives (all scale with amp)
-        #     #if self.niter>1 and refit:
-        #     #    newamp = amp*np.median(flux/m)
-        #     #    self.staramp[i] = newamp
-        #     #    m *= (newamp/amp)
-        #     #    deriv *= (newamp/amp)
-
-        #     #if i==1: print(amp,newamp)
-        #     #import pdb; pdb.set_trace()
-
-        #     npix,dum = deriv.shape
-        #     allderiv[pixcnt:pixcnt+npix,:] = deriv
-        #     if retmodel:
-        #         allim[pixcnt:pixcnt+npix] = m
-        #     pixcnt += npix
-            
-        # return allim,allderiv
 
     def linesearch(self,bestpar,dbeta):
         # Perform line search along search gradient
@@ -795,7 +708,6 @@ class PSFFitter(object):
         f0 = self.chisq(bestpar)
         f1 = self.chisq(bestpar+0.5*dbeta)
         f2 = self.chisq(bestpar+dbeta)
-        print(f0,f1,f2)
         alpha = quadratic_bisector(np.array([0.0,0.5,1.0]),np.array([f0,f1,f2]))
         alpha = np.minimum(np.maximum(alpha,0.0),1.0)  # 0<alpha<1
         if np.isfinite(alpha)==False:
@@ -828,31 +740,24 @@ class PSFFitter(object):
     #     #import pdb; pdb.set_trace()
         
         
-    # def starmodel(self,star=None,pars=None):
-    #     """ Generate 2D star model images that can be compared to the original cutouts.
-    #          if star=None, then it will return all of them as a list."""
-
-    #     psf = self.psf.copy()
-    #     if pars is not None:
-    #         psf._params = pars
-        
-    #     model = []
-    #     if star is None:
-    #         star = np.arange(self.nstars)
-    #     else:
-    #         star = [star]
-
-    #     for i in star:
-    #         image = self.imdata[i]
-    #         amp = self.staramp[i]
-    #         xcen = self.starxcen[i]   
-    #         ycen = self.starycen[i]
-    #         bbox = self.bboxdata[i]
-    #         model1 = psf(pars=[amp,xcen,ycen],bbox=bbox)
-    #         model.append(model1)
-    #     return model
-
-
+    def starmodel(self,istar,params):
+        """ Generate a 2D star model image that can be compared to the original cutout."""
+        im,err,xdata,ydata,bbox,shape = self.unpackstar(istar)
+        xdata1d = xdata.ravel()
+        ydata1d = ydata.ravel()
+        amp = self.staramp[istar]
+        xcen = self.starxcen[istar]   
+        ycen = self.starycen[istar]
+        nparsarr = np.array([6,7,8,8,7])
+        npars = nparsarr[self.psftype-1]
+        allpars = np.zeros(npars,float)
+        allpars[0] = amp
+        allpars[1] = xcen
+        allpars[2] = ycen
+        allpars[3:] = params
+        g,_ = mnb.amodel2d(xdata1d,ydata1d,self.psftype,allpars,0)
+        g = g.reshape(im.shape)
+        return g
 
 @njit
 def fitpsf(psftype,psfparams,image,error,starx,stary,starflux,fitradius,method='qr',maxiter=10,
@@ -909,21 +814,12 @@ def fitpsf(psftype,psfparams,image,error,starx,stary,starflux,fitradius,method='
 
     """
 
-    #t0 = time.time()
-    #print = utils.getprintfunc() # Get print function to be used locally, allows for easy logging   
-
-    # Initialize the output catalog best-fitting values for the PSF stars
-    #dt = np.dtype([('id',np.int32),('amp',np.float64),('x',np.float64),('y',np.float64),
-    #               ('npix',np.int32),('rms',np.float64),('chisq',np.float64),
-    #               ('ixmin',np.int32),('ixmax',np.int32),('iymin',np.int32),('iymax',np.int32)])
-    #psftab = np.zeros(len(tab),dtype=dt)
-
     # Fitting the PSF to the stars
     #-----------------------------
 
-    # # Empirical PSF - done differently
-    # if psf.psftype==6:
-    #     cube1 = starcube(tab,image,npix=psf.npix,fillvalue=np.nan)
+    # Empirical PSF - done differently
+    if psf.psftype==6:
+        cube1 = starcube(tab,image,npix=psf.npix,fillvalue=np.nan)
     #     coords = (tab['x'].data,tab['y'].data)
     #     epsf1,nbadstar1,rms1 = mkempirical(cube1,order=psf.order,coords=coords,shape=psf._shape)
     #     initpsf = mnb.PSFEmpirical(epsf1,imshape=image.shape,order=psf.order)
@@ -955,13 +851,8 @@ def fitpsf(psftype,psfparams,image,error,starx,stary,starflux,fitradius,method='
     #     return newpsf, None, None, psftab, pf
 
     nstars = len(starx)
-    #starx = tab['x']
-    #stary = tab['y']
-    #starflux = tab['flux']
-    # psftype,psfparams,image,error,starx,stary,starflux,fitradius,verbose=False):
     pf = PSFFitter(psftype,psfparams,image,error,starx,stary,starflux,fitradius,verbose)
     initpar = psfparams.copy()
-    #method = str(method).lower()
     xdata = np.arange(10)  # dummy
 
     # Iterate
@@ -1053,9 +944,6 @@ def fitpsf(psftype,psfparams,image,error,starx,stary,starflux,fitradius,method='
     psftab[:,8] = pf.star_bbox[:,1]      # ixmax
     psftab[:,9] = pf.star_bbox[:,2]      # iymin
     psftab[:,10] = pf.star_bbox[:,3]     # iymax
-    
-    if verbose:
-        print('dt = %.2f sec' % (time.time()-t0))
     
     return pars, perror, pcov, psftab, rchisq
     
@@ -1273,9 +1161,6 @@ def getpsf(psf,image,tab,fitradius=None,lookup=False,lorder=0,method='qr',subnei
         outtab['chisq'][ind1] = pf.starchisq[ind2]                
         if verbose:
             print('Median RMS: '+str(np.median(pf.starrms)))            
-            
-    if verbose:
-        print('dt = %.2f sec' % (time.time()-t0))
     
     return newpsf, pars, perror, outtab
         
