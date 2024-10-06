@@ -7,6 +7,178 @@ from . import models_numba as mnb
 # Fit a PSF model to multiple stars in an image
 
 @njit
+def nansum(data):
+    """ Get the sum ignoring nans """
+    data1d = data.ravel()
+    gd, = np.where(np.isfinite(data1d)==True)
+    if len(gd)==0:
+        sm = np.nan
+    else:
+        sm = np.sum(data1d[gd])
+    return sm
+
+@njit
+def sum(data,ignore_nan=False):
+    """Get the sum."""
+    if ignore_nan:
+        sm = nansum(data.ravel())
+    else:
+        sm = np.sum(data.ravel())
+    return sm
+
+@njit
+def sum2d(data,axis=-1,ignore_nan=False):
+    """Get the sum."""
+    if axis==-1:
+        raise Exception('Use sum() if not using axis parameter')
+    if data.ndim != 2:
+        raise Exception('data must be 2D')
+    ndim = data.ndim
+    shape = data.shape
+    loopdims = np.delete(np.arange(ndim),axis)
+    loopshape = np.delete(np.array(shape),axis)
+    sm = np.zeros(loopshape[0],float)
+    for i in range(loopshape[0]):
+        if axis==0:
+            if ignore_nan:
+                sm[i] = nansum(data[:,i])
+            else:
+                sm[i] = np.sum(data[:,i])
+        else:
+            if ignore_nan:
+                sm[i] = nansum(data[i,:])
+            else:
+                sm[i] = np.sum(data[i,:])
+    return sm
+
+@njit
+def sum3d(data,axis=-1,ignore_nan=False):
+    """Get the sum."""
+    if axis==-1:
+        raise Exception('Use sum() if not using axis parameter')
+    if data.ndim != 3:
+        raise Exception('data must be 3D')
+    ndim = data.ndim
+    shape = data.shape
+    loopdims = np.delete(np.arange(ndim),axis)
+    loopshape = np.delete(np.array(shape),axis)
+    sm = np.zeros((loopshape[0],loopshape[1]),float)
+    for i in range(loopshape[0]):
+        for j in range(loopshape[1]):
+            if axis==0:
+                if ignore_nan:
+                    sm[i,j] = nansum(data[:,i,j])
+                else:
+                    sm[i,j] = np.sum(data[:,i,j])
+            elif axis==1:
+                if ignore_nan:
+                    sm[i,j] = nansum(data[i,:,j])
+                else:
+                    sm[i,j] = np.sum(data[i,:,j])
+            else:
+                if ignore_nan:
+                    sm[i,j] = nansum(data[i,j,:])
+                else:
+                    sm[i,j] = np.sum(data[i,j,:])
+    return sm
+
+@njit
+def nanmean(data):
+    """ Get the mean ignoring nans """
+    data1d = data.ravel()
+    gd, = np.where(np.isfinite(data1d)==True)
+    if len(gd)==0:
+        mn = np.nan
+    else:
+        mn = np.mean(data1d[gd])
+    return mn
+
+@njit
+def mean(data,ignore_nan=False):
+    """Get the mean."""
+    if ignore_nan:
+        mn = nanmean(data.ravel())
+    else:
+        mn = np.mean(data.ravel())
+    return mn
+
+@njit
+def mean2d(data,axis=-1,ignore_nan=False):
+    """Get the mean."""
+    if axis==-1:
+        raise Exception('Use mean() if not using axis parameter')
+    if data.ndim != 2:
+        raise Exception('data must be 2D')
+    ndim = data.ndim
+    shape = data.shape
+    loopdims = np.delete(np.arange(ndim),axis)
+    loopshape = np.delete(np.array(shape),axis)
+    mn = np.zeros(loopshape[0],float)
+    for i in range(loopshape[0]):
+        if axis==0:
+            if ignore_nan:
+                mn[i] = nanmean(data[:,i])
+            else:
+                mn[i] = np.mean(data[:,i])
+        else:
+            if ignore_nan:
+                mn[i] = nanmean(data[i,:])
+            else:
+                mn[i] = np.mean(data[i,:])
+    return mn
+
+@njit
+def mean3d(data,axis=-1,ignore_nan=False):
+    """Get the mean."""
+    if axis==-1:
+        raise Exception('Use mean() if not using axis parameter')
+    if data.ndim != 3:
+        raise Exception('data must be 3D')
+    ndim = data.ndim
+    shape = data.shape
+    loopdims = np.delete(np.arange(ndim),axis)
+    loopshape = np.delete(np.array(shape),axis)
+    mn = np.zeros((loopshape[0],loopshape[1]),float)
+    for i in range(loopshape[0]):
+        for j in range(loopshape[1]):
+            if axis==0:
+                if ignore_nan:
+                    mn[i,j] = nanmean(data[:,i,j])
+                else:
+                    mn[i,j] = np.mean(data[:,i,j])
+            elif axis==1:
+                if ignore_nan:
+                    mn[i,j] = nanmean(data[i,:,j])
+                else:
+                    mn[i,j] = np.mean(data[i,:,j])
+            else:
+                if ignore_nan:
+                    mn[i,j] = nanmean(data[i,j,:])
+                else:
+                    mn[i,j] = np.mean(data[i,j,:])
+    return mn
+
+@njit
+def nanmedian(data):
+    """ Get the median ignoring nans """
+    data1d = data.ravel()
+    gd, = np.where(np.isfinite(data1d)==True)
+    if len(gd)==0:
+        med = np.nan
+    else:
+        med = np.median(data1d[gd])
+    return med
+
+@njit
+def median(data,ignore_nan=False):
+    """Get the median."""
+    if ignore_nan:
+        med = nanmedian(data.ravel())
+    else:
+        med = np.median(data.ravel())
+    return med
+
+@njit
 def median2d(data,axis=-1,ignore_nan=False):
     """Get the median."""
     if axis==-1:
@@ -60,17 +232,6 @@ def median3d(data,axis=-1,ignore_nan=False):
                     med[i,j] = nanmedian(data[i,j,:])
                 else:
                     med[i,j] = np.median(data[i,j,:])
-    return med
-
-@njit
-def nanmedian(data):
-    """ Get the median ignoring nans """
-    data1d = data.ravel()
-    gd, = np.where(np.isfinite(data1d)==True)
-    if len(gd)==0:
-        med = np.nan
-    else:
-        med = np.median(data1d[gd])
     return med
 
 @njit
@@ -451,7 +612,7 @@ def jac_covariance(jac,resid,wt):
 
     # cov = H-1, covariance matrix is inverse of Hessian matrix
     cov_orig = inverse(hess)
-
+    
     # Rescale to get an unbiased estimate
     # cov_scaled = cov * (RSS/(m-n)), where m=number of measurements, n=number of parameters
     # RSS = residual sum of squares
@@ -461,6 +622,178 @@ def jac_covariance(jac,resid,wt):
         chisq = np.sum(resid**2 * wt)
     else:
         chisq = np.sum(resid**2)
-    cov = cov_orig * (chisq/(npix-npars))  # what MPFITFUN suggests, but very small
+    dof = npix-npars
+    if dof<=0:
+        dof = 1
+    cov = cov_orig * (chisq/dof)  # what MPFITFUN suggests, but very small
         
     return cov
+
+@njit
+def checkbounds(pars,bounds):
+    """ Check the parameters against the bounds."""
+    # 0 means it's fine
+    # 1 means it's beyond the lower bound
+    # 2 means it's beyond the upper bound
+    npars = len(pars)
+    lbounds,ubounds = bounds
+    check = np.zeros(npars,int)
+    check[pars<=lbounds] = 1
+    check[pars>=ubounds] = 2
+    return check
+
+@njit
+def limbounds(pars,bounds):
+    """ Limit the parameters to the boundaries."""
+    lbounds,ubounds = bounds
+    outpars = np.minimum(np.maximum(pars,lbounds),ubounds)
+    return outpars
+
+@njit
+def limsteps(steps,maxsteps):
+    """ Limit the parameter steps to maximum step sizes."""
+    signs = np.sign(steps)
+    outsteps = np.minimum(np.abs(steps),maxsteps)
+    outsteps *= signs
+    return outsteps
+
+@njit
+def newpars(pars,steps,bounds=None,maxsteps=None):
+    """ Return new parameters that fit the constraints."""
+    # Limit the steps to maxsteps
+    if maxsteps is not None:
+        limited_steps = limsteps(steps,maxsteps)
+    else:
+        limited_steps = steps
+
+    # No bounds input
+    if bounds is None:
+        return pars+limited_steps
+        
+    # Make sure that these don't cross the boundaries
+    lbounds,ubounds = bounds
+    check = checkbounds(pars+limited_steps,bounds)
+    # Reduce step size for any parameters to go beyond the boundaries
+    badpars = (check!=0)
+    # reduce the step sizes until they are within bounds
+    newsteps = limited_steps.copy()
+    count = 0
+    maxiter = 2
+    while (np.sum(badpars)>0 and count<=maxiter):
+        newsteps[badpars] /= 2
+        newcheck = checkbounds(pars+newsteps,bounds)
+        badpars = (newcheck!=0)
+        count += 1
+            
+    # Final parameters
+    newpars = pars + newsteps
+                
+    # Make sure to limit them to the boundaries
+    check = checkbounds(newpars,bounds)
+    badpars = (check!=0)
+    if np.sum(badpars)>0:
+        # add a tiny offset so it doesn't fit right on the boundary
+        newpars = np.minimum(np.maximum(newpars,lbounds+1e-30),ubounds-1e-30)
+    return newpars
+
+@njit
+def poly2d(xdata,pars):
+    """ model of 2D linear polynomial."""
+    x = xdata[:,0]
+    y = xdata[:,1]
+    return pars[0]+pars[1]*x+pars[2]*y+pars[3]*x*y
+
+@njit
+def jacpoly2d(xdata,pars):
+    """ jacobian of 2D linear polynomial."""
+    x = xdata[:,0]
+    y = xdata[:,1]
+    nx = len(x)
+    # Model
+    m = pars[0]+pars[1]*x+pars[2]*y+pars[3]*x*y
+    # Jacobian, partical derivatives wrt the parameters
+    jac = np.zeros((nx,4),float)
+    jac[:,0] = 1    # constant coefficient
+    jac[:,1] = x    # x-coefficient
+    jac[:,2] = y    # y-coefficient
+    jac[:,3] = x*y  # xy-coefficient
+    return m,jac
+
+@njit
+def poly2dfit(x,y,data,error,maxiter=2,minpercdiff=0.5,verbose=False):
+    """ Fit a 2D linear function to data robustly."""
+    ndata = len(data)
+    if ndata<4:
+        raise Exception('Need at least 4 data points for poly2dfit')
+    gd1, = np.where(np.isfinite(data))
+    if len(gd1)<4:
+        raise Exception('Need at least 4 good data points for poly2dfit')
+    xdata = np.zeros((len(gd1),2),float)
+    xdata[:,0] = x[gd1]
+    xdata[:,1] = y[gd1]
+    initpar = np.zeros(4,float)
+    med = np.median(data[gd1])
+    sig = mad(data[gd1])
+    gd2, = np.where( (np.abs(data-med)<3*sig) & np.isfinite(data))
+    if len(gd1)>=4 and len(gd2)<4:
+        gd = gd1
+    else:
+        gd = gd2
+    initpar[0] = med
+    xdata = np.zeros((len(gd),2),float)
+    xdata[:,0] = x[gd]
+    xdata[:,1] = y[gd]
+    data1 = data[gd]
+    error1 = error[gd]
+
+    # Do the fit
+    # Iterate
+    count = 0
+    bestpar = initpar.copy()
+    maxpercdiff = 1e10
+    # maxsteps = None
+    wt = 1.0/error1.ravel()**2
+    while (count<maxiter and maxpercdiff>minpercdiff):
+        # Use Cholesky, QR or SVD to solve linear system of equations
+        m,j = jacpoly2d(xdata,bestpar)
+        dy = data1.ravel()-m.ravel()
+        # Solve Jacobian
+        #if error is not None:
+        #dbeta = qr_jac_solve(j,dy,weight=wt)
+        dbeta = qr_jac_solve(j,dy)
+        #else:
+        #    dbeta = qr_jac_solve(j,dy)
+        dbeta[~np.isfinite(dbeta)] = 0.0  # deal with NaNs
+
+        # -add "shift cutting" and "line search" in the least squares method
+        # basically scale the beta vector to find the best match.
+        # check this out
+        # https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.line_search.html
+        
+        # Update parameters
+        oldpar = bestpar.copy()
+        # limit the steps to the maximum step sizes and boundaries
+        #if bounds is not None or maxsteps is not None:
+        #    bestpar = newpars(bestpar,dbeta,bounds,maxsteps)
+        #else:
+        bestpar += dbeta
+        # Check differences and changes
+        diff = np.abs(bestpar-oldpar)
+        denom = np.maximum(np.abs(oldpar.copy()),0.0001)
+        percdiff = diff.copy()/denom*100  # percent differences
+        maxpercdiff = np.max(percdiff)
+                
+        if verbose:
+            print('N = ',count)
+            print('bestpars = ',bestpar)
+            print('dbeta = ',dbeta)
+                
+        count += 1
+
+    # Get covariance and errors
+    m,j = jacpoly2d(xdata,bestpar)
+    dy = data1.ravel()-m.ravel()
+    cov = jac_covariance(j,dy,wt)
+    perror = np.sqrt(np.diag(cov))
+
+    return bestpar,perror,cov

@@ -38,7 +38,7 @@ def starcube(tab,image,error,npix=51,fillvalue=np.nan):
     nstars = len(tab)
     nhpix = npix//2
     cube = np.zeros((npix,npix,nstars),float)
-    xx,yy = mnb.meshgrid(np.arange(npix)-nhpix,np.arange(npix)-nhpix)
+    xx,yy = utils.meshgrid(np.arange(npix)-nhpix,np.arange(npix)-nhpix)
     rr = np.sqrt(xx**2+yy**2)        
     x = xx[0,:]
     y = yy[:,0]
@@ -75,7 +75,7 @@ def starcube(tab,image,error,npix=51,fillvalue=np.nan):
     return cube
 
 
-#@njit
+@njit
 def mkempirical(cube,order=0,coords=None,shape=None,lookup=False):
     """
     Take a star cube and collapse it to make an empirical PSF using median
@@ -123,30 +123,47 @@ def mkempirical(cube,order=0,coords=None,shape=None,lookup=False):
     nhpix = ny//2
     
     # Do outlier rejection in each pixel
-    med = median3d(cube,axis=2,ignore_nan=True)
-    bad = ~np.isfinite(med)
-    if np.sum(bad)>0:
-        med[bad] = median(med)
-    sig = mad3d(cube,axis=2,ignore_nan=True)
-    bad = ~np.isfinite(sig)
-    if np.sum(bad)>0:
-        sig[bad] = median(sig,ignore_nan=True)
+    med = utils.median3d(cube,axis=2,ignore_nan=True)
+    bady,badx = np.where(np.isfinite(med)==False)
+    if len(bady)>0:
+        gdmed = utils.median(med,ignore_nan=True)
+        for i in range(len(bady)):
+            med[bady[i],badx[i]] = gdmed
+    sig = utils.mad3d(cube,axis=2,ignore_nan=True)
+    bady,badx = np.where(np.isfinite(sig)==False)
+    if len(bady)>0:
+        gdsig = utils.median(sig,ignore_nan=True)
+        for i in range(len(bady)):
+            sig[bady[i],badx[i]] = gdsig
     # Mask outlier points
-    outliers = ((np.abs(cube-med.reshape((med.shape)+(-1,)))>3*sig.reshape((med.shape)+(-1,)))
-                & np.isfinite(cube))
-    nbadstar = np.sum(outliers,axis=(0,1))
-    goodmask = ((np.abs(cube-med.reshape((med.shape)+(-1,)))<3*sig.reshape((med.shape)+(-1,)))
-                & np.isfinite(cube))    
-    # Now take the mean of the unmasked pixels
-    macube = np.ma.array(cube,mask=~goodmask)
-    medim = macube.mean(axis=2)
-    medim = medim.data
+    bady,badx,badk = np.where((np.abs(cube-med.reshape((med.shape)+(-1,)))>3*sig.reshape((med.shape)+(-1,)))
+                              & np.isfinite(cube))
+    if len(bady)>0:
+        macube = cube.copy()
+        for i in range(len(bady)):
+            macube[bady[i],badx[i],badk[i]] = np.nan
+        medim = utils.mean3d(macube,axis=2,ignore_nan=True)
+        # Remove any final NaNs
+        bady,badx = np.where(np.isfinite(medim)==False)
+        if len(bady)>0:
+            gdmed = utils.median(medim,ignore_nan=True)
+            for i in range(len(bady)):
+                medim[bady[i],badx[i]] = gdmed
+    else:
+        medim = med
 
     # Check how well each star fits the median
-    goodpix = macube.count(axis=(0,1))
-    rms = np.sqrt(np.nansum((cube-medim.reshape((medim.shape)+(-1,)))**2,axis=(0,1))/goodpix)
+    goodpix = np.sum(np.sum(np.isfinite(macube),axis=0),axis=0)
+    print('goodpix=',goodpix)
+    #goodpix = macube.count(axis=(0,1))
+    resid2 = (cube-medim.reshape((medim.shape)+(-1,)))**2
+    mnresid2 = utils.sum2d(utils.sum3d(resid2,axis=0,ignore_nan=True),axis=0,ignore_nan=True)/goodpix
+    rms = np.sqrt(mnresid2)
+    print('rms=',rms)
+    #print(utils.sum3d(dum,axis=0,ignore_nan=True))
+    #rms = np.sqrt(np.nansum((cube-medim.reshape((medim.shape)+(-1,)))**2,axis=(0,1))/goodpix)
 
-    xx,yy = mnb.meshgrid(np.arange(npix)-nhpix,np.arange(npix)-nhpix)
+    xx,yy = utils.meshgrid(np.arange(npix)-nhpix,np.arange(npix)-nhpix)
     rr = np.sqrt(xx**2+yy**2)        
     x = xx[0,:]
     y = yy[:,0]
@@ -159,16 +176,18 @@ def mkempirical(cube,order=0,coords=None,shape=None,lookup=False):
         # Make sure values are positive
         if lookup==False:
             medim = np.maximum(medim,0.0)
+            fpars = medim
         else:
             fpars = medim
+        fpars = fpars.reshape((ny,nx,1))
             
     # Linear
     elif order==1:
         if coords is None or shape is None:
             raise ValueError('Need coords and shape with order=1')
-        fpars = np.zeros((ny,nx,4),float)
+        pars = np.zeros((ny,nx,4),float)
         # scale coordinates to -1 to +1
-        xcen,ycen = coords
+        xcen,ycen = coords[:,0],coords[:,1]
         relx,rely = mnb.relcoord(xcen,ycen,shape)
         # Loop over pixels and fit line to x/y
         for i in range(ny):
@@ -176,10 +195,20 @@ def mkempirical(cube,order=0,coords=None,shape=None,lookup=False):
                 data1 = cube[i,j,:]
                 if np.sum(np.abs(data1)) != 0:
                     # maybe use a small maxiter
-                    pars1,perror1 = utils.poly2dfit(relx,rely,data1)
-                    fpars[i,j,:] = pars1
-                
-    return fpars,nbadstar,rms
+                    pars1,perror1,pcov1 = utils.poly2dfit(relx,rely,data1,data1*0+1)
+                    pars[i,j,:] = pars1
+        # Make sure it goes to zero at large radius
+        fpars = pars.copy()
+        for i in range(4):
+            # Make sure edges are zero on average for higher-order terms
+            gdouter, = np.where(rr.ravel()>nhpix*0.8)
+            medouter = np.median(pars[:,:,i].ravel()[gdouter])
+            fpars[:,:,i] -= medouter
+            # Mask corners
+            fpars[:,:,i] *= mask
+            # Each higher-order term must have ZERO total volume
+   
+    return fpars,rms
 
 @njit
 def starbbox(coords,imshape,radius):
