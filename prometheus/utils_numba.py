@@ -6,6 +6,8 @@ from . import models_numba as mnb
 
 # Fit a PSF model to multiple stars in an image
 
+PI = 3.141592653589793
+
 @njit
 def nansum(data):
     """ Get the sum ignoring nans """
@@ -636,16 +638,20 @@ def checkbounds(pars,bounds):
     # 1 means it's beyond the lower bound
     # 2 means it's beyond the upper bound
     npars = len(pars)
-    lbounds,ubounds = bounds
-    check = np.zeros(npars,int)
-    check[pars<=lbounds] = 1
-    check[pars>=ubounds] = 2
+    lbounds,ubounds = bounds[:,0],bounds[:,1]
+    check = np.zeros(npars,np.int32)
+    badlow, = np.where(pars<=lbounds)
+    if len(badlow)>0:
+        check[badlow] = 1
+    badhigh, = np.where(pars>=ubounds)
+    if len(badhigh)>0:
+        check[badhigh] = 2
     return check
 
 @njit
 def limbounds(pars,bounds):
     """ Limit the parameters to the boundaries."""
-    lbounds,ubounds = bounds
+    lbounds,ubounds = bounds[:,0],bounds[:,1]
     outpars = np.minimum(np.maximum(pars,lbounds),ubounds)
     return outpars
 
@@ -671,7 +677,7 @@ def newpars(pars,steps,bounds=None,maxsteps=None):
         return pars+limited_steps
         
     # Make sure that these don't cross the boundaries
-    lbounds,ubounds = bounds
+    lbounds,ubounds = bounds[:,0],bounds[:,1]
     check = checkbounds(pars+limited_steps,bounds)
     # Reduce step size for any parameters to go beyond the boundaries
     badpars = (check!=0)
