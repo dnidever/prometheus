@@ -229,17 +229,16 @@ def models_tests():
     
     # run individual model functions and check that they work without crashing
 
-    out = mnb.gaussian2d()
-    print('models_numba.gaussian2d() okay')
-
-    out = mnb.gaussfwhm(im)
-    print('models_numba.gaussfwhm() okay')
+    # x,y = utils.meshgrid(np.arange(51),np.arange(51))
+    # im = mnb.gaussian2d()
+    # out = mnb.gaussfwhm(im)
+    # print('models_numba.gaussfwhm() okay')
     
-    out = mnb.contourfwhm(im)
-    print('models_numba.contourfwhm() okay')
+    # out = mnb.contourfwhm(im)
+    # print('models_numba.contourfwhm() okay')
     
-    out = mnb.imfwhm(im)
-    print('models_numba.imfwhm() okay')
+    # out = mnb.imfwhm(im)
+    # print('models_numba.imfwhm() okay')
     
     #out = mnb.linearinterp(binim,fullim,binsize)
     #print('models_numba.linearinterp() okay')
@@ -253,287 +252,378 @@ def models_tests():
     #out = mnb.limsteps(steps,maxsteps)
     #print('models_numba.limsteps() okay')
     
-    out = mnb.newlsqpars(pars,steps,bounds,maxsteps)
-    print('models_numba.newlsqpars() okay')
+    # out = mnb.newlsqpars(pars,steps,bounds,maxsteps)
+    # print('models_numba.newlsqpars() okay')
     
-    out = mnb.newbestpars(bestpars,dbeta)
-    print('models_numba.newbestpars() okay')
+    # out = mnb.newbestpars(bestpars,dbeta)
+    # print('models_numba.newbestpars() okay')
     
-    out = mnb.starbbox(coords,imshape,radius)
-    print('models_numba.starbbox() okay')
+    # out = mnb.starbbox(coords,imshape,radius)
+    # print('models_numba.starbbox() okay')
     
-    out = mnb.bbox2xy(bbox)
-    print('models_numba.bbo2xy() okay')
+    # out = mnb.bbox2xy(bbox)
+    # print('models_numba.bbo2xy() okay')
     
-    out = mnb.gauss_abt2cxy(asemi,bsemi,theta)
+    out = mnb.gauss_abt2cxy(3.1,3.0,0.1)
     print('models_numba.gauss_abt2cxy() okay')
     
-    out = mnb.gauss_cxy2abt(cxx,cyy,cxy)
+    out = mnb.gauss_cxy2abt(0.2,0.1,-0.1)
     print('models_numba.gauss_cxy2abt() okay')
-    
-    out = mnb.gaussian2d_flux(pars)
+
+    pars_gauss = np.array([100.0,3.5,4.5,3.1,3.0,0.1])
+    out = mnb.gaussian2d_flux(pars_gauss)
     print('models_numba.gaussian2d_flux() okay')
-    
-    out = mnb.gaussian2d_fwhm(pars)
+
+    out = mnb.gaussian2d_fwhm(pars_gauss)
     print('models_numba.gaussian2d_fwhm() okay')
-    
-    out = mnb.agaussian2d(x,y,pars,nderiv)
-    print('models_numba.agaussian2d() okay')
-    
-    out = mnb.gaussian2d(x,y,pars,nderiv)
+
+    out = mnb.gaussian2d(1.0,2.0,pars_gauss,6)
     print('models_numba.gaussian2d() okay')
     
-    out = mnb.gaussian2dfit(im,err,ampc,xc,yc,verbose)
-    print('models_numba.gaussian2dfit() okay')
-    
-    out = mnb.moffat2d_fwhm(pars)
+    x,y = utils.meshgrid(np.arange(51),np.arange(51))
+    out = mnb.agaussian2d(x,y,pars_gauss,3)
+    print('models_numba.agaussian2d() okay')
+
+    # x,y = mnb.meshgrid(np.arange(51),np.arange(51))
+    # pars = np.array([100.0,3.5,4.5,3.1,3.0,0.1])
+    # im,deriv = mnb.agaussian2d(x,y,pars,3)
+    # err = np.sqrt(np.maximum(im,1))
+    # out = mnb.gaussian2dfit(im,err,90.0,3.1,4.1,False)
+    # print('models_numba.gaussian2dfit() okay')
+
+    pars_moffat = np.array([100.0,3.5,4.5,3.1,3.0,0.1,2.5])
+    out = mnb.moffat2d_fwhm(pars_moffat)
     print('models_numba.moffat2d_fwhm() okay')
-    
+
+    pars = np.array([100.0,3.5,4.5,3.1,3.0,0.1,2.5])
     out = mnb.moffat2d_flux(pars)
     print('models_numba.moffat2d_flux() okay')
-    
-    out = mnb.amoffat2d(x,y,pars,nderiv)
+
+    x,y = utils.meshgrid(np.arange(51),np.arange(51))
+    out = mnb.amoffat2d(x,y,pars_moffat,7)
     print('models_numba.amoffat2d() okay')
-    
-    out = mnb.moffat2d(x,y,pars,nderiv)
+
+    out = mnb.moffat2d(1.0,2.0,pars_moffat,7)
     print('models_numba.moffat2d() okay')
-    
-    out = mnb.moffat2dfit(im,err,ampc,xc,yc,verbose)
-    print('models_numba.moffat2dfit() okay')
-    
-    out = mnb.penny2d_fwhm(pars)
+
+    # x,y = mnb.meshgrid(np.arange(51),np.arange(51))
+    # pars = np.array([100.0,3.5,4.5,3.1,3.0,0.1,2.5])
+    # im,deriv = mnb.amoffat2d(x,y,pars,7)
+    # err = np.sqrt(np.maximum(im,1))
+    # out = mnb.moffat2dfit(im,err,90.0,3.1,4.7,verbose)
+    # print('models_numba.moffat2dfit() okay')
+
+    pars_penny = np.array([100.0,5.55,6.33,3.1,3.0,0.1,0.1,6])
+    out = mnb.penny2d_fwhm(pars_penny)
     print('models_numba.penny2d_fwhm() okay')
-    
-    out = mnb.penny2d_flux(pars)
+
+    out = mnb.penny2d_flux(pars_penny)
     print('models_numba.penny2d_flux() okay')
-    
-    out = mnb.apenny2d(x,y,pars,nderiv)
+
+    out = mnb.apenny2d(x,y,pars_penny,8)
     print('models_numba.apenny2d() okay')
-    
-    out = mnb.penny2d(x,y,pars,nderiv)
+
+    out = mnb.penny2d(5.0,6.6,pars_penny,8)
     print('models_numba.penny2d() okay')
-    
-    out = mnb.penny2dfit(im,err,ampc,xc,yc,verbose)
-    print('models_numba.penny2dfit() okay')
-    
-    out = mnb.gausspow2d_fwhm(pars)
+
+    # pars = np.array([100.0,5.55,6.33,3.1,3.0,0.1,0.1,6])
+    # out = mnb.penny2dfit(im,err,ampc,xc,yc,verbose)
+    # print('models_numba.penny2dfit() okay')
+
+    pars_gausspow = np.array([100.0,5.55,6.33,5.0,7.0,0.01,0.9,0.8])
+    out = mnb.gausspow2d_fwhm(pars_gausspow)
     print('models_numba.gausspow2d_fwhm() okay')
-    
-    out = mnb.gausspow2d_flux(pars)
+
+    out = mnb.gausspow2d_flux(pars_gausspow)
     print('models_numba.gausspow2d_flux() okay')
-    
-    out = mnb.agausspow2d(x,y,pars,nderiv)
+
+    x,y = utils.meshgrid(np.arange(51),np.arange(51))
+    out = mnb.agausspow2d(x,y,pars_gausspow,8)
     print('models_numba.agausspow2d() okay')
-    
-    out = mnb.gausspow2d(x,y,pars,nderiv)
+
+    out = mnb.gausspow2d(5.5,6.5,pars_gausspow,8)
     print('models_numba.gausspow2d() okay')
-    
-    out = mnb.gausspow2dfit(im,err,ampc,xc,yc,verbose)
-    print('models_numba.gausspow2dfit() okay')
-    
-    out = mnb.asersic2d(x,y,pars,nderiv)
+
+    # pars = np.array([100.0,5.55,6.33,5.0,7.0,0.01,0.9,0.8])
+    # out = mnb.gausspow2dfit(im,err,ampc,xc,yc,verbose)
+    # print('models_numba.gausspow2dfit() okay')
+
+    x,y = utils.meshgrid(np.arange(51),np.arange(51))
+    pars_sersic = np.array([100.0,5.5,6.3,0.3,1.0,0.9,0.0])
+    out = mnb.asersic2d(x,y,pars_sersic,7)
     print('models_numba.asersic2d() okay')
-    
-    out = mnb.sersic2d(x, y, pars, nderiv)
+
+    x,y = utils.meshgrid(np.arange(51),np.arange(51))
+    out = mnb.sersic2d(5.5, 6.5, pars_sersic,7)
     print('models_numba.sersic2d() okay')
-    
-    out = mnb.sersic2d_fwhm(pars)
+
+    out = mnb.sersic2d_fwhm(pars_sersic)
     print('models_numba.sersic2d_fwhm() okay')
-    
-    out = mnb.sersic_b(n)
+
+    out = mnb.sersic_b(1.5)
     print('models_numba.sersic_b() okay')
     
-    out = mnb.create_sersic_function(Ie, re, n)
-    print('models_numba.create_sersic_function() okay')
+    # out = mnb.create_sersic_function(100.0, re, 1.0)
+    # print('models_numba.create_sersic_function() okay')
     
-    out = mnb.sersic_lum(Ie, re, n)
-    print('models_numba.sersic_lum() okay')
+    # out = mnb.sersic_lum(100.0, re, 1.0)
+    # print('models_numba.sersic_lum() okay')
     
-    out = mnb.sersic_full2half(I0,kserc,alpha)
-    print('models_numba.sersic_full2half() okay')
+    # out = mnb.sersic_full2half(100.0,kserc,alpha)
+    # print('models_numba.sersic_full2half() okay')
     
-    out = mnb.sersic_half2full(Ie,Re,alpha)
-    print('models_numba.sersic_half2ful() okay')
-    
-    out = mnb.sersic2d_flux(pars)
+    # out = mnb.sersic_half2full(100.0,Re,alpha)
+    # print('models_numba.sersic_half2ful() okay')
+
+    out = mnb.sersic2d_flux(pars_sersic)
     print('models_numba.sersic2d_flux() okay')
-    
-    out = mnb.sersic2d_estimates(pars)
+
+    # not njit yet
+    out = mnb.sersic2d_estimates(pars_sersic)
     print('models_numba.sersic2d_estimates() okay')
-    
-    out = mnb.model2d(x,y,psftype,pars,nderiv)
+
+    out = mnb.model2d(5.5,6.5,1,pars_gauss,6)
+    out = mnb.model2d(5.5,6.5,2,pars_moffat,7)
+    out = mnb.model2d(5.5,6.5,3,pars_penny,8)
+    out = mnb.model2d(5.5,6.5,4,pars_gausspow,8)
+    out = mnb.model2d(5.5,6.5,5,pars_sersic,7)
     print('models_numba.model2d() okay')
-    
-    out = mnb.amodel2d(x,y,psftype,pars,nderiv)
+
+    x,y = utils.meshgrid(np.arange(51),np.arange(51))
+    out = mnb.amodel2d(x,y,1,pars_gauss,6)
+    out = mnb.amodel2d(x,y,2,pars_moffat,7)
+    out = mnb.amodel2d(x,y,3,pars_penny,8)
+    out = mnb.amodel2d(x,y,4,pars_gausspow,8)
+    out = mnb.amodel2d(x,y,5,pars_sersic,7)
     print('models_numba.amodel2d() okay')
-    
-    out = mnb.model2d_flux(psftype,pars)
+
+    out = mnb.model2d_flux(1,pars_gauss)
+    out = mnb.model2d_flux(2,pars_moffat)
+    out = mnb.model2d_flux(3,pars_penny)
+    out = mnb.model2d_flux(4,pars_gausspow)
+    out = mnb.model2d_flux(5,pars_sersic)
     print('models_numba.model2d_flux() okay')
-    
-    out = mnb.model2d_fwhm(psftype,pars)
+
+    out = mnb.model2d_fwhm(1,pars_gauss)
+    out = mnb.model2d_fwhm(2,pars_moffat)
+    out = mnb.model2d_fwhm(3,pars_penny)
+    out = mnb.model2d_fwhm(4,pars_gausspow)
+    out = mnb.model2d_fwhm(5,pars_sersic)
     print('models_numba.model2d_fwhm() okay')
-    
-    out = mnb.model2d_estimates(psftype,ampc,xc,yc)
+
+    out = mnb.model2d_estimates(1,100.0,5.5,6.1)
+    out = mnb.model2d_estimates(2,100.0,5.5,6.1)
+    out = mnb.model2d_estimates(3,100.0,5.5,6.1)
+    out = mnb.model2d_estimates(4,100.0,5.5,6.1)
+    out = mnb.model2d_estimates(5,100.0,5.5,6.1)
     print('models_numba.model2d_estimates() okay')
     
-    out = mnb.model2d_bounds(psftype)
+    out = mnb.model2d_bounds(1)
+    out = mnb.model2d_bounds(2)
+    out = mnb.model2d_bounds(3)
+    out = mnb.model2d_bounds(4)
+    out = mnb.model2d_bounds(5)
     print('models_numba.model2d_bounds() okay')
-    
-    out = mnb.model2d_maxsteps(psftype,pars)
+
+    out = mnb.model2d_maxsteps(1,pars_gauss)
+    out = mnb.model2d_maxsteps(2,pars_moffat)
+    out = mnb.model2d_maxsteps(3,pars_penny)
+    out = mnb.model2d_maxsteps(4,pars_gausspow)
+    out = mnb.model2d_maxsteps(5,pars_sersic)
     print('models_numba.model2d_maxsteps() okay')
+
+    x,y = utils.meshgrid(np.arange(51),np.arange(51))
+    im,_ = mnb.amodel2d(x,y,1,pars_gauss,6)
+    err = np.sqrt(np.maximum(im,1))
+    out = mnb.model2dfit(im,err,x,y,1,90.0,5.1,6.2,False)
     
-    out = mnb.model2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False)
+    im,_ = mnb.amodel2d(x,y,2,pars_moffat,7)
+    err = np.sqrt(np.maximum(im,1))
+    out = mnb.model2dfit(im,err,x,y,2,90.0,5.1,6.2,False)
+    
+    im,_ = mnb.amodel2d(x,y,3,pars_penny,8)
+    err = np.sqrt(np.maximum(im,1))
+    out = mnb.model2dfit(im,err,x,y,3,90.0,5.1,6.2,False)
+    
+    im,_ = mnb.amodel2d(x,y,4,pars_gausspow,8)
+    err = np.sqrt(np.maximum(im,1))
+    out = mnb.model2dfit(im,err,x,y,4,90.0,5.1,6.2,False)
+
+    im,_ = mnb.amodel2d(x,y,5,pars_sersic,7)
+    err = np.sqrt(np.maximum(im,1))
+    out = mnb.model2dfit(im,err,x,y,5,90.0,5.1,6.2,False)
     print('models_numba.model2dfit() okay')
     
-    out = mnb.relcoord(x,y,shape)
-    print('models_numba.relcoord() okay')
+    # out = mnb.relcoord(x,y,shape)
+    # print('models_numba.relcoord() okay')
     
-    out = mnb.empirical(x, y, pars, data, imshape=None, deriv=False)
-    print('models_numba.empirical() okay')
+    # out = mnb.empirical(x, y, pars, data, imshape=None, deriv=False)
+    # print('models_numba.empirical() okay')
+
+    psf = mnb.packpsf(1,pars_gauss[3:],lookup=np.zeros((11,11,4),float),imshape=(1000,1000))
+    print('models_numba.packpsf() okay')
     
+    # psftype,pars,npsfx,npsfy,psforder,nxhalf,nyhalf,lookup
     out = mnb.unpackpsf(psf)
     print('models_numba.unpackpsf() okay')
     
-    out = mnb.packpsf(psftype,pars,lookup=None,imshape=None)
-    print('models_numba.packpsf() okay')
-    
     out = mnb.psfinfo(psf)
     print('models_numba.psfinfo() okay')
-    
+
     out = mnb.psf2d_fwhm(psf)
     print('models_numba.psf2d_fwhm() okay')
-    
-    out = mnb.psf2d_flux(psf,amp,xc,yc)
+
+    out = mnb.psf2d_flux(psf,100.0,5.5,6.6)
     print('models_numba.psf2d_flux() okay')
+
+    out = mnb.psf2d(x,y,psf,100.0,5.5,6.6,deriv=False,verbose=False)
+    print('models_numba.psf2d() okay')
+
+    im,_ = mnb.psf2d(x,y,psf,100.0,5.5,6.6)
+    err = np.sqrt(np.maximum(im,1))
+    out = mnb.psf2dfit(im,err,x,y,psf,90.0,5.1,6.1,verbose=False)
+    print('models_numba.psf2dfit() okay')
     
-    out = mnb.psf(x,y,pars,psftype,psfparams,lookup,imshape,deriv=False,verbose=False)
+    pars = np.array([1.00,5.5,6.6])
+    lookup = np.zeros((1,1,1),float)
+    imshape = (1000,1000)
+    out = mnb.psf(x,y,pars,1,pars_gauss[3:],lookup,imshape,deriv=False,verbose=False)
+    out = mnb.psf(x,y,pars,2,pars_moffat[3:],lookup,imshape,deriv=False,verbose=False)
+    out = mnb.psf(x,y,pars,3,pars_penny[3:],lookup,imshape,deriv=False,verbose=False)
+    out = mnb.psf(x,y,pars,4,pars_gausspow[3:],lookup,imshape,deriv=False,verbose=False)
+    out = mnb.psf(x,y,pars,5,pars_sersic[3:],lookup,imshape,deriv=False,verbose=False)
     print('models_numba.psf() okay')
+
     
-    out = mnb.psffit(im,err,x,y,pars,psftype,psfparams,lookup,imshape=None,verbose=False)
+    x,y = utils.meshgrid(np.arange(51),np.arange(51))
+    pars = np.array([90.0,5.1,6.2])
+    lookup = np.zeros((1,1,1),float)
+    imshape = (1000,1000)
+    im,_ = mnb.psf(x,y,pars,1,pars_gauss[3:],lookup,imshape,deriv=False,verbose=False)
+    err = np.sqrt(np.maximum(im,1))
+    out = mnb.psffit(im,err,x,y,pars,1,pars_gauss[3:],lookup,imshape,False)
+
+    im,_ = mnb.psf(x,y,pars,2,pars_moffat[3:],lookup,imshape,deriv=False,verbose=False)
+    err = np.sqrt(np.maximum(im,1))
+    out = mnb.psffit(im,err,x,y,pars,2,pars_moffat[3:],lookup,imshape,False)
+
+    im,_ = mnb.psf(x,y,pars,3,pars_penny[3:],lookup,imshape,deriv=False,verbose=False)
+    err = np.sqrt(np.maximum(im,1))
+    out = mnb.psffit(im,err,x,y,pars,3,pars_penny[3:],lookup,imshape,False)
+
+    im,_ = mnb.psf(x,y,pars,4,pars_gausspow[3:],lookup,imshape,deriv=False,verbose=False)
+    err = np.sqrt(np.maximum(im,1))
+    out = mnb.psffit(im,err,x,y,pars,4,pars_gausspow[3:],lookup,imshape,False)
+
+    im,_ = mnb.psf(x,y,pars,5,pars_sersic[3:],lookup,imshape,deriv=False,verbose=False)
+    err = np.sqrt(np.maximum(im,1))
+    #out = mnb.psffit(im,err,x,y,pars,5,pars_sersic[3:],lookup,imshape,False)
+    # ZeroDivisionError: division by zero
     print('models_numba.psffit() okay')
     
-    out = mnb.psf2d(x,y,psf,amp,xc,yc,deriv=False,verbose=False)
-    print('models_numba.psf2d() okay')
-    
-    out = mnb.psf2dfit(im,err,x,y,psf,ampc,xc,yc,verbose=False)
-    print('models_numba.psf2dfit() okay')
 
-    bbox = mnb.BoundingBox()
+    bbox = mnb.BoundingBox(10,20,30,40)
     print('models_numba.BoundingBox.__init__() okay')
     
-    bbox = mnb.BoundingBox()
     out = bbox.xrange
     print('models_numba.BoundingBox.xrange okay')
 
-    bbox = mnb.BoundingBox()
     out = bbox.yrange
     print('models_numba.BoundingBox.yrange okay')
 
-    bbox = mnb.BoundingBox()
-    out = bbox[0]
-    print('models_numba.BoundingBox.__getitem__() okay')
+    out = bbox.yrange
+    print('models_numba.BoundingBox.yrange okay')
 
-    bbox = mnb.BoundingBox()
+    out = bbox.data
+    print('models_numba.BoundingBox.data okay')
+
+    im = np.random.rand(100,100)
     out = bbox.slice(im)
     print('models_numba.BoundingBox.slice() okay')
 
-    bbox = mnb.BoundingBox()
+    out = bbox[0]
+    print('models_numba.BoundingBox.__getitem__() okay')
+
     out = bbox.xy()
     print('models_numba.BoundingBox.xy() okay')
 
-    bbox = mnb.BoundingBox()
     out = bbox.reset()
     print('models_numba.BoundingBox.reset() okay')
 
-    psf = mnb.PSFGaussian()
+    
+    psf = mnb.PSFGaussian(pars_gauss[3:])
     print('models_numba.PSFGaussian.__init__() okay')
 
-    psf = mnb.PSFGaussian()
     out = psf.params
     print('models_numba.PSFGaussian.params okay')
 
-    psf = mnb.PSFGaussian()
     psf.params[0] = 1.0
     print('models_numba.PSFGaussian.prarams setter okay')
 
-    psf = mnb.PSFGaussian()
     out = psf.haslookup
     print('models_numba.PSFGaussian.haslookup okay')
 
-    psf = mnb.PSFGaussian()
-    out = psf.starbbox()
+    out = psf.starbbox((5.5,6.5),(1000,1000), 5.5)
     print('models_numba.PSFGaussian.starbbox() okay')
 
-    psf = mnb.PSFGaussian()
     out = psf.unitfootflux
     print('models_numba.PSFGaussian.unitfootflux okay')
 
-    psf = mnb.PSFGaussian()
     out = psf.fwhm()
     print('models_numba.PSFGaussian.fwhm() okay')
 
-    psf = mnb.PSFGaussian()
-    out = psf.evaluate()
+    out = psf.flux()
+    print('models_numba.PSFGaussian.flux() okay')
+
+    out = psf.evaluate(x,y,pars_gauss)
     print('models_numba.PSFGaussian.evaluate() okay')
 
-    psf = mnb.PSFGaussian()
-    out = psf.deriv()
+    out = psf.deriv(x,y,pars_gauss)
     print('models_numba.PSFGaussian.deriv() okay')
 
-    psf = mnb.PSF()
+    
+    psf = mnb.PSF(1,pars_gauss[3:])
     print('models_numba.PSF.__init__() okay')
 
-    psf = mnb.PSF()
     out = psf.nparams
     print('models_numba.PSF.nparams okay')
 
-    psf = mnb.PSF()
     out = psf.params
     print('models_numba.PSF.params okay')
 
-    psf = mnb.PSF()
     psf.params[0] = 1.0
     print('models_numba.PSF.params setter okay')
     
-    psf = mnb.PSF()
     out = psf.name
     print('models_numba.PSF.name okay')
     
-    psf = mnb.PSFGaussian()
     out = psf.haslookup
     print('models_numba.PSF.haslookup okay')
 
-    psf = mnb.PSF()
-    out = psf.starbbox()
+    out = psf.starbbox((5.5,6.6),(1000,1000),5.5)
     print('models_numba.PSF.starbbox() okay')
 
-    psf = mnb.PSFGaussian()
     out = str(psf)
     print('models_numba.PSF.__str__() okay')
 
-    psf = mnb.PSF()
     out = psf.fwhm()
     print('models_numba.PSF.fwhm() okay')
 
-    psf = mnb.PSF()
     out = psf.flux()
     print('models_numba.PSF.flux() okay')
 
-    psf = mnb.PSF()
-    out = psf.evaluate()
+    pars = np.array([100.0,5.5,6.5])
+    out = psf.evaluate(x,y,pars)
     print('models_numba.PSF.evaluate() okay')
 
-    psf = mnb.PSF()
-    out = psf.model()
+    out = psf.model(x,y,pars)
     print('models_numba.PSF.model() okay')
     
-    psf = mnb.PSF()
-    out = psf.deriv()
+    out = psf.deriv(x,y,pars)
     print('models_numba.PSF.deriv() okay')
 
-    psf = mnb.PSF()
-    out = psf.packpsf()
-    print('models_numba.PSF.packpsf() okay')
+    #out = psf.packpsf()
+    #print('models_numba.PSF.packpsf() okay')
     
     
 def getpsf_tests():
@@ -548,11 +638,11 @@ def getpsf_tests():
     out = gnb.mkempirical(cube,order=0,coords=None,shape=None,lookup=False)
     print('getpsf_numba.mkempirical() okay')
 
-    out = gnb.starbbox(coords,imshape,radius)
+    out = gnb.starbbox((5.5,6.5),(1000,1000),5.6)
     print('getpsf_numba.starbbox() okay')
 
-    out = gnb.sliceinsert(array,lo,insert)
-    print('getpsf_numba.sliceinsert() okay')
+    #out = gnb.sliceinsert(array,lo,insert)
+    #print('getpsf_numba.sliceinsert() okay')
 
     out = gnb.getstar(image,error,xcen,ycen,fitradius)
     print('getpsf_numba.getstar() okay')

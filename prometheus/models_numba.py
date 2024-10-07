@@ -3,6 +3,7 @@ import sys
 import numpy as np
 #from scipy.special import gamma, gammaincinv, gammainc
 import scipy.special as sc
+from scipy.optimize import root_scalar
 #import numba_special  # The import generates Numba overloads for special
 from dlnpyutils import utils as dln
 import numba
@@ -48,7 +49,7 @@ def contourfwhm(im):
     ny,nx = im.shape
     xcen = nx//2
     ycen = ny//2
-    xx,yy = np.meshgrid(np.arange(nx)-nx//2,np.arange(ny)-ny//2)
+    xx,yy = utils.meshgrid(np.arange(nx)-nx//2,np.arange(ny)-ny//2)
     rr = np.sqrt(xx**2+yy**2)
 
     # Get half-flux radius                                                                      
@@ -98,7 +99,7 @@ def imfwhm(im):
                                                                                                 
     """
     ny,nx = im.shape
-    xx,yy = np.meshgrid(np.arange(nx)-nx//2,np.arange(ny)-ny//2)
+    xx,yy = utils.meshgrid(np.arange(nx)-nx//2,np.arange(ny)-ny//2)
     rr = np.sqrt(xx**2+yy**2)
     centerf = im[ny//2,nx//2]
     si = np.argsort(rr.ravel())
@@ -238,17 +239,17 @@ def newbestpars(bestpars,dbeta):
     ampmin = bestpars[0]-maxchange*np.abs(bestpars[0])
     ampmin = np.maximum(ampmin,0)
     ampmax = bestpars[0]+np.abs(maxchange*bestpars[0])
-    newamp = clip(bestpars[0]+dbeta[0],ampmin,ampmax)
+    newamp = utils.clip(bestpars[0]+dbeta[0],ampmin,ampmax)
     newpars[0] = newamp
     # Xc, maxchange in pixels
     xmin = bestpars[1]-maxchange
     xmax = bestpars[1]+maxchange
-    newx = clip(bestpars[1]+dbeta[1],xmin,xmax)
+    newx = utils.clip(bestpars[1]+dbeta[1],xmin,xmax)
     newpars[1] = newx
     # Yc
     ymin = bestpars[2]-maxchange
     ymax = bestpars[2]+maxchange
-    newy = clip(bestpars[2]+dbeta[2],ymin,ymax)
+    newy = utils.clip(bestpars[2]+dbeta[2],ymin,ymax)
     newpars[2] = newy
     return newpars
 
@@ -659,7 +660,7 @@ def gaussian2dfit(im,err,ampc,xc,yc,verbose):
     ny,nx = im.shape
     im1d = im.ravel()
 
-    x2d,y2d = meshgrid(np.arange(nx),np.arange(ny))
+    x2d,y2d = utils.meshgrid(np.arange(nx),np.arange(ny))
     x1d = x2d.ravel()
     y1d = y2d.ravel()
     
@@ -687,7 +688,7 @@ def gaussian2dfit(im,err,ampc,xc,yc,verbose):
     while (niter<maxiter and maxpercdiff>minpercdiff):
         model,deriv = agaussian2d(x1d,y1d,bestpar,6)
         resid = im1d-model
-        dbeta = qr_jac_solve(deriv,resid,weight=wt1d)
+        dbeta = utils.qr_jac_solve(deriv,resid,weight=wt1d)
         
         if verbose:
             print(niter,bestpar)
@@ -723,7 +724,7 @@ def gaussian2dfit(im,err,ampc,xc,yc,verbose):
     resid = im1d-model
     
     # Get covariance and errors
-    cov = jac_covariance(deriv,resid,wt1d)
+    cov = utils.jac_covariance(deriv,resid,wt1d)
     perror = np.sqrt(np.diag(cov))
 
     # Now get the flux, multiply by the volume of the Gaussian
@@ -1038,7 +1039,7 @@ def moffat2dfit(im,err,ampc,xc,yc,verbose):
     ny,nx = im.shape
     im1d = im.ravel()
 
-    x2d,y2d = meshgrid(np.arange(nx),np.arange(ny))
+    x2d,y2d = utils.meshgrid(np.arange(nx),np.arange(ny))
     x1d = x2d.ravel()
     y1d = y2d.ravel()
     
@@ -1068,7 +1069,7 @@ def moffat2dfit(im,err,ampc,xc,yc,verbose):
     while (niter<maxiter and maxpercdiff>minpercdiff):
         model,deriv = amoffat2d(x1d,y1d,bestpar,7)
         resid = im1d-model
-        dbeta = qr_jac_solve(deriv,resid,weight=wt1d)
+        dbeta = utils.qr_jac_solve(deriv,resid,weight=wt1d)
         
         if verbose:
             print(niter,bestpar)
@@ -1104,7 +1105,7 @@ def moffat2dfit(im,err,ampc,xc,yc,verbose):
     resid = im1d-model
     
     # Get covariance and errors
-    cov = jac_covariance(deriv,resid,wt1d)
+    cov = utils.jac_covariance(deriv,resid,wt1d)
     perror = np.sqrt(np.diag(cov))
 
     # Now get the flux, multiply by the volume of the Gaussian
@@ -1151,7 +1152,7 @@ def penny2d_fwhm(pars):
     amp = pars[0]
     xsig = pars[3]
     ysig = pars[4]
-    relamp = clip(pars[6],0.0,1.0)  # 0<relamp<1
+    relamp = utils.clip(pars[6],0.0,1.0)  # 0<relamp<1
     sigma = np.maximum(pars[7],0)
     beta = 1.2   # Moffat
     
@@ -1336,7 +1337,7 @@ def penny2d(x,y,pars,nderiv):
     u2 = u**2
     v = (y-yc)
     v2 = v**2
-    relamp = clip(relamp,0.0,1.0)  # 0<relamp<1
+    relamp = utils.clip(relamp,0.0,1.0)  # 0<relamp<1
     # Gaussian component
     g = amp * (1-relamp) * np.exp(-0.5*((cxx * u2) + (cxy * u*v) +
                                         (cyy * v2)))
@@ -1456,7 +1457,7 @@ def penny2dfit(im,err,ampc,xc,yc,verbose):
     ny,nx = im.shape
     im1d = im.ravel()
 
-    x2d,y2d = meshgrid(np.arange(nx),np.arange(ny))
+    x2d,y2d = utils.meshgrid(np.arange(nx),np.arange(ny))
     x1d = x2d.ravel()
     y1d = y2d.ravel()
     
@@ -1488,7 +1489,7 @@ def penny2dfit(im,err,ampc,xc,yc,verbose):
     while (niter<maxiter and maxpercdiff>minpercdiff):
         model,deriv = apenny2d(x1d,y1d,bestpar,8)
         resid = im1d-model
-        dbeta = qr_jac_solve(deriv,resid,weight=wt1d)
+        dbeta = utils.qr_jac_solve(deriv,resid,weight=wt1d)
         
         if verbose:
             print(niter,bestpar)
@@ -1524,7 +1525,7 @@ def penny2dfit(im,err,ampc,xc,yc,verbose):
     resid = im1d-model
     
     # Get covariance and errors
-    cov = jac_covariance(deriv,resid,wt1d)
+    cov = utils.jac_covariance(deriv,resid,wt1d)
     perror = np.sqrt(np.diag(cov))
 
     # Now get the flux, multiply by the volume of the Gaussian
@@ -1889,7 +1890,7 @@ def gausspow2dfit(im,err,ampc,xc,yc,verbose):
     ny,nx = im.shape
     im1d = im.ravel()
 
-    x2d,y2d = meshgrid(np.arange(nx),np.arange(ny))
+    x2d,y2d = utils.meshgrid(np.arange(nx),np.arange(ny))
     x1d = x2d.ravel()
     y1d = y2d.ravel()
     
@@ -1921,7 +1922,7 @@ def gausspow2dfit(im,err,ampc,xc,yc,verbose):
     while (niter<maxiter and maxpercdiff>minpercdiff):
         model,deriv = agausspow2d(x1d,y1d,bestpar,8)
         resid = im1d-model
-        dbeta = qr_jac_solve(deriv,resid,weight=wt1d)
+        dbeta = utils.qr_jac_solve(deriv,resid,weight=wt1d)
         
         if verbose:
             print(niter,bestpar)
@@ -1957,7 +1958,7 @@ def gausspow2dfit(im,err,ampc,xc,yc,verbose):
     resid = im1d-model
     
     # Get covariance and errors
-    cov = jac_covariance(deriv,resid,wt1d)
+    cov = utils.jac_covariance(deriv,resid,wt1d)
     perror = np.sqrt(np.diag(cov))
 
     # Now get the flux, multiply by the volume of the Gaussian
@@ -2010,7 +2011,7 @@ def asersic2d(x,y,pars,nderiv):
     """
 
     if len(pars)!=7:
-        raise Exception('aseric2d pars must have either 6 or 9 elements')
+        raise Exception('aseric2d pars must have 7 elements')
     
     # Unravel 2D arrays
     if x.ndim==2:
@@ -2226,7 +2227,7 @@ def sersic_b(n):
     # https://gist.github.com/bamford/b657e3a14c9c567afc4598b1fd10a459
     # n is always positive
     #return gammaincinv(2*n, 0.5)
-    return gammaincinv05(2*n)
+    return utils.gammaincinv05(2*n)
 
 #@njit
 def create_sersic_function(Ie, re, n):
@@ -2243,7 +2244,7 @@ def create_sersic_function(Ie, re, n):
 def sersic_lum(Ie, re, n):
     # total luminosity (integrated to infinity)
     bn = sersic_b(n)
-    g2n = gamma(2*n)
+    g2n = utils.gamma(2*n)
     return Ie * re**2 * 2*np.pi*n * np.exp(bn)/(bn**(2*n)) * g2n
 
 @njit
@@ -2365,10 +2366,9 @@ def sersic2d_estimates(pars):
         # rhalf, recc, flux are defined above
         n = 1/alpha
         bn = sersic_b(n)
-        g2n = gamma(2*n)
+        g2n = utils.gamma(2*n)
         Ie,_ = sersic_full2half(peak,1.0,alpha)
         return np.log(0.5)/rhalf**alpha + bn * ((recc * Ie * 2*np.pi*n * np.exp(bn)/(bn**(2*n)) * g2n)/flux)**(alpha/2)
-    
     
     # Solve for the roots
     res = root_scalar(alphafunc,x0=1.0,x1=0.5)
@@ -2869,7 +2869,7 @@ def model2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
     while (niter<maxiter and maxpercdiff>minpercdiff):
         model,deriv = amodel2d(x1d,y1d,psftype,bestpar,nderiv)
         resid = im1d-model
-        dbeta = qr_jac_solve(deriv,resid,weight=wt1d)
+        dbeta = utils.qr_jac_solve(deriv,resid,weight=wt1d)
         
         if verbose:
             print(niter,bestpar)
@@ -2899,7 +2899,7 @@ def model2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
     resid = im1d-model
     
     # Get covariance and errors
-    cov = jac_covariance(deriv,resid,wt1d)
+    cov = utils.jac_covariance(deriv,resid,wt1d)
     perror = np.sqrt(np.diag(cov))
 
     # Now get the flux
@@ -3044,11 +3044,11 @@ def empirical(x, y, pars, data, imshape=None, deriv=False):
         # spline is initialized with x,y, z(Nx,Ny)
         # and evaluated with f(x,y)
         # since we are using im(Ny,Nx), we have to evalute with f(y,x)
-        g[:] += alinearinterp(data3d[:,:,i],dx,dy) * coeff[i]
+        g[:] += utils.alinearinterp(data3d[:,:,i],dx,dy) * coeff[i]
         #g += farr[i](dy,dx,grid=False) * coeff[i]
         if deriv:
-            gxplus[:] += alinearinterp(data3d[:,:,i],dx-xoff,dy) * coeff[i]
-            gyplus[:] += alinearinterp(data3d[:,:,i],dx,dy-yoff) * coeff[i]
+            gxplus[:] += utils.alinearinterp(data3d[:,:,i],dx-xoff,dy) * coeff[i]
+            gyplus[:] += utils.alinearinterp(data3d[:,:,i],dx,dy-yoff) * coeff[i]
             #gxplus += farr[i](dy,dx-xoff,grid=False) * coeff[i]
             #gyplus += farr[i](dy-yoff,dx,grid=False) * coeff[i]
     g *= amp
@@ -3135,9 +3135,14 @@ def unpackpsf(psf):
     return psftype,pars,lookup,imshape
 
 @njit
-def packpsf(psftype,pars,lookup=None,imshape=None):
+def packpsf(psftype,pars,lookup=np.zeros((1,1,1),float),imshape=(0,0)):
     """ Put all of the PSF information into a 1D array."""
     # Figure out how many elements we need in the array
+    if lookup.size>1:
+        npsfy,npsfx,norder = lookup.shape
+        psforder = norder-1
+    else:
+        npsfy,npsfx,psforder = 0,0,0
     npsf = 1
     if psftype<=5:
         npsf += len(pars)
@@ -3151,14 +3156,14 @@ def packpsf(psftype,pars,lookup=None,imshape=None):
         psf[count:count+len(pars)] = pars
         count += len(pars)
     # Add lookup table/empirical PSF information
-    if lookup is not None:
+    if lookup.size>1:
         if lookup.ndim==2:
             npsfy,npsfx = lookup.shape
             psforder = 0
         else:
             npsfy,npsfx,norder = lookup.shape
             psforder = norder-1
-        if imshape is not None:
+        if imshape[0] != 0:
             nimy,nimx = imshape
         else:
             nimy,nimx = 0,0
@@ -3187,12 +3192,12 @@ def psfinfo(psf):
         if psforder > 0:
             print('Image size = [',nimx,nimy,']')
 
-#@njit
+@njit
 def psf2d_fwhm(psf):
     """
     Return the FWHM of the PSF
     """
-    psftype,psfpars,lookup,imshape = unpackpsf()
+    psftype,psfpars,lookup,imshape = unpackpsf(psf)
     tpars = np.zeros(3+len(psfpars),float)
     tpars[0] = 1.0
     tpars[3:] = psfpars
@@ -3201,12 +3206,12 @@ def psf2d_fwhm(psf):
     
     return fwhm
 
-#@njit
+@njit
 def psf2d_flux(psf,amp,xc,yc):
     """
     Return the flux of the PSF
     """
-    psftype,psfpars,lookup,imshape = unpackpsf()
+    psftype,psfpars,lookup,imshape = unpackpsf(psf)
     tpars = np.zeros(3+len(psfpars),float)
     tpars[:3] = [amp,xc,yc]
     tpars[3:] = psfpars
@@ -3394,7 +3399,7 @@ def psffit(im,err,x,y,pars,psftype,psfparams,lookup,imshape=None,verbose=False):
         # psf(x,y,pars,psftype,psfparams,lookup,imshape
         model,deriv = psf(x1d,y1d,bestpar[:3],psftype,psfparams,lookup,imshape,True)
         resid = im1d-model
-        dbeta = qr_jac_solve(deriv,resid,weight=wt1d)
+        dbeta = utils.qr_jac_solve(deriv,resid,weight=wt1d)
         
         if verbose:
             print(niter,bestpar)
@@ -3426,7 +3431,7 @@ def psffit(im,err,x,y,pars,psftype,psfparams,lookup,imshape=None,verbose=False):
     resid = im1d-model
     
     # Get covariance and errors
-    cov = jac_covariance(deriv,resid,wt1d)
+    cov = utils.jac_covariance(deriv,resid,wt1d)
     perror = np.sqrt(np.diag(cov))
 
     # Now get the flux
@@ -3617,7 +3622,7 @@ def psf2dfit(im,err,x,y,psf,ampc,xc,yc,verbose=False):
     while (niter<maxiter and maxpercdiff>minpercdiff):
         model,deriv = psf2d(x1d,y1d,psf,bestpar[0],bestpar[1],bestpar[2],True)
         resid = im1d-model
-        dbeta = qr_jac_solve(deriv,resid,weight=wt1d)
+        dbeta = utils.qr_jac_solve(deriv,resid,weight=wt1d)
         
         if verbose:
             print(niter,bestpar)
@@ -3648,7 +3653,7 @@ def psf2dfit(im,err,x,y,psf,ampc,xc,yc,verbose=False):
     resid = im1d-model
     
     # Get covariance and errors
-    cov = jac_covariance(deriv,resid,wt1d)
+    cov = utils.jac_covariance(deriv,resid,wt1d)
     perror = np.sqrt(np.diag(cov))
 
     # Now get the flux
@@ -3707,7 +3712,8 @@ class BoundingBox(object):
 
     def xy(self):
         """ Return 2D X/Y arrays."""
-        return meshgrid(np.arange(self.ixmin,self.ixmax+1),np.arange(self.iymin,self.iymax+1))
+        return utils.meshgrid(np.arange(self.ixmin,self.ixmax+1),
+                              np.arange(self.iymin,self.iymax+1))
     
     def reset(self):
         """ Forget the original coordinates."""
@@ -3822,7 +3828,7 @@ class PSFGaussian(object):
     def unitfootflux(self):
         """ Return the unit flux inside the footprint."""
         if np.isfinite(self._unitfootflux)==False:
-            xx,yy = meshgrid(np.arange(self.npix),np.arange(self.npix))
+            xx,yy = utils.meshgrid(np.arange(self.npix),np.arange(self.npix))
             pars = np.zeros(6,float)
             pars[0] = 1.0
             pars[3:] = self.params
@@ -3856,7 +3862,7 @@ class PSFGaussian(object):
         g,_ = agaussian2d(x, y, pars, nderiv=nderiv)
         return g
     
-    def deriv(self,x, y, pars, binned=None, nderiv=None):
+    def deriv(self,x, y, pars, binned=None, nderiv=3):
         """Two dimensional Gaussian model derivative with respect to parameters"""
         g, derivative = agaussian2d(x, y, pars, nderiv=nderiv)
         return derivative            
@@ -3981,7 +3987,7 @@ class PSF(object):
     def unitfootflux(self):
         """ Return the unit flux inside the footprint."""
         if np.isfinite(self._unitfootflux)==False:
-            xx,yy = meshgrid(np.arange(self.npix),np.arange(self.npix))
+            xx,yy = utils.meshgrid(np.arange(self.npix),np.arange(self.npix))
             pars = np.zeros(3,float)
             pars[0] = 1.0
             foot = self.model(xx,yy,pars,deriv=False)
@@ -3996,7 +4002,7 @@ class PSF(object):
         if self.psftype <= 5:
             fwhm = model2d_fwhm(self.psftype,tpars)
         else:
-            xx,yy = meshgrid(np.arange(self.npix),np.arange(self.npix))
+            xx,yy = utils.meshgrid(np.arange(self.npix),np.arange(self.npix))
             tpars = np.zeros(3,float)
             tpars[0] = pars[0]
             foot = self.model(xx,yy,tpars)
@@ -4016,7 +4022,7 @@ class PSF(object):
             if self.psftype <= 5:
                 flux = model2d_flux(self.psftype,pars)
             else:
-                xx,yy = meshgrid(np.arange(self.npix),np.arange(self.npix))
+                xx,yy = utils.meshgrid(np.arange(self.npix),np.arange(self.npix))
                 tpars = np.zeros(3,float)
                 tpars[0] = pars[0]
                 foot = self.model(xx,yy,tpars)
@@ -4062,8 +4068,8 @@ class PSF(object):
         """ Return the packed PSF array."""
         if self.psftype <= 5:
             if self.haslookup:
-                return packpsf(self.psftype,self.pars,self.lookup,self.imshape)
+                return packpsf(self.psftype,self.params,self.lookup,self.imshape)
             else:
-                return packpsf(self.psftype,self.pars)
+                return packpsf(self.psftype,self.params)
         else:
             return packpsf(self.psftype,0,self.lookup,self.imshape)
