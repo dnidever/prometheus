@@ -2,6 +2,7 @@ import os
 import numpy as np
 from numba import njit,types,from_dtype
 from numba.experimental import jitclass
+from numba_kdtree import KDTree
 from . import models_numba as mnb, utils_numba as utils
 
 # Fit a PSF model to multiple stars in an image
@@ -210,6 +211,135 @@ def mkempirical(cube,order=0,coords=None,shape=None,lookup=False):
    
     return fpars,rms
 
+#@njit
+def findpsfnei(alltab,psftab,npix):
+    """
+    Find stars near PSF stars.
+
+    Parameters
+    ----------
+    alltab : numpy array
+      Catalog of all sources in the image.
+    psftab : numpy array
+      Catalog of PSF stars.
+    npix : int
+      Search radius in pixels.
+
+    Returns
+    -------
+    indall : numpy array
+       List of indices into allcat that are neighbors to
+        the PSF stars (within radius of npix), and are not
+        PSF stars themselves.
+
+    Example
+    -------
+
+    indall = findpsfnei(alltab,psftab,npix)
+
+    """
+    # Returns distance and index of closest neighbor
+    
+    nalltab = len(alltab)
+    npsftab = len(psftab)
+    
+    # Use KD-tree
+    x1 = np.zeros((nalltab,2),float)
+    x1[:,0] = alltab[:,2]
+    x1[:,1] = alltab[:,3]
+    x2 = np.zeros((npsftab,2),float)
+    x2[:,0] = psftab[:,2]
+    x2[:,1] = psftab[:,3]
+
+
+    #data = np.random.random(3_000_000).reshape(-1, 3)
+    #kdtree = KDTree(data, leafsize=10)
+
+    ## query the nearest neighbors of the first 100 points
+    #distances, indices, neighbors = kdtree.query(data[:100], k=30)
+
+    ## query all points in a radius around the first 100 points
+    #indices = kdtree.query_radius(data[:100], r=0.5, return_sorted=True)
+
+    
+    #kdt = cKDTree(x1)
+    kdt = KDTree(x1)
+    # Get distance for 2 closest neighbors
+    dist, ind = kdt.query(x2, k=50, distance_upper_bound=np.sqrt(2)*npix//2)
+    # closest neighbor is always itself, remove it 
+    dist = dist[:,1:]
+    ind = ind[:,1:]
+    # Add up all the stars
+    gdall, = np.where(np.isfinite(dist.ravel()))
+    indall = ind.ravel()[gdall]
+    # Get unique ones
+    indall = np.unique(indall)
+
+    # Make sure none of them are our psf stars
+    ind1,ind2,dist = utils.xmatch(alltab[indall,2],alltab[indall3],
+                                  psftab[:,2],psftab[:,3],5,sphere=False)
+    #    alltab['x'][indall],alltab['y'][indall],psftab['x'],psftab['y'],5)
+    # Remove any matches
+    if len(ind1)>0:
+        indall = np.delete(indall,ind1)
+    
+    return indall
+    
+#@njit
+def subtractnei(image,error,alltab,psftab,psf):
+    """
+    Subtract neighboring stars to PSF stars from the image.
+
+    Parameters
+    ----------
+    image : CCDDdata object
+       The input image from which to subtract PSF neighbor stars.
+    alltab : numpy array
+      Catalog of all sources in the image.
+    psftab : numpy array
+      Catalog of PSF stars.
+    psf : PSF object
+      The PSF model.
+
+    Returns
+    -------
+    resid : CCDData object
+      The input images with the PSF neighbor stars subtracted.
+
+    Example
+    -------
+
+    subim = subtractnei(image,alltab,psftab,psf)
+
+    """
+
+    indnei = findpsfnei(alltab,psftab,psf.npix)
+    nnei = len(indnei)
+
+    flux = image
+    resid = image.copy()
+    fitradius = psf.fwhm()*0.5
+    
+    # Loop over neighboring stars and fit just the core
+    for i in range(nnei):
+        x1 = alltab[indnei[i],2]
+        xp1 = int(np.minimum(np.maximum(np.round(x1),0),image.shape[1]-1))
+        y1 = alltab[indnei[i],3]
+        yp1 = int(np.minimum(np.maximum(np.round(y1),0),image.shape[0]-1))
+        h1 = alltab[indnei[i],1]
+        initpars = np.array([h1,x1,y1])
+        bbox = starbbox((initpars[1],initpars[2]),image.shape,psf.radius)
+        # Fit amp empirically with central pixels
+        flux1 = bbox.slice(flux)
+        err1 = bbox.slice(error)
+        model1 = psf(pars=initpars,bbox=bbox)
+        good = ((flux1/err1>2) & (flux1>0) & (model1/np.max(model1)>0.25))
+        amp = np.median(flux1[good]/model1[good]) * initpars[0]
+        pars = np.array([amp, x1, y1])
+        im1 = psf(pars=pars,bbox=bbox)
+        resid[bbox.slices].data -= im1
+    return resid
+
 @njit
 def starbbox(coords,imshape,radius):
     """                                                                                         
@@ -261,14 +391,14 @@ def starbbox(coords,imshape,radius):
     #yhi = np.minimum(int(np.ceil(ycen+radius+1)),ny)
     return np.array([xlo,xhi,ylo,yhi])
 
-@njit
-def sliceinsert(array,lo,insert):
-    """ Insert array values."""
-    n = insert.size
-    for i in range(n):
-        j = i + lo
-        array[j] = insert[i]
-    # array is updated in place  
+# @njit
+# def sliceinsert(array,lo,insert):
+#     """ Insert array values."""
+#     n = insert.size
+#     for i in range(n):
+#         j = i + lo
+#         array[j] = insert[i]
+#     # array is updated in place  
 
 
 @njit
@@ -978,17 +1108,22 @@ def fitpsf(psftype,psfparams,image,error,starx,stary,starflux,fitradius,method='
     
 
 #@njit
-def getpsf(psf,image,tab,fitradius=None,lookup=False,lorder=0,method='qr',subnei=False,
+def getpsf(psftype,psfparams,image,error,starx,stary,starflux,fitradius,
+           lookup=False,lorder=0,subnei=False,
            alltab=None,maxiter=10,minpercdiff=1.0,reject=False,maxrejiter=3,verbose=False):
     """
     Fit PSF model to stars in an image with outlier rejection of badly-fit stars.
 
     Parameters
     ----------
-    psf : PSF object
+    psftype : PSF object
        PSF object with initial parameters to use.
-    image : CCDData object
+    psfparams : numpy array
+       PSF object with initial parameters to use.
+    image : numpy array
        Image to use to fit PSF model to stars.
+    error : numpy array
+       Uncertainties in image.
     tab : table
        Catalog with initial amp/x/y values for the stars to use to fit the PSF.
     fitradius : float, table
@@ -1037,73 +1172,85 @@ def getpsf(psf,image,tab,fitradius=None,lookup=False,lorder=0,method='qr',subnei
 
     """
 
-    t0 = time.time()
-    print = utils.getprintfunc() # Get print function to be used locally, allows for easy logging   
+    #t0 = time.time()
+    #print = utils.getprintfunc() # Get print function to be used locally, allows for easy logging   
 
-    psftype,psfpars,_,_ = mnb.unpackpsf(psf)
+    #psftype,psfpars,_,_ = mnb.unpackpsf(psf)
     
-    # Fitting radius
-    if fitradius is None:
-        tpars = np.zeros(len(psfpars)+3,float)
-        tpars[0] = 1.0
-        tpars[3:] = psfpars
-        if psftype == 3:  # Penny
-            fitradius = mnb.penny2d_fwhm(tpars)*1.5
-        else:
-            fitradius = mnb.model2d_fwhm(psftype,tpars)
+    # # Fitting radius
+    # if fitradius is None:
+    #     tpars = np.zeros(len(psfpars)+3,float)
+    #     tpars[0] = 1.0
+    #     tpars[3:] = psfpars
+    #     if psftype == 3:  # Penny
+    #         fitradius = mnb.penny2d_fwhm(tpars)*1.5
+    #     else:
+    #         fitradius = mnb.model2d_fwhm(psftype,tpars)
         
-    # subnei but no alltab input
-    if subnei and alltab is None:
-        raise ValueError('alltab is needed for PSF neighbor star subtraction')
+    # # subnei but no alltab input
+    # if subnei and alltab is None:
+    #     raise ValueError('alltab is needed for PSF neighbor star subtraction')
         
-    if 'id' not in tab.dtype.names:
-        tab['id'] = np.arange(len(tab))+1
-    psftab = tab.copy()
+    # if 'id' not in tab.dtype.names:
+    #     tab['id'] = np.arange(len(tab))+1
+    # psftab = tab.copy()
 
+    # id, amp, x, y, npix, rms, chisq, ixmin, ixmax, iymin, iymax, reject
+    psftab = np.zeros((nstars,12),float)
+    psftab[:,0] = np.arange(nstars)+1
+    psftab[:,1] = starflux
+    psftab[:,2] = starx
+    psftab[:,3] = stary
+    
     # Initializing output PSF star catalog
-    dt = np.dtype([('id',int),('amp',float),('x',float),('y',float),('npix',int),
-                   ('rms',float),('chisq',float),('ixmin',int),('ixmax',int),
-                   ('iymin',int),('iymax',int),('reject',int)])
-    outtab = np.zeros(len(tab),dtype=dt)
-    outtab = Table(outtab)
-    for n in ['id','x','y']:
-        outtab[n] = tab[n]
+    #dt = np.dtype([('id',int),('amp',float),('x',float),('y',float),('npix',int),
+    #               ('rms',float),('chisq',float),('ixmin',int),('ixmax',int),
+    #               ('iymin',int),('iymax',int),('reject',int)])
+    #outtab = np.zeros(len(tab),dtype=dt)
+    #outtab = Table(outtab)
+    #for n in ['id','x','y']:
+    #    outtab[n] = tab[n]
+    nstars = len(starx)
+    # id, amp, x, y, npix, rms, chisq, ixmin, ixmax, iymin, iymax, reject
+    outtab = np.zeros((nstars,12),float)
     
     # Remove stars that are too close to the edge
     ny,nx = image.shape
-    bd = ((psftab['x']<fitradius) | (psftab['x']>(nx-1-fitradius)) |
-          (psftab['y']<fitradius) | (psftab['y']>(ny-1-fitradius)))
-    nbd = np.sum(bd)
+    gd, = np.where((starx>fitradius) & (starx<(nx-1-fitradius)) &
+                   (stary>fitradius) & (stary<(ny-1-fitradius)))
+    ngd = len(gd)
+    nbd = nstars-ngd
     if nbd > 0:
         if verbose:
             print('Removing '+str(nbd)+' stars near the edge')
-        psftab = psftab[~bd]
+        psftab = psftab[gd,:]
 
-    # Generate an empirical image of the stars
-    # and fit a model to it to get initial estimates
-    if psftype != 6:
-        cube = starcube(psftab,image,npix=psf.npix,fillvalue=np.nan)
-        epsf,nbadstar,rms = mkempirical(cube,order=0)
-        #epsfim = CCDData(epsf,error=epsf.copy()*0+1,mask=~np.isfinite(epsf))
-        epsfim = epsf.copy()
-        epsferr = np.ones(epsf.shape,float)
-        ny,nx = epsf.shape
-        xx,yy = np.meshgrid(np.arange(nx),np.arange(ny))
-        out = model2dfit(epsfim,epsferr,xx,yy,psftype,1.0,nx//2,ny//2,verbose=False)
-        pars,perror,cov,flux,fluxerr,chisq = out
-        mparams = pars[3:]  # model parameters
-        #pars,perror,mparams = mnb.model2d_fit(epsfim,pars=[1.0,psf.npix/2,psf.npix//2])
-        initpar = mparams.copy()
-        curpsf = mnb.packpsf(psftype,mparams,0,0)
-        #curpsf = psf.copy()
-        #curpsf.params = initpar
-        if verbose:
-            print('Initial estimate from empirical PSF fit = '+str(mparams))
-    else:
-        curpsf = psf.copy()
-        _,initpar,_,_ = mnb.unpackpsf(psf)
-        #initpar = psf.params.copy()
-
+    # # Generate an empirical image of the stars
+    # # and fit a model to it to get initial estimates
+    # if psftype != 6:
+    #     cube = starcube(psftab,image,npix=psf.npix,fillvalue=np.nan)
+    #     epsf,nbadstar,rms = mkempirical(cube,order=0)
+    #     #epsfim = CCDData(epsf,error=epsf.copy()*0+1,mask=~np.isfinite(epsf))
+    #     epsfim = epsf.copy()
+    #     epsferr = np.ones(epsf.shape,float)
+    #     ny,nx = epsf.shape
+    #     xx,yy = np.meshgrid(np.arange(nx),np.arange(ny))
+    #     out = model2dfit(epsfim,epsferr,xx,yy,psftype,1.0,nx//2,ny//2,verbose=False)
+    #     pars,perror,cov,flux,fluxerr,chisq = out
+    #     mparams = pars[3:]  # model parameters
+    #     #pars,perror,mparams = mnb.model2d_fit(epsfim,pars=[1.0,psf.npix/2,psf.npix//2])
+    #     initpar = mparams.copy()
+    #     curpsf = mnb.packpsf(psftype,mparams,0,0)
+    #     #curpsf = psf.copy()
+    #     #curpsf.params = initpar
+    #     if verbose:
+    #         print('Initial estimate from empirical PSF fit = '+str(mparams))
+    # else:
+    #     curpsf = psf.copy()
+    #     _,initpar,_,_ = mnb.unpackpsf(psf)
+    #     #initpar = psf.params.copy()
+    curparams = psfparams.copy()
+    
     # Outlier rejection iterations
     nrejiter = 0
     flag = 0
@@ -1115,23 +1262,23 @@ def getpsf(psf,image,tab,fitradius=None,lookup=False,lorder=0,method='qr',subnei
             print('--- Iteration '+str(nrejiter+1)+' ---')                
 
         # Update the fitting radius
-        if nrejiter>0:
-            fitrad = curpsf.fwhm()
+        #if nrejiter>0:
+        #    fitrad = curpsf.fwhm()
         if verbose:
             print('  Fitting radius = %5.3f' % (fitrad))
                     
         # Reject outliers
         if reject and nrejiter>0:
-            medrms = np.median(ptab['rms'])
-            sigrms = dln.mad(ptab['rms'].data)
-            gd, = np.where(ptab['rms'] < medrms+3*sigrms)
+            medrms = np.median(ptab[:,5]) # rms
+            sigrms = utils.mad(ptab[:,5])
+            gd, = np.where(ptab[:,5] < medrms+3*sigrms)
             nrejstar = len(psftab)-len(gd)
             if verbose:
                 print('  RMS = %6.4f +/- %6.4f' % (medrms,sigrms))
                 print('  Threshold RMS = '+str(medrms+3*sigrms))
                 print('  Rejecting '+str(nrejstar)+' stars')
             if nrejstar>0:
-                psftab = psftab[gd]
+                psftab = psftab[gd,:]
 
         # Subtract neighbors
         if nrejiter>0 and subnei:
@@ -1141,25 +1288,34 @@ def getpsf(psf,image,tab,fitradius=None,lookup=False,lorder=0,method='qr',subnei
                 # Fit the neighbors and PSF stars
                 # Subtract neighbors from the image
                 useimage = image.copy()  # start with original image
-                useimage = subtractnei(useimage,alltab,tab,curpsf)
+                print('subtractnei')
+                #useimage = subtractnei(useimage,alltab,tab,curpsf)
                 
         # Fitting the PSF to the stars
         #-----------------------------
-        newpsf,pars,perror,ptab,pf = fitpsf(curpsf,useimage,psftab,fitradius=fitrad,method=method,
-                                            maxiter=maxiter,minpercdiff=minpercdiff,verbose=verbose)
+        newpars,perror,pcov,ptab,rchisq = fitpsf(psftype,curparams,image,error,psftab[:,2],psftab[:,3],
+                                                 psftab[:,1],fitradius,method=method,
+                                                 maxiter=maxiter,minpercdiff=minpercdiff,verbose=verbose)
+        #newpsf,pars,perror,ptab,pf = fitpsf(curpsf,useimage,psftab,fitradius=fitrad,method=method,
+        #                                    maxiter=maxiter,minpercdiff=minpercdiff,verbose=verbose)
         
         # Add information into the output catalog
-        ind1,ind2 = dln.match(outtab['id'],ptab['id'])
-        outtab['reject'] = 1
-        for n in ptab.columns:
-            outtab[n][ind1] = ptab[n][ind2]
-        outtab['reject'][ind1] = 0
-
+        _,ind1,ind2 = np.intersect1d(outtab[:,0],ptab[:,0],return_indices=True)
+        #ind1,ind2 = dln.match(outtab['id'],ptab['id'])
+        outtab[:,11] = 1    # reject
+        #outtab['reject'] = 1
+        #for n in ptab.columns:
+        #    outtab[n][ind1] = ptab[n][ind2]
+        #outtab['reject'][ind1] = 0
+        # id, amp, x, y, npix, rms, chisq, ixmin, ixmax, iymin, iymax, reject
+        outtab[ind1,1:10] = ptab[ind2,1:10]
+        
         # Compare PSF parameters
-        if type(newpsf)!=mnb.PSFEmpirical:
-            pardiff = newpsf.params-curpsf.params
-        else:
-            pardiff = newpsf._data-curpsf._data
+        # if type(newpsf)!=mnb.PSFEmpirical:
+        #     pardiff = newpsf.params-curpsf.params
+        # else:
+        #     pardiff = newpsf._data-curpsf._data
+        pardiff = newpars - pars
         sumpardiff = np.sum(np.abs(pardiff))
         curpsf = newpsf.copy()
         
@@ -1169,27 +1325,28 @@ def getpsf(psf,image,tab,fitradius=None,lookup=False,lorder=0,method='qr',subnei
         
         nrejiter += 1
         
-    # Generate an empirical look-up table of corrections
-    if lookup:
-        if verbose:
-            print('Making empirical lookup table with order='+str(lorder))
+    # # Generate an empirical look-up table of corrections
+    # if lookup:
+    #     if verbose:
+    #         print('Making empirical lookup table with order='+str(lorder))
 
-        pf.mklookup(lorder)
-        # Fit the stars again and get new RMS values
-        xdata = np.arange(pf.ntotpix)
-        out = pf.model(xdata,*pf.psf.params)
-        newpsf = pf.psf.copy()
-        # Update information in the output catalog
-        ind1,ind2 = dln.match(outtab['id'],ptab['id'])
-        outtab['reject'] = 1
-        outtab['reject'][ind1] = 0
-        outtab['amp'][ind1] = pf.staramp[ind2]
-        outtab['x'][ind1] = pf.starxcen[ind2]
-        outtab['y'][ind1] = pf.starycen[ind2]
-        outtab['rms'][ind1] = pf.starrms[ind2]
-        outtab['chisq'][ind1] = pf.starchisq[ind2]                
-        if verbose:
-            print('Median RMS: '+str(np.median(pf.starrms)))            
+    #     pf.mklookup(lorder)
+    #     # Fit the stars again and get new RMS values
+    #     xdata = np.arange(pf.ntotpix)
+    #     out = pf.model(xdata,*pf.psf.params)
+    #     newpsf = pf.psf.copy()
+    #     # Update information in the output catalog
+    #     ind1,ind2 = dln.match(outtab['id'],ptab['id'])
+    #     outtab['reject'] = 1
+    #     outtab['reject'][ind1] = 0
+    #     outtab['amp'][ind1] = pf.staramp[ind2]
+    #     outtab['x'][ind1] = pf.starxcen[ind2]
+    #     outtab['y'][ind1] = pf.starycen[ind2]
+    #     outtab['rms'][ind1] = pf.starrms[ind2]
+    #     outtab['chisq'][ind1] = pf.starchisq[ind2]                
+    #     if verbose:
+    #         print('Median RMS: '+str(np.median(pf.starrms)))    
+            
     
     return newpsf, pars, perror, outtab
         
