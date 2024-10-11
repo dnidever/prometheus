@@ -219,7 +219,62 @@ def utils_tests():
     error = data*0+1
     out = utils.poly2dfit(xdata[:,0],xdata[:,1],data,error,maxiter=2,minpercdiff=0.5,verbose=False)
     print('utils_numba.poly2dfit() okay')
-    
+
+    # Index
+    arr = np.array([1.0,2.0,3.0,4.0,5.0,3.0,2.0,1.0,6.0])
+    index = utils.Index(arr)
+    out = index.data
+    out = index.index
+    out = index.num
+    out = len(index)
+    out = index[0]
+    out = index.values
+    out = index.get(0)
+    out = index.getindex(0)
+    out = index.invindex
+    print('utils_numba.Index okay')
+
+    ra = np.random.rand(100)*10
+    dec = np.random.rand(100)*10
+    ra2 = ra + np.random.randn(100)*0.1
+    dec2 = ra + np.random.randn(100)*0.1
+    n1 = len(ra1)
+    n2 = len(ra2)
+    X1 = np.zeros((n1,2),float)
+    X1[:,0] = ra1
+    X1[:,1] = dec1
+    X2 = np.zeros((n2,2),float)
+    X2[:,0] = ra2
+    X2[:,1] = dec2
+    out = utils.crossmatch(X1, X2, max_distance=np.inf,k=1)
+    print('utils_numba.crossmatch() okay')
+
+    ra1 = np.random.rand(100)*10
+    dec1 = np.random.rand(100)*10
+    ra2 = ra + np.random.randn(100)*0.001
+    dec2 = ra + np.random.randn(100)*0.001
+    out = utils.xmatch(ra1, dec1, ra2, dec2, dcr=2.0, unique=False, sphere=False)
+    out = utils.xmatch(ra1, dec1, ra2, dec2, dcr=2.0, unique=True, sphere=False)
+    out = utils.xmatch(ra1, dec1, ra2, dec2, dcr=2.0, unique=False, sphere=True)
+    out = utils.xmatch(ra1, dec1, ra2, dec2, dcr=2.0, unique=True, sphere=True)
+    print('utils_numba.xmatch() okay')
+
+    imshape = (1000,1000)
+    multi_index = (np.random.choice(np.arange(100),100),
+                   np.random.choice(np.arange(100),100),
+                   np.random.choice(np.arange(100),100))
+    out = utils.ravel_multi_index(multi_index,imshape)
+    print('utils_numba.ravel_multi_index() okay')
+
+    imshape = (1000,1000)
+    indices = np.arange(5000)
+    out = utils.unravel_index(indices,imshape)
+    print('utils_numba.unravel_ndex() okay')
+
+    arr = np.array([1.0,2.0,3.0,4.0,5.0,3.0,2.0,1.0,6.0])
+    out = utils.unique_index(arr)
+    print('utils_numba.unique_index() okay')
+
 
 def models_tests():
     

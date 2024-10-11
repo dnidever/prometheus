@@ -92,27 +92,27 @@ def collatestars(imshape,starx,stary,fitradius):
         ndata[i] = n1
     return xdata,ydata,ravelindex,bbox,shape,ndata
 
-@njit
-def unpackstar(xdata,ydata,bbox,shape,istar):
-    """ Return unpacked data for one star."""
-    xdata1 = xdata[istar,:].copy()
-    ydata1 = ydata[istar,:].copy()
-    bbox1 = bbox[istar,:]
-    shape1 = shape[istar,:]
-    n = len(imdata1)
-    npix = int(np.sqrt(n))
-    # Convert to 2D arrays
-    xdata1 = xdata1.reshape(npix,npix)
-    ydata1 = ydata1.reshape(npix,npix)
-    # Trim values
-    if shape1[0] < npix or shape1[1] < npix:
-        xdata1 = xdata1[:shape1[0],:shape1[1]]
-        ydata1 = ydata1[:shape1[0],:shape1[1]]
-    return xdata1,ydata1,bbox1,shape1
+# @njit
+# def unpackstar(xdata,ydata,bbox,shape,istar):
+#     """ Return unpacked data for one star."""
+#     xdata1 = xdata[istar,:].copy()
+#     ydata1 = ydata[istar,:].copy()
+#     bbox1 = bbox[istar,:]
+#     shape1 = shape[istar,:]
+#     n = len(imdata1)
+#     npix = int(np.sqrt(n))
+#     # Convert to 2D arrays
+#     xdata1 = xdata1.reshape(npix,npix)
+#     ydata1 = ydata1.reshape(npix,npix)
+#     # Trim values
+#     if shape1[0] < npix or shape1[1] < npix:
+#         xdata1 = xdata1[:shape1[0],:shape1[1]]
+#         ydata1 = ydata1[:shape1[0],:shape1[1]]
+#     return xdata1,ydata1,bbox1,shape1
 
 @njit
 def getfitstar(imshape,xcen,ycen,fitradius):
-    """ Get the fitting pixels for a single star."""
+    """ Get the fitting pixel information for a single star."""
     npix = int(np.floor(2*fitradius))+2
     bbox = gnb.starbbox((xcen,ycen),imshape,fitradius)
     nx = bbox[1]-bbox[0]
@@ -138,6 +138,7 @@ def getfitstar(imshape,xcen,ycen,fitradius):
         
 @njit
 def collatefitstars(imshape,starx,stary,fitradius):
+    """ Get the fitting pixel information for all stars."""
     nstars = len(starx)
     npix = int(np.floor(2*fitradius))+2
     # Get xdata, ydata, error
@@ -161,17 +162,17 @@ def collatefitstars(imshape,starx,stary,fitradius):
         bbox[i,:] = bb
     return xdata,ydata,ravelindex,bbox,ndata,mask
 
-@njit
-def unpackfitstar(xdata,ydata,bbox,ndata,istar):
-    """ Return unpacked fitting data for one star."""
-    xdata1 = xdata[istar,:]
-    ydata1 = ydata[istar,:]
-    bbox1 = bbox[istar,:]
-    n1 = ndata[istar]
-    # Trim to the values we want
-    xdata1 = xdata1[:n1]
-    ydata1 = ydata1[:n1]
-    return xdata1,ydata1,bbox1,n1
+# @njit
+# def unpackfitstar(xdata,ydata,bbox,ndata,istar):
+#     """ Return unpacked fitting pixel data for one star."""
+#     xdata1 = xdata[istar,:]
+#     ydata1 = ydata[istar,:]
+#     bbox1 = bbox[istar,:]
+#     n1 = ndata[istar]
+#     # Trim to the values we want
+#     xdata1 = xdata1[:n1]
+#     ydata1 = ydata1[:n1]
+#     return xdata1,ydata1,bbox1,n1
 
     
 kv_ty = (types.int64, types.unicode_type)
@@ -227,10 +228,6 @@ spec = [
     ('yflat', types.int64[:]),
     ('indflat', types.int64[:]),
     ('bbox', types.int32[:]),
-    #('_unitfootflux', types.float64),
-    #('_bounds', types.float64[:,:]),
-    #('_steps', types.float64[:]),
-    #('coords', types.float64[:]),
     #('imshape', types.int32[:]),
     #('order', types.int32),
 ]
@@ -353,7 +350,7 @@ class GroupFitter(object):
         self.yflat = yflat
         self.indflat = uind1
 
-        # Add inverse index
+        # Add inverse index for the fitted pixels
         #  to be used with imflat/resflat/errflat/xflat/yflat/indflat
         self.starfit_invindex = np.zeros((self.nstars,npix*npix),np.int32)
         for i in range(self.nstars):
@@ -513,6 +510,22 @@ class GroupFitter(object):
         ravelindex = self.starfit_ravelindex[i,:n]
         invindex = self.starfit_invindex[i,:n]
         return pars,xind,yind,ravelindex,invindex
+
+    @property
+    def residfull(self):
+        """ Return the residual values of the fitte pixels in full 2D image format."""
+        resid = np.zeros(self.imshape[0]*self.imshape[1],np.float64)
+        resid[self.indflat] = self.resflat
+        resid = resid.reshape((self.imshape[0],self.imshape[1]))
+        return resid
+
+    @property
+    def imfull(self):
+        """ Return the flux values of the fitted pixels in full 2D image format."""
+        im = np.zeros(self.imshape[0]*self.imshape[1],np.float64)
+        im[self.indflat] = self.imflat
+        im = im.reshape((self.imshape[0],self.imshape[1]))
+        return im
     
     @property
     def nfreezepars(self):
@@ -569,17 +582,15 @@ class GroupFitter(object):
         newfreezestars, = np.where((oldfreezestars==False) & (self.freezestars==True))
         if len(newfreezestars)>0:
             # add models to a full image
+            # WHY FULL IMAGE??
             newmodel = np.zeros((self.imshape[0],self.imshape[1]),np.float64).ravel()
             for i in newfreezestars:
                 # Save on what iteration this star was frozen
                 self.starniter[i] = self.niter+1
                 #print('freeze: subtracting model for star ',i)
-                pars1 = self.pars[i*3:(i+1)*3]
-                n1 = self.starfit_ndata[i]
-                xind = self.starfit_xdata[i,:n1]
-                yind = self.starfit_ydata[i,:n1]
-                ravelindex = self.starfit_ravelindex[i,:n1]
-                im1 = self.psf(xind,yind,pars1)
+                pars1,xind1,yind1,ravelind1,invind1 = self.getstarfit(i)
+                n1 = len(xind1)
+                im1 = self.psf(xind1,yind1,pars1)
                 newmodel[ravelindex] += im1
             # Only keep the pixels being fit
             #  and subtract from the residuals
@@ -696,19 +707,61 @@ class GroupFitter(object):
         g,_ = mnb.psf(x,y,pars,self.psftype,self.psfparams,self.psflookup,self.imshape,
                       deriv=False,verbose=False)
         return g
-        
+
+    def modelstar(self,i,full=False):
+        """ Return model of one star (full footprint) with the current best values."""
+        pars,xind,yind,ravelind,invind = self.getstar(i)
+        m = self.psf(xind,yind,pars)        
+        if full==True:
+            modelim = np.zeros((self.imshape[0]*self.imshape[1]),np.float64)
+            modelim[ravelind] = m
+            modelim = modelim.reshape((self.imshape[0],self.imshape[1]))
+        else:
+            bbox = self.star_bbox[i,:]
+            nx = bbox[1]-bbox[0]+1
+            ny = bbox[3]-bbox[2]+1
+            xind1 = xind-bbox[0]
+            yind1 = yind-bbox[2]
+            ind1 = utils.ravel_multi_index((xind1,yind1),(ny,nx))
+            modelim = np.zeros(nx*ny,np.float64)
+            modelim[ind1] = m
+            modelim = modelim.reshape((ny,nx))
+        return modelim
+
+    def modelstarfit(self,i,full=False):
+        """ Return model of one star (only fitted pixels) with the current best values."""
+        pars,xind,yind,ravelind,invind = self.getstarfit(i)
+        m = self.psf(xind,yind,pars)        
+        if full==True:
+            modelim = np.zeros((self.imshape[0]*self.imshape[1]),np.float64)
+            modelim[ravelind] = m
+            modelim = modelim.reshape((self.imshape[0],self.imshape[1]))
+        else:
+            bbox = self.starfit_bbox[i,:]
+            nx = bbox[1]-bbox[0]+1
+            ny = bbox[3]-bbox[2]+1
+            xind1 = xind-bbox[0]
+            yind1 = yind-bbox[2]
+            ind1 = utils.ravel_multi_index((xind1,yind1),(ny,nx))
+            modelim = np.zeros(nx*ny,np.float64)
+            modelim[ind1] = m
+            modelim = modelim.reshape((ny,nx))
+        return modelim
+    
     @property
     def modelim(self):
         """ This returns the full image of the current best model (no sky)
             using the PARS values."""
         modelim = np.zeros((self.imshape[0],self.imshape[1]),np.float64).ravel()
         for i in range(self.nstars):
-            pars = self.pars[i*3:(i+1)*3]
-            n1 = self.star_ndata[i]
-            xdata1 = self.star_xdata[i,:n1]
-            ydata1 = self.star_ydata[i,:n1]
-            ravelindex1 = self.star_ravelindex[i,:n1]
-            modelim1 = self.psf(xdata1,ydata1,pars)
+            pars1,xind1,yind1,ravelindex1,invindxe1 = self.getstar(i)
+            modelim1 = self.psf(xind1,yind1,pars1)
+            #pars = self.pars[i*3:(i+1)*3]
+            #n1 = self.star_ndata[i]
+            #xdata1 = self.star_xdata[i,:n1]
+            #ydata1 = self.star_ydata[i,:n1]
+            #ravelindex1 = self.star_ravelindex[i,:n1]
+            #modelim1 = self.psf(xdata1,ydata1,pars)
             modelim[ravelindex1] += modelim1
         modelim = modelim.reshape((self.imshape[0],self.imshape[1]))
         return modelim

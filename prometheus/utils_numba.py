@@ -871,7 +871,7 @@ class Index(object):
         return len(self._num)
     
     def __getitem__(self,item):
-        return self._value[item]
+        return self._values[item]
     
     @property
     def values(self):
