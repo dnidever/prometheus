@@ -370,6 +370,7 @@ spec = [
     ('overlap_xdata', types.int64[:,:]),
     ('overlap_ydata', types.int64[:,:]),
     ('bbox', types.int32[:]),
+    ('usepix', types.int8[:]),
     #('imshape', types.int32[:]),
     #('order', types.int32),
 ]
@@ -1024,20 +1025,20 @@ class GroupFitter(object):
             count += len(im1)
             print(invind1)
             allim[invind1] += im1
-        #     usepix[invindex] = 1
+            usepix[invind1] = 1
 
         print('number of pixels = ',count)
         
-        # allim += allpars[-1]  # add sky offset
+        allim += allpars[-1]  # add sky offset
             
-        # self.usepix = usepix
-        # nusepix = np.sum(usepix)
+        self.usepix = usepix
+        nusepix = np.sum(usepix)
         
-        # # if trim and nusepix<self.ntotpix:            
-        # #     unused = np.arange(self.ntotpix)[~usepix]
-        # #     allim = np.delete(allim,unused)
+        # if trim and nusepix<self.ntotpix:            
+        #     unused = np.arange(self.ntotpix)[~usepix]
+        #     allim = np.delete(allim,unused)
         
-        # # self.niter += 1
+        # self.niter += 1
         
         return allim
 
