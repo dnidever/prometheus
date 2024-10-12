@@ -837,7 +837,7 @@ class Index(object):
         self._data = data
         self.ndata = len(data)
         self._sindex = np.argsort(self._data)
-        self._sdata = data[self._sindex]
+        self._sdata = data.copy()[self._sindex]
         brklo, = np.where(self._sdata != np.roll(self._sdata,1))
         nbrk = len(brklo)
         if nbrk>0:
@@ -860,8 +860,8 @@ class Index(object):
 
     @property
     def index(self):
-        # uniue index
-        return self._lo
+        # unique index
+        return self._sindex[self._lo]
     
     @property
     def num(self):
@@ -892,10 +892,11 @@ class Index(object):
     @property
     def invindex(self):
         # Construct inverse index
-        #  takes you from the original pixels to the unique ones
+        #  takes you from the original pixels to the unique ones (index.values)
         if self._invindex[0]==-1:
+            # Loop over the unique values
             for i in range(len(self)):
-                ind = self.getindex(i)
+                ind = self.getindex(i)   # index array for each unique value
                 self._invindex[ind] = i
         return self._invindex
             
