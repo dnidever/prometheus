@@ -6,7 +6,6 @@ from numba.typed import Dict
 from numba.experimental import jitclass
 from numba_kdtree import KDTree
 from . import models_numba as mnb
-from .clock import clock
 
 # Fit a PSF model to multiple stars in an image
 
@@ -1208,9 +1207,10 @@ def skygrid(im,binsize,tot=1,med=0):
     ny2 = ny // binsize
     nx2 = nx // binsize
     bgim = np.zeros((ny2,nx2),float)
-    sample = np.random.randint(0,binsize*binsize-1,1000)
-    for i in range(ny2):
-        for j in range(nx2):
+    nsample = np.minimum(1000,binsize*binsize)
+    sample = np.random.randint(0,binsize*binsize-1,nsample)
+    for i in range(nx2):
+        for j in range(ny2):
             x1 = i*binsize
             x2 = x1+binsize
             if x2 > nx: x2=nx
@@ -1302,6 +1302,7 @@ def sky(im,binsize=0):
     # Figure out best binsize
     if binsize <= 0:
         binsize = np.min(np.array([ny//20,nx//20]))
+    binsize = np.maximum(binsize,20)
         
     # Bin in a grid
     bgimbin = skygrid(im,binsize,0,1)
