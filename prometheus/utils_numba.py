@@ -1,8 +1,8 @@
 import os
 import numpy as np
 import numba
-from numba import njit,types,from_dtype
-from numba.typed import Dict
+from numba import njit,types,from_dtype,typed
+from numba.typed import Dict,List
 from numba.experimental import jitclass
 from numba_kdtree import KDTree
 from . import models_numba as mnb
@@ -1567,3 +1567,351 @@ def morphology(im,xpeak,ypeak,thresh,bmax):
         mout[i,7:] = out
 
     return mout
+
+@njit
+def create_table(names, data):
+    """Creates a table-like structure using NumPy structured arrays."""
+    dtype = np.dtype([(name, data[0].dtype) for name in names])
+    table = np.zeros(len(data[0]), dtype=dtype)
+    for i, name in enumerate(names):
+        table[name] = data[i]
+    return table
+
+@njit
+def convertstringlist(norm_list):
+    numba_list = typed.List.empty_list(types.string)
+    for e in norm_list:
+        numba_list.append(e)
+    return numba_list
+
+@njit
+def asciicode(a):
+    """ Get ascii code for a character."""
+    if a==',':
+        return 44
+    elif a=='.':
+        return 46
+    elif a=='0':
+        return 48
+    elif a=='1':
+        return 49
+    elif a=='2':
+        return 50
+    elif a=='3':
+        return 51
+    elif a=='4':
+        return 52
+    elif a=='5':
+        return 53
+    elif a=='6':
+        return 54
+    elif a=='7':
+        return 55
+    elif a=='8':
+        return 56
+    elif a=='9':
+        return 57
+    elif a=='A':
+        return 65
+    elif a=='B':
+        return 66
+    elif a=='C':
+        return 67
+    elif a=='D':
+        return 68
+    elif a=='E':
+        return 69
+    elif a=='F':
+        return 70
+    elif a=='G':
+        return 71
+    elif a=='H':
+        return 72
+    elif a=='I':
+        return 73
+    elif a=='J':
+        return 74
+    elif a=='K':
+        return 75
+    elif a=='L':
+        return 76
+    elif a=='M':
+        return 77
+    elif a=='N':
+        return 78
+    elif a=='O':
+        return 79
+    elif a=='P':
+        return 80
+    elif a=='Q':
+        return 81
+    elif a=='R':
+        return 82
+    elif a=='S':
+        return 83
+    elif a=='T':
+        return 84
+    elif a=='U':
+        return 85
+    elif a=='V':
+        return 86
+    elif a=='W':
+        return 87
+    elif a=='X':
+        return 88
+    elif a=='Y':
+        return 89
+    elif a=='Z':
+        return 90
+    elif a=='_':
+        return 95
+    elif a=='a':
+        return 97
+    elif a=='b':
+        return 98
+    elif a=='c':
+        return 99
+    elif a=='d':
+        return 100
+    elif a=='e':
+        return 101
+    elif a=='f':
+        return 102
+    elif a=='g':
+        return 103
+    elif a=='h':
+        return 104
+    elif a=='i':
+        return 105
+    elif a=='j':
+        return 106
+    elif a=='k':
+        return 107
+    elif a=='l':
+        return 108
+    elif a=='m':
+        return 109
+    elif a=='n':
+        return 110
+    elif a=='o':
+        return 111
+    elif a=='p':
+        return 112
+    elif a=='q':
+        return 113
+    elif a=='r':
+        return 114
+    elif a=='s':
+        return 115
+    elif a=='t':
+        return 116
+    elif a=='u':
+        return 117
+    elif a=='v':
+        return 118
+    elif a=='w':
+        return 119
+    elif a=='x':
+        return 120
+    elif a=='y':
+        return 121
+    elif a=='z':
+        return 122
+
+@njit
+def asciichar(code):
+    """ Return ascii character given the code."""
+    vals = ['','','','','','','','','','',   # 0-9
+            '','','','','','','','','','',   # 10-19
+            '','','','','','','','','','',   # 20-29
+            '','','','','','','','','','',   # 30-39
+            '','','','',',','','.','','0','1',   # 40-49
+            '2','3','4','5','6','7','8','9','','',   # 50-59
+            '','','','','','A','B','C','D','E',   # 60-69
+            'F','G','H','I','J','K','L','M','N','O',   # 70-79
+            'P','Q','R','S','T','U','V','W','X','Y',   # 80-89
+            'Z','','','','','_','','a','b','c',   # 90-99
+            'd','e','f','g','h','i','j','k','l','m',   # 100-109
+            'n','o','p','q','r','s','t','u','v','w',   # 110-119
+            'x','y','z','','','','','','','']   # 120-129
+    return vals[code]
+    
+@njit
+def convertasciitoint(data):
+    """ Convert ascii string to integer."""
+    n = len(data)
+    out = np.zeros(n,np.int64)
+    for i in range(n):
+        out[i] = asciicode(data[i])
+    return out
+
+@njit
+def convertinttoascii(data):
+    """ Convert array of ascii code integers to string."""
+    n = len(data)
+    out = ''
+    for i in range(n):
+        out += asciichar(data[i])
+    return out
+
+@njit
+def asciiintvalue(arr):
+    """ Convert ascii code array to an integer value."""
+    out = 0
+    for i in range(len(arr)):
+        out += arr[i]*1000**i
+    return out
+
+@njit
+def isinteger(val):
+    """ Check if this is an integer."""
+    sval = str(val)
+    sval1 = sval[0]
+    if (sval1=='1' or sval1=='2' or sval1=='3' or sval1=='4' or sval1=='5' or
+        sval1=='6' or sval1=='7' or sval1=='8' or sval1=='9'):
+        return True
+    else:
+        return False
+
+@njit
+def formatfloat(val,ndigits):
+    """ Format a floating point number for string output."""
+    if val<0:
+        isnegative = True
+        ndig = ndigits-1
+        val = np.abs(val)
+    else:
+        isnegative = False
+        ndig = ndigits
+    exponent = int(np.log10(val))
+    if np.log10(val)<0:
+        exponent = int(np.log10(val))-1
+    significand = val/10.0**exponent
+    sigvals = str(int(significand*10.0**ndig))
+    osigvals = sigvals[0]+'.'+sigvals[1:]
+    # Whole value, >=1
+    if exponent < ndig and exponent >= 0:
+        sval = str(int(val*10.0**ndig))
+        oval = sval[:exponent+1]+'.'+sval[exponent+1:]
+        out = oval[:ndig]
+    # Whole value, <1
+    elif np.abs(exponent)<ndig and exponent<0:
+        sval = str(int(val*10.0**ndig))
+        aexponent = np.abs(exponent)
+        if aexponent > 1:
+            oval = '0.' + (aexponent-1)*'0' + sval
+        else:
+            oval = '0.'+sval
+        out = oval[:ndig]
+    # Scientific notation
+    else:
+        eout = 'e'+str(exponent)
+        out = osigvals[:ndig-len(eout)]+eout
+    if isnegative:
+        out = '-'+out
+    return out
+    
+spec = [
+    #('_names', types.List(types.string)),
+    ('_namesintarray', types.int64[:,:]),
+    ('_namesnchars', types.int64[:]),
+    ('_namesintvalue', types.int64[:]),
+    ('ncols', types.int64),
+    ('nrows', types.int64),
+    ('data', types.float64[:,:]),
+]
+@jitclass(spec)
+class Table(object):
+
+    def __init__(self, names, data):
+        n = len(names)
+        namesnchars = np.zeros(n,np.int64)
+        maxlength = 0
+        for i in range(n):
+            namesnchars[i] = len(names[i])
+            maxlength = np.max(np.array([maxlength,len(names[i])]))
+        self._namesnchars = namesnchars
+        namesintarray = np.zeros((n,maxlength),np.int64)-1
+        self._namesintarray = namesintarray
+        namesintvalue = np.zeros(n,np.int64)
+        self._namesintvalue = namesintvalue
+        for i in range(n):
+            nameint = convertasciitoint(names[i])
+            self._namesintarray[i,:len(nameint)] = nameint
+            self._namesintvalue[i] = asciiintvalue(nameint)
+        self.ncols = n
+        ncols,nrows = data.shape
+        self.nrows = nrows
+        self.data = np.zeros(data.shape,np.float64)
+        self.data[:,:] = data.astype(np.float64)
+
+    def __len__(self):
+        """ Return the number of rows."""
+        return self.nrows
+
+    def __str__(self):
+        """ string representation."""
+        # Header
+        out = ''
+        for i in range(self.ncols):
+            name1 = self.name(i)
+            n1 = len(name1)
+            if n1<11:
+                out += name1+(11-n1)*' '
+            else:
+                out += name1
+        out += '\n'
+        # Rows
+        for i in range(self.nrows):
+            out1 = ''
+            for j in range(self.ncols):
+                out1 += formatfloat(self.data[j,i],10)+' '
+            out1 += '\n'
+            out += out1
+        return out
+
+    def name(self,i):
+        """ Return single name."""
+        nchar = self._namesnchars[i]
+        nameint = self._namesintarray[i,:]
+        nameint = nameint[:nchar]
+        colname = convertinttoascii(nameint)
+        return colname
+
+    @property
+    def names(self):
+        ls = typed.List.empty_list(types.string)
+        for i in range(self.ncols):
+            colname = self.name(i)
+            ls.append(colname)
+        return ls
+
+    def _getnameindex(self,name):
+        nameint = convertasciitoint(name)
+        nameval =  asciiintvalue(nameint)
+        ind, = np.where(self._namesintvalue==nameval)
+        return ind
+
+    def getcol(self,item):
+        data1 = np.zeros((self.ncols,1),np.float64)
+        data1[:,0] = self.data[:,item]
+        return Table(self.names,data1)
+        
+    def __getitem__(self,item):
+        """ Get a single column."""
+        ind = self._getnameindex(item)
+        if len(ind)==0:
+            print('No column "'+str(item)+'"')
+            return
+        return self.data[ind,:]
+        
+    def __setitem__(self,item,data):
+        """ Set the entire column."""
+        ind = self._getnameindex(item)
+        if len(ind)==0:
+            print('No column "'+str(item)+'"')
+            return
+        if len(data)!=self.nrows:
+            print(len(data),'elements input but need',self.nrows,'elements to set entire column')
+            return
+        self.data[ind[0],:] = data
