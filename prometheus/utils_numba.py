@@ -6,6 +6,7 @@ from numba.typed import Dict
 from numba.experimental import jitclass
 from numba_kdtree import KDTree
 from . import models_numba as mnb
+from .clock import clock
 
 # Fit a PSF model to multiple stars in an image
 
@@ -1197,3 +1198,4 @@ def unique_index(array):
     #   to the unique ones
     invindex = index.invindex
     return uvals,uindex,invindex
+
