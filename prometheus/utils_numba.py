@@ -1915,3 +1915,29 @@ class Table(object):
             print(len(data),'elements input but need',self.nrows,'elements to set entire column')
             return
         self.data[ind[0],:] = data
+
+    def set(self,name,row,data):
+        """ Set a single value."""
+        ind = self._getnameindex(name)
+        if len(ind)==0:
+            print('No column "'+str(name)+'"')
+            return
+        if row>self.nrows-1:
+            print(row,'out of bounds for',self.nrows,'rows')
+        self.data[ind[0],row] = data
+
+    def setmany(self,name,rows,data):
+        """ Set multiple values in a single row."""
+        # rows and data must be numpy arrays
+        ind = self._getnameindex(name)
+        if len(ind)==0:
+            print('No column "'+str(name)+'"')
+            return
+        if len(rows) != len(data):
+            print('rows and data not the same length')
+            return
+        for i in range(len(rows)):
+            if rows[i]>self.nrows-1:
+                print(rows[i],'out of bounds for',self.nrows,'rows')
+                continue
+            self.data[ind[0],rows[i]] = data[i]
