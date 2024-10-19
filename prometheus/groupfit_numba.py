@@ -599,10 +599,10 @@ class GroupFitter(object):
         """ Set starycen values."""
         self.pars[2::3] = val
     
-    # def sky(self,method='sep',rin=None,rout=None):
-    #     """ (Re)calculate the sky."""
-    #     # Remove the current best-fit model
-    #     resid = self.image.data-self.modelim  # remove model
+    def sky(self,method='sep',rin=None,rout=None):
+        """ (Re)calculate the sky."""
+        # Remove the current best-fit model
+        resid = self.image-self.modelim    # remove model
     #     # SEP smoothly varying background
     #     if method=='sep':
     #         bw = np.maximum(int(self.nx/10),64)
@@ -691,10 +691,27 @@ class GroupFitter(object):
         return self.starfit_invindex[i,:n]
 
     def starfitchisq(self,i):
-        pass
-
+        """ Return chisq of current best-fit for one star."""
+        pars1,xind1,yind1,ravelind1,invind1 = self.getstarfit(i)
+        n1 = self.starfitnpix(i)
+        flux1 = self.image.ravel()[ravelind1].copy()
+        err1 = self.error.ravel()[ravelind1].copy()
+        model1 = self.psf(xind1,yind1,pars1)
+        sky1 = self.pars[-1]
+        chisq1 = np.sum((flux1-sky1-model1)**2/err1**2)/n1
+        return chisq1
+    
     def starfitrms(self,i):
-        pass
+        """ Return rms of current best-fit for one star."""
+        pars1,xind1,yind1,ravelind1,invind1 = self.getstarfit(i)
+        n1 = self.starfitnpix(i)
+        flux1 = self.image.ravel()[ravelind1].copy()
+        err1 = self.error.ravel()[ravelind1].copy()
+        model1 = self.psf(xind1,yind1,pars1)
+        sky1 = self.pars[-1]
+        # chi value, RMS of the residuals as a fraction of the amp
+        rms1 = np.sqrt(np.mean(((flux1-sky1-model1)/pars1[0])**2))
+        return rms1
     
     def getstar(self,i):
         """ Get star full footprint information."""

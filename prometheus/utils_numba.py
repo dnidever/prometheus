@@ -1199,3 +1199,370 @@ def unique_index(array):
     invindex = index.invindex
     return uvals,uindex,invindex
 
+
+@njit
+def skygrid(im,binsize,tot=1,med=0):
+    """ Estimate the background."""
+    #binsize = 200
+    ny,nx = im.shape
+    ny2 = ny // binsize
+    nx2 = nx // binsize
+    bgim = np.zeros((ny2,nx2),float)
+    sample = np.random.randint(0,binsize*binsize-1,1000)
+    for i in range(ny2):
+        for j in range(nx2):
+            x1 = i*binsize
+            x2 = x1+binsize
+            if x2 > nx: x2=nx
+            y1 = j*binsize
+            y2 = y1+binsize
+            if y2 > ny: y2=ny
+            if tot==1:
+                bgim[j,i] = np.sum(im[y1:y2,x1:x2].ravel()[sample])
+            elif med==1:
+                bgim[j,i] = np.median(im[y1:y2,x1:x2].ravel()[sample])
+            else:
+                bgim[j,i] = np.mean(im[y1:y2,x1:x2].ravel()[sample])
+    return bgim
+
+@njit
+def skyinterp(binim,fullim,binsize):
+    """ linear interpolation"""
+    ny,nx = fullim.shape
+    ny2 = ny // binsize
+    nx2 = nx // binsize
+    hbinsize = int(0.5*binsize)
+
+    # Calculate midpoint positions
+    xx = np.arange(nx2)*binsize+hbinsize
+    yy = np.arange(ny2)*binsize+hbinsize
+    
+    for i in range(ny2-1):
+        for j in range(nx2-1):
+            y1 = i*binsize+hbinsize
+            y2 = y1+binsize
+            x1 = j*binsize+hbinsize
+            x2 = x1+binsize
+            f11 = binim[i,j]
+            f12 = binim[i+1,j]
+            f21 = binim[i,j+1]
+            f22 = binim[i+1,j+1]
+            denom = binsize*binsize
+            for k in range(binsize):
+                for l in range(binsize):
+                    x = x1+k
+                    y = y1+l
+                    # weighted mean
+                    #denom = (x2-x1)*(y2-y1)
+                    w11 = (x2-x)*(y2-y)/denom
+                    w12 = (x2-x)*(y-y1)/denom
+                    w21 = (x-x1)*(y2-y)/denom
+                    w22 = (x-x1)*(y-y1)/denom
+                    f = w11*f11+w12*f12+w21*f21+w22*f22
+                    fullim[y,x] = f
+
+    # Do the edges
+    for i in range(hbinsize,nx2*binsize-hbinsize):
+        # bottom
+        for j in range(hbinsize):
+            fullim[j,i] = fullim[hbinsize,i]
+        # top
+        for j in range(ny2*binsize-hbinsize-1,ny):
+            fullim[j,i] = fullim[ny2*binsize-hbinsize-2,i]
+    for j in np.arange(hbinsize,ny2*binsize-hbinsize):
+        # left
+        for i in range(hbinsize):
+            fullim[j,i] = fullim[j,hbinsize]
+        # right
+        for i in range(nx2*binsize-hbinsize-1,nx):
+            fullim[j,i] = fullim[j,nx2*binsize-hbinsize-2]
+    # Do the corners
+    for i in range(hbinsize):
+        # bottom-left
+        for j in range(hbinsize):
+            fullim[j,i] = fullim[hbinsize,hbinsize]
+        # top-left
+        for j in range(ny2*binsize-hbinsize-1,ny):
+            fullim[j,i] = fullim[ny2*binsize-hbinsize-2,hbinsize]
+    for i in range(nx2*binsize-hbinsize-1,nx):
+        # bottom-right
+        for j in range(hbinsize):
+            fullim[j,i] = fullim[hbinsize,nx2*binsize-hbinsize-2]
+        # top-right
+        for j in range(ny2*binsize-hbinsize-1,ny):
+            fullim[j,i] = fullim[ny2*binsize-hbinsize-2,nx2*binsize-hbinsize-2]
+
+    return fullim
+                    
+
+@njit
+def sky(im,binsize=0):
+    ny,nx = im.shape
+
+    # Figure out best binsize
+    if binsize <= 0:
+        binsize = np.min(np.array([ny//20,nx//20]))
+        
+    # Bin in a grid
+    bgimbin = skygrid(im,binsize,0,1)
+    
+    # Linearly interpolate
+    bgim = np.zeros(im.shape,np.float64)+np.median(bgimbin)
+    bgim = skyinterp(bgimbin,bgim,binsize)
+
+    # # do the edges
+    # #bgim[:binsize,:] = bgim[binsize,:].reshape(1,-1)
+    # #bgim[:,:binsize] = bgim[:,binsize].reshape(-1,1)
+    # #bgim[-binsize:,:] = bgim[-binsize,:].reshape(1,-1)
+    # #bgim[:,-binsize:] = bgim[:,-binsize].reshape(-1,1)    
+    
+    return bgim
+
+@njit
+def numba_sky2(im,binsize,tot,med):
+    """ Estimate the background."""
+    ny,nx = im.shape
+    ny2 = ny // binsize
+    nx2 = nx // binsize
+    bgim = np.zeros((ny2,nx2),float)
+    #sample = np.random.randint(0,binsize*binsize-1,1000)
+    xsample = np.random.randint(0,binsize-1,1000)
+    ysample = np.random.randint(0,binsize-1,1000)
+    data = np.zeros(1000,float)
+    for i in range(ny2):
+        for j in range(nx2):
+            x1 = i*binsize
+            x2 = x1+binsize
+            if x2 > nx: x2=nx
+            y1 = j*binsize
+            y2 = y1+binsize
+            if y2 > ny: y2=ny
+            for k in range(1000):
+                data[k] = im[y1+ysample[k],x1+xsample[k]]
+            if tot==1:
+                bgim[j,i] = np.sum(data)
+            elif med==1:
+                bgim[j,i] = np.median(data)
+            else:
+                bgim[j,i] = np.mean(data)
+    #import pdb; pdb.set_trace()
+
+    return bgim
+
+
+
+def detection(im,nsig=10):
+    """  Detect peaks """
+
+    # just looping over the 9K x 9K array
+    # takes 1.3 sec
+
+    # bin 2x2 as a crude initial smoothing
+    imbin = dln.rebin(im,binsize=(2,2))
+    
+    sig = sigma(imbin)
+    xpeak,ypeak,count = detectpeaks(imbin,sig,nsig)
+    xpeak = xpeak[:count]*2
+    ypeak = ypeak[:count]*2
+    
+    return xpeak,ypeak
+
+@njit
+def detectpeaks(im,sig,nsig):
+    """ Detect peaks"""
+    # input sky subtracted image
+    ny,nx = im.shape
+    nbin = 3  # 5
+    nhbin = nbin//2
+
+    mnim = np.zeros(im.shape,float)-100000
+    
+    count = 0
+    xpeak = np.zeros(100000,float)
+    ypeak = np.zeros(100000,float)
+    for i in np.arange(nhbin+1,nx-nhbin-2):
+        for j in range(nhbin+1,ny-nhbin-2):
+            if im[j,i]>nsig*sig:
+                if mnim[j,i] > -1000:
+                    mval = mnim[j,i]
+                else:
+                    mval = np.mean(im[j-nhbin:j+nhbin+1,i-nhbin:i+nhbin+1])
+                    mnim[j,i] = mval
+                if mnim[j,i-1] > -1000:
+                    lval = mnim[j,i-1]
+                else:
+                    lval = np.mean(im[j-nhbin:j+nhbin+1,i-nhbin-1:i+nhbin])
+                    mnim[j,i-1] = lval
+                if mnim[j,i+1] > -1000:
+                    rval = mnim[j,i+1]
+                else:
+                    rval = np.mean(im[j-nhbin:j+nhbin+1,i-nhbin+1:i+nhbin+2])
+                    mnim[j,i+1] = rval
+                if mnim[j-1,i] > -1000:
+                    dval = mnim[j-1,i]
+                else:
+                    dval = np.mean(im[j-nhbin-1:j+nhbin,i-nhbin:i+nhbin+1])
+                    mnim[j-1,i] = dval
+                if mnim[j+1,i] > -1000:
+                    uval = mnim[j+1,i]
+                else:
+                    uval = np.mean(im[j-nhbin+1:j+nhbin+2,i-nhbin:i+nhbin+1])
+                    mnim[j+1,i] = uval
+                # Check that it is a peak
+                if (mval>lval and mval>rval and mval>dval and mval>uval):
+                    xpeak[count] = i
+                    ypeak[count] = j
+                    count = count + 1
+    return xpeak,ypeak,count
+
+@njit
+def boundingbox(im,xp,yp,thresh,bmax):
+    """ Get bounding box for the source """
+
+    ny,nx = im.shape
+    nbin = 3
+    nhbin = nbin//2
+    
+    # Step left until you reach the threshold
+    y0 = yp-nhbin
+    if y0<0: y0=0
+    y1 = yp+nhbin+1
+    if y1>ny: y1=ny
+    flag = False
+    midval = np.mean(im[y0:y1,xp])
+    count = 1
+    while (flag==False):
+        newval = np.mean(im[y0:y1,xp-count])
+        if newval < thresh*midval or xp-count==0 or count==bmax:
+            flag = True
+        lastval = newval
+        count += 1
+    leftxp = xp-count+1
+    # Step right until you reach the threshold
+    flag = False
+    count = 1
+    while (flag==False):
+        newval = np.mean(im[y0:y1,xp+count])
+        if newval < thresh*midval or xp+count==(nx-1) or count==bmax:
+            flag = True
+        lastval = newval
+        count += 1
+    rightxp = xp+count-1
+    # Step down until you reach the threshold
+    x0 = xp-nhbin
+    if x0<0: x0=0
+    x1 = xp+nhbin+1
+    if x1>nx: x1=nx
+    flag = False
+    midval = np.mean(im[yp,x0:x1])
+    count = 1
+    while (flag==False):
+        newval = np.mean(im[yp-count,x0:x1])
+        if newval < thresh*midval or yp-count==0 or count==bmax:
+            flag = True
+        lastval = newval
+        count += 1
+    downyp = yp-count+1
+    # Step up until you reach the threshold
+    flag = False
+    count = 1
+    while (flag==False):
+        newval = np.mean(im[yp+count,x0:x1])
+        if newval < thresh*midval or yp+count==(ny-1) or count==bmax:
+            flag = True
+        lastval = newval
+        count += 1
+    upyp = yp+count-1
+
+    return leftxp,rightxp,downyp,upyp
+
+@njit
+def morpho(im,xp,yp,x0,x1,y0,y1,thresh):
+    """ Measure morphology parameters """
+    ny,nx = im.shape
+
+    midval = im[yp,xp]
+    hthresh = thresh*midval
+    
+    nx = x1-x0+1
+    ny = y1-y0+1
+
+    # Flux and first moments
+    flux = 0.0
+    mnx = 0.0
+    mny = 0.0
+    # X loop    
+    for i in range(nx):
+        x = i+x0
+        # Y loop
+        for j in range(ny):
+            y = j+y0
+            val = im[y,x]
+            if val>hthresh:
+                # Flux
+                flux += val
+                # First moments
+                mnx += val*x
+                mny += val*y
+    mnx /= flux
+    mny /= flux
+
+    # Second moments
+    sigx2 = 0.0
+    sigy2 = 0.0
+    sigxy = 0.0
+    # X loop    
+    for i in range(nx):
+        x = i+x0
+        # Y loop
+        for j in range(ny):
+            y = j+y0
+            val = im[y,x]
+            if val>hthresh:
+                sigx2 += val*(x-mnx)**2
+                sigy2 += val*(y-mny)**2
+                sigxy += val*(x-mnx)*(y-mny)
+    sigx2 /= flux
+    sigy2 /= flux
+    sigx = np.sqrt(sigx2)
+    sigy = np.sqrt(sigy2)
+    sigxy /= flux
+    fwhm = (sigx+sigy)*0.5 * 2.35
+    
+    # Ellipse parameters
+    asemi = np.sqrt( 0.5*(sigx2+sigy2) + np.sqrt(((sigx2-sigy2)*0.5)**2 + sigxy**2 ) )
+    bsemi = np.sqrt( 0.5*(sigx2+sigy2) - np.sqrt(((sigx2-sigy2)*0.5)**2 + sigxy**2 ) )
+    theta = 0.5*np.arctan2(2*sigxy,sigx2-sigy2)  # in radians
+
+    return flux,mnx,mny,sigx,sigy,sigxy,fwhm,asemi,bsemi,theta
+
+@njit
+def morphology(im,xpeak,ypeak,thresh,bmax):
+    """ Measure morphology of the peaks."""
+
+    ny,nx = im.shape
+    nbin = 3
+    nhbin = nbin//2
+
+    mout = np.zeros((len(xpeak),17),float)
+    for i in range(len(xpeak)):
+        xp = int(xpeak[i])
+        yp = int(ypeak[i])
+        mout[i,0] = xp
+        mout[i,1] = yp
+        
+        # Get the bounding box
+        leftxp,rightxp,downyp,upyp = boundingbox(im,xp,yp,thresh,bmax)
+        mout[i,2] = leftxp
+        mout[i,3] = rightxp
+        mout[i,4] = downyp
+        mout[i,5] = upyp
+        mout[i,6] = (rightxp-leftxp+1)*(upyp-downyp+1)
+
+
+        # Measure morphology parameters
+        out = morpho(im,xp,yp,leftxp,rightxp,downyp,upyp,thresh)
+        #flux,mnx,mny,sigx,sigy,sigxy,fwhm,asemi,bsemi,theta = out
+        mout[i,7:] = out
+
+    return mout
