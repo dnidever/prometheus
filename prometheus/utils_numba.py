@@ -1200,7 +1200,30 @@ def unique_index(array):
 
 
 @njit
-def skygrid(im,binsize,tot=1,med=0):
+def smooth2d(im,binsize,med=0):
+    """ Do smoothing of a 2D image."""
+    # mean by default
+    smim = im.copy()
+    ny,nx = im.shape
+    ny2 = int(np.ceil(ny / binsize))
+    nx2 = int(np.ceil(nx / binsize))
+    for i in range(nx2):
+        for j in range(ny2):
+            x1 = i*binsize
+            x2 = x1+binsize
+            if x2 > nx: x2=nx
+            y1 = j*binsize
+            y2 = y1+binsize
+            if y2 > ny: y2=ny
+            if med==1:
+                sm = np.median(im[y1:y2,x1:x2])
+            else:
+                sm = np.mean(im[y1:y2,x1:x2])
+            smim[y1:y2,x1:x2] = sm
+    return smim
+
+@njit
+def skygrid(im,binsize,tot=0,med=1):
     """ Estimate the background."""
     #binsize = 200
     ny,nx = im.shape
@@ -1303,20 +1326,23 @@ def sky(im,binsize=0):
     if binsize <= 0:
         binsize = np.min(np.array([ny//20,nx//20]))
     binsize = np.maximum(binsize,20)
-        
+    ny2 = ny // binsize
+    nx2 = nx // binsize
+
     # Bin in a grid
     bgimbin = skygrid(im,binsize,0,1)
+
+    # Outlier rejection
+    # median smoothing
+    medbin = 3
+    if nx2<medbin or ny2<medbin:
+        medbin = np.min(np.array([nx2,ny2]))
+    smbgimbin = smooth2d(bgimbin,medbin,1)  # median smoothing
     
     # Linearly interpolate
     bgim = np.zeros(im.shape,np.float64)+np.median(bgimbin)
-    bgim = skyinterp(bgimbin,bgim,binsize)
+    bgim = skyinterp(smbgimbin,bgim,binsize)
 
-    # # do the edges
-    # #bgim[:binsize,:] = bgim[binsize,:].reshape(1,-1)
-    # #bgim[:,:binsize] = bgim[:,binsize].reshape(-1,1)
-    # #bgim[-binsize:,:] = bgim[-binsize,:].reshape(1,-1)
-    # #bgim[:,-binsize:] = bgim[:,-binsize].reshape(-1,1)    
-    
     return bgim
 
 @njit

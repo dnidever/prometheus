@@ -359,6 +359,8 @@ spec = [
     ('starfit_bbox', types.int32[:,:]),
     ('starfit_ndata', types.int32[:]),
     ('starfit_invindex', types.int64[:,:]),
+    ('starindex', types.int64[:,:]),
+    ('starcount', types.int64[:]),
     ('ntotpix', types.int32),
     ('imflat', types.float64[:]),
     ('resflat', types.float64[:]),
@@ -462,7 +464,7 @@ class GroupFitter(object):
         self.starfit_bbox = sbbox
         self.starfit_ndata = sndata
         self.starfit_mask = smask
-        
+
         # Combine all of the X and Y values (of the pixels we are fitting) into one array
         ntotpix = np.sum(self.starfit_ndata)
         xall = np.zeros(ntotpix,np.int32)
@@ -475,7 +477,7 @@ class GroupFitter(object):
             xall[count:count+n1] = xdata1
             yall[count:count+n1] = ydata1
             count += n1
-        
+            
         # Create 1D unraveled indices, python images are (Y,X)
         ind1 = utils.ravel_multi_index((yall,xall),self.imshape)
         # Get unique indices and inverse indices
@@ -517,10 +519,28 @@ class GroupFitter(object):
             invindex1 = invindex[invlo:invlo+n1]
             self.starfit_invindex[i,:n1] = invindex1
 
+        # For all of the fitting pixels, find the ones that
+        # a given star contributes to (basically within its PSF radius)
+        starindex = np.zeros((self.nstars,self.ntotpix),np.int64)-1
+        starcount = np.zeros(self.nstars,np.int64)
+        for i in range(self.ntotpix):
+            x1 = self.xflat[i]
+            y1 = self.yflat[i]
+            for j in range(self.nstars):
+                r = np.sqrt((self.xflat[i]-self.starxcen[j])**2 + (self.yflat[i]-self.starycen[j])**2)
+                if r <= self.npsfpix:
+                    starindex[j,starcount[j]] = i
+                    starcount[j] += 1
+        maxcount = np.max(starcount)
+        starindex = starindex[:,:maxcount]
+        self.starindex = starindex
+        self.starcount = starcount
+                    
+            
         # We want to know for each star which pixels (that are being fit)
         # are affected by other stars (within their full footprint, not just
         # their "fitted pixels").
-        # How do star is full PSF footprint overlap neighboring star's fitted pixels?
+        # How does a star's full PSF footprint overlap neighboring star's fitted pixels?
         pixim = np.zeros(self.imshape[0]*self.imshape[1],np.int32)
         onused = np.zeros(self.nstars,np.int64)
         overlap_invindex = np.zeros((self.nstars,self.npsfpix*self.npsfpix),np.int64)-1
@@ -865,8 +885,8 @@ class GroupFitter(object):
         lbounds[2::3] = np.maximum(pars[2::3]-xoff,0)
         lbounds[-1] = -np.inf
         ubounds[0:-1:3] = np.inf
-        ubounds[1::3] = np.maximum(pars[1::3]+xoff,nx-1)
-        ubounds[2::3] = np.maximum(pars[2::3]+xoff,ny-1)
+        ubounds[1::3] = np.minimum(pars[1::3]+xoff,nx-1)
+        ubounds[2::3] = np.minimum(pars[2::3]+xoff,ny-1)
         ubounds[-1] = np.inf
         
         bounds = (lbounds,ubounds)
@@ -902,7 +922,7 @@ class GroupFitter(object):
         outsteps *= signs
         return outsteps
 
-    def steps(self,pars,bounds=None,dx=0.2):
+    def steps(self,pars,bounds=None,dx=0.5):
         """ Return step sizes to use when fitting the stellar parameters."""
         npars = len(pars)
         fsteps = np.zeros(npars,float)
@@ -1049,10 +1069,14 @@ class GroupFitter(object):
             dostars = np.arange(self.nstars)
         for i in dostars:
             pars1 = allpars[i*3:(i+1)*3]
-            n1 = self.starfitnpix(i)
-            xind1 = self.starfitx(i)
-            yind1 = self.starfity(i)
-            invind1 = self.starfitinvindex(i)
+            #n1 = self.starfitnpix(i)
+            #xind1 = self.starfitx(i)
+            #yind1 = self.starfity(i)
+            #invind1 = self.starfitinvindex(i)
+            n1 = self.starcount[i]
+            invind1 = self.starindex[i,:n1]
+            xind1 = self.xflat[invind1]
+            yind1 = self.yflat[invind1]
             # we need the inverse index to the unique fitted pixels
             im1 = self.psf(xind1,yind1,pars1)
             allim[invind1] += im1
@@ -1072,7 +1096,7 @@ class GroupFitter(object):
         return allim
 
     
-    def jac(self,args,allparams=False,trim=False):
+    def jac(self,args,trim=False,allparams=False):
         #,retmodel=False,trim=False,allparams=False,verbose=None):
         """ Calculate the jacobian for the pixels and parameters we are fitting"""
 
@@ -1111,10 +1135,14 @@ class GroupFitter(object):
             dostars = np.arange(self.nstars)
         for i in dostars:
             pars1 = allpars[i*3:(i+1)*3]
-            n1 = self.starfitnpix(i)
-            xind1 = self.starfitx(i)
-            yind1 = self.starfity(i)
-            invind1 = self.starfitinvindex(i)
+            #n1 = self.starfitnpix(i)
+            #xind1 = self.starfitx(i)
+            #yind1 = self.starfity(i)
+            #invind1 = self.starfitinvindex(i)
+            n1 = self.starcount[i]
+            invind1 = self.starindex[i,:n1]
+            xind1 = self.xflat[invind1]
+            yind1 = self.yflat[invind1]
             # we need the inverse index to the unique fitted pixels
             im1,jac1 = self.psfjac(xind1,yind1,pars1)
             jac[invind1,i*3] = jac1[:,0]
@@ -1157,7 +1185,7 @@ class GroupFitter(object):
         """ Return chi-squared """
         flux = self.resflat[self.usepix]-self.skyflat[self.usepix]
         wt = 1/self.errflat[self.usepix]**2
-        bestmodel = self.model(pars) #,allparams=True,trim=False,verbose=False)
+        bestmodel = self.model(pars,False,True)   # allparams,Trim
         resid = flux-bestmodel[self.usepix]
         chisq1 = np.sum(resid**2/self.errflat[self.usepix]**2)
         return chisq1
@@ -1172,7 +1200,7 @@ class GroupFitter(object):
         f0 = self.chisq(bestpar)
         f1 = self.chisq(bestpar+0.5*dbeta)
         f2 = self.chisq(bestpar+dbeta)
-        #print(f0,f1,f2)
+        print('linesearch:',f0,f1,f2)
         alpha = utils.quadratic_bisector(np.array([0.0,0.5,1.0]),np.array([f0,f1,f2]))
         alpha = np.minimum(np.maximum(alpha,0.0),1.0)  # 0<alpha<1
         if np.isfinite(alpha)==False:
@@ -1181,6 +1209,45 @@ class GroupFitter(object):
         new_dbeta = alpha * dbeta
         return alpha,new_dbeta
 
+    def score(self,x,y,err,im,pars):
+        """
+        The score is the partial derivative of the ln likelihood
+        """
+
+        m,j = self.psfjac(x,y,pars)
+
+        # ln likelihood is
+        # ln likelihood = -0.5 * Sum( (y_i - m_i)**2/err_i**2 + ln(2*pi*err_i**2))
+        #                 -0.5 * Sum( (1/err_i**2) * (y_i**2 - 2*y_i*m_i + m_i**2) + ln(2*pi*err_i**2))
+        # only one pixel
+        # d/dtheta []  = -0.5 * ( (1/err_i**2) * ( 0 - 2*y_i*dm_i/dtheta + 2*m_i*dm_i/dtheta) + 0)
+        #              = -0.5 * (  (1/err_i**2) * (-2*y_i*dm_i/dtheta + 2*m_i*dm_i/dtheta) )
+        scr = np.zeros(j.shape,float)
+        scr[:,0] = - (1/err**2) * (-im + m)*j[:,0]
+        scr[:,1] = - (1/err**2) * (-im + m)*j[:,1]
+        scr[:,2] = - (1/err**2) * (-im + m)*j[:,2]
+        return scr
+ 
+    def information(self,x,y,err,pars):
+        """
+        This calculates the "information" in pixels for a given star.
+        x/y/err for a set of pixels
+        pars are [amp,xc,yc] for a star
+        """
+
+        m,j = self.psfjac(x,y,pars)
+
+        # |dm/dtheta| * (S/N)
+        # where dm/dtheta is given by the Jacobian
+        # and we use the model for the "signal"
+
+        # since there are 3 parameters, we are going to add up
+        # partial derivatives for all three
+        info = (np.abs(j[:,0])+np.abs(j[:,1])+np.abs(j[:,2])) * (m/err)**2
+
+        return info
+        
+        
     def ampfit(self,trim=True):
         """ Fit the amps only for the stars."""
 
@@ -1364,7 +1431,7 @@ class GroupFitter(object):
         #  using rss gives values consistent with what curve_fit returns
         #bestmodel = self.model(xdata,*self.pars,allparams=True,trim=False,verbose=False)
         #resid = self.imflatten-self.skyflatten-bestmodel
-        bestmodel = self.model(self.pars,allparams=True,trim=False,verbose=False)
+        bestmodel = self.model(self.pars,False,True,False)   # trim,allparams
         resid = self.imflat-bestmodel-self.skyflat
         #cov = cov_orig * (np.sum(resid**2)/(self.ntotpix-len(self.pars)))
         # Use chi-squared, since we are doing the weighted least-squares and weighted Hessian
@@ -1376,7 +1443,7 @@ class GroupFitter(object):
         return cov
 
         
-@njit
+#@njit
 def fit(psf,image,error,tab,fitradius=0.0,recenter=True,maxiter=10,minpercdiff=0.5,
         reskyiter=2,nofreeze=False,skyfit=True,absolute=False,verbose=False):
     """
@@ -1461,7 +1528,7 @@ def fit(psf,image,error,tab,fitradius=0.0,recenter=True,maxiter=10,minpercdiff=0
     
     # Make bounds
     #  this requires all 3*Nstars parameters to be input
-    bounds = gf.mkbounds(initpar,image.shape,xoff=2)    
+    bounds = gf.mkbounds(initpar,image.shape,2)    
 
     # Iterate
     bestpar_all = initpar.copy()        
@@ -1482,9 +1549,9 @@ def fit(psf,image,error,tab,fitradius=0.0,recenter=True,maxiter=10,minpercdiff=0
         # Jacobian solvers
         # Get the Jacobian and model
         #  only for pixels that are affected by the "free" parameters
-        m,jac = gf.jac(bestpar,trim=True)
+        m,jac = gf.jac(bestpar,True,False)   # trim,allparams
         # Residuals
-        dy = gf.resflat[gf.usepix]-m[gf.usepix]-gf.skyflat[gf.usepix]
+        dy = gf.resflat[gf.usepix]-gf.skyflat[gf.usepix]-m
         # Weights
         wt = 1/gf.errflat[gf.usepix]**2
         # Solve Jacobian
@@ -1492,8 +1559,7 @@ def fit(psf,image,error,tab,fitradius=0.0,recenter=True,maxiter=10,minpercdiff=0
         dbeta_free[~np.isfinite(dbeta_free)] = 0.0  # deal with NaNs, shouldn't happen
         dbeta = np.zeros(len(gf.pars),np.float64)
         dbeta[gf.freepars] = dbeta_free
-        chisq = np.sum(dy**2 * wt.ravel())/len(dy)
-            
+
         # Perform line search
         alpha,new_dbeta_free = gf.linesearch(bestpar,dbeta_free,m,jac)
         new_dbeta = np.zeros(len(gf.pars),float)
@@ -1502,7 +1568,6 @@ def fit(psf,image,error,tab,fitradius=0.0,recenter=True,maxiter=10,minpercdiff=0
         # Update parameters
         oldpar = bestpar.copy()
         oldpar_all = bestpar_all.copy()
-        #bestpar_all = gf.newpars(gf.pars,dbeta,bounds,maxsteps)
         bestpar_all = gf.newpars(gf.pars,new_dbeta,bounds,maxsteps)            
         bestpar = bestpar_all[gf.freepars]
         # Check differences and changes
@@ -1533,14 +1598,22 @@ def fit(psf,image,error,tab,fitradius=0.0,recenter=True,maxiter=10,minpercdiff=0
                 print('Nfrozen stars = '+str(gf.nfreezestars))
                 print('Nfree pars = '+str(npar))
         else:
-            gf.pars = bestpar            
+            gf.pars[:len(bestpar)] = bestpar    # also works if skyfit=False
         maxpercdiff = np.max(percdiff)
 
         # Get model and chisq
-        bestmodel = gf.model(gf.pars,allparams=True)
+        bestmodel = gf.model(gf.pars,False,True)  # trim,allparams
         resid = gf.imflat-bestmodel-gf.skyflat
         chisq = np.sum(resid**2/gf.errflat**2)
-              
+
+        # from gf.chisq() method
+        # flux = self.resflat[self.usepix]-self.skyflat[self.usepix]
+        # wt = 1/self.errflat[self.usepix]**2
+        # bestmodel = self.model(pars) #,allparams=True,trim=False,verbose=False)
+        # resid = flux-bestmodel[self.usepix]
+        # chisq1 = np.sum(resid**2/self.errflat[self.usepix]**2)
+
+        
         if verbose:
             print('Iter = ',gf.niter)
             print('Pars = ',gf.pars)
@@ -1551,7 +1624,7 @@ def fit(psf,image,error,tab,fitradius=0.0,recenter=True,maxiter=10,minpercdiff=0
         # Re-estimate the sky
         if gf.niter % reskyiter == 0:
             print('Re-estimating the sky')
-            gf.sky()
+            #gf.sky()
 
         if verbose:
             print('iter dt =',(clock()-start0)/1e9,'sec.')
@@ -1559,7 +1632,8 @@ def fit(psf,image,error,tab,fitradius=0.0,recenter=True,maxiter=10,minpercdiff=0
         gf.niter += 1     # increment counter
 
         print('niter=',gf.niter)
-            
+
+        import pdb; pdb.set_trace()
         
     # Check that all starniter are set properly
     #  if we stopped "prematurely" then not all stars were frozen
