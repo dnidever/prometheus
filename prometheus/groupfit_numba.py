@@ -359,8 +359,8 @@ spec = [
     ('starfit_bbox', types.int32[:,:]),
     ('starfit_ndata', types.int32[:]),
     ('starfit_invindex', types.int64[:,:]),
-    ('starindex', types.int64[:,:]),
-    ('starcount', types.int64[:]),
+    ('starflat_index', types.int64[:,:]),
+    ('starflat_ndata', types.int64[:]),
     ('ntotpix', types.int32),
     ('imflat', types.float64[:]),
     ('resflat', types.float64[:]),
@@ -521,20 +521,20 @@ class GroupFitter(object):
 
         # For all of the fitting pixels, find the ones that
         # a given star contributes to (basically within its PSF radius)
-        starindex = np.zeros((self.nstars,self.ntotpix),np.int64)-1
-        starcount = np.zeros(self.nstars,np.int64)
+        starflat_index = np.zeros((self.nstars,self.ntotpix),np.int64)-1
+        starflat_ndata = np.zeros(self.nstars,np.int64)
         for i in range(self.ntotpix):
             x1 = self.xflat[i]
             y1 = self.yflat[i]
             for j in range(self.nstars):
                 r = np.sqrt((self.xflat[i]-self.starxcen[j])**2 + (self.yflat[i]-self.starycen[j])**2)
                 if r <= self.npsfpix:
-                    starindex[j,starcount[j]] = i
-                    starcount[j] += 1
-        maxcount = np.max(starcount)
-        starindex = starindex[:,:maxcount]
-        self.starindex = starindex
-        self.starcount = starcount
+                    starflat_index[j,starflat_ndata[j]] = i
+                    starflat_ndata[j] += 1
+        maxndata = np.max(starflat_ndata)
+        starflat_index = starflat_index[:,:maxndata]
+        self.starflat_index = starflat_index
+        self.starflat_ndata = starflat_ndata
                     
             
         # We want to know for each star which pixels (that are being fit)
@@ -720,6 +720,23 @@ class GroupFitter(object):
         n = self.starfit_ndata[i]
         return self.starfit_invindex[i,:n]
 
+    def starflatnpix(self,i):
+        """ Return the number of flat pixels for a star."""
+        return self.starflat_ndata[i]
+    
+    def starflatindex(self,i):
+        """ Return (reverse) index for a star's flat pixels."""
+        n = self.starflat_ndata[i]
+        return self.starflat_index[i,:n]
+        
+    def starflatx(self,i):
+        """ Return star's flat pixel's x values."""
+        return self.xflat[self.starflatindex(i)]
+
+    def starflaty(self,i):
+        """ Return star's flat pixel's y values."""
+        return self.yflat[self.starflatindex(i)]
+    
     def starfitchisq(self,i):
         """ Return chisq of current best-fit for one star."""
         pars1,xind1,yind1,ravelind1,invind1 = self.getstarfit(i)
@@ -1069,12 +1086,8 @@ class GroupFitter(object):
             dostars = np.arange(self.nstars)
         for i in dostars:
             pars1 = allpars[i*3:(i+1)*3]
-            #n1 = self.starfitnpix(i)
-            #xind1 = self.starfitx(i)
-            #yind1 = self.starfity(i)
-            #invind1 = self.starfitinvindex(i)
-            n1 = self.starcount[i]
-            invind1 = self.starindex[i,:n1]
+            n1 = self.starflat_ndata[i]
+            invind1 = self.starflat_index[i,:n1]
             xind1 = self.xflat[invind1]
             yind1 = self.yflat[invind1]
             # we need the inverse index to the unique fitted pixels
@@ -1135,12 +1148,8 @@ class GroupFitter(object):
             dostars = np.arange(self.nstars)
         for i in dostars:
             pars1 = allpars[i*3:(i+1)*3]
-            #n1 = self.starfitnpix(i)
-            #xind1 = self.starfitx(i)
-            #yind1 = self.starfity(i)
-            #invind1 = self.starfitinvindex(i)
-            n1 = self.starcount[i]
-            invind1 = self.starindex[i,:n1]
+            n1 = self.starflat_ndata[i]
+            invind1 = self.starflat_index[i,:n1]
             xind1 = self.xflat[invind1]
             yind1 = self.yflat[invind1]
             # we need the inverse index to the unique fitted pixels

@@ -1967,3 +1967,263 @@ class Table(object):
                 print(rows[i],'out of bounds for',self.nrows,'rows')
                 continue
             self.data[ind[0],rows[i]] = data[i]
+
+
+@njit
+def starbbox(coords,imshape,radius):
+    """                                                                                         
+    Return the boundary box for a star given radius and image size.                             
+                                                                                                
+    Parameters                                                                                  
+    ----------                                                                                  
+    coords: list or tuple                                                                       
+       Central coordinates (xcen,ycen) of star (*absolute* values).                             
+    imshape: list or tuple                                                                      
+       Image shape (ny,nx) values.  Python images are (Y,X).                                    
+    radius: float                                                                               
+       Radius in pixels.                                                                        
+                                                                                                
+    Returns                                                                                     
+    -------                                                                                     
+    bbox : BoundingBox object                                                                   
+       Bounding box of the x/y ranges.                                                          
+       Upper values are EXCLUSIVE following the python convention.                              
+                                                                                                
+    """
+
+    # pixels span +/-0.5 pixels in each direction
+    # so pixel x=5 spans x=4.5-5.5
+    # Use round() to get the value of the pixel that is covers
+    # the coordinate
+    # to include pixels at the bottom but not the top we have to
+    # subtract a tiny bit before we round
+    eta = 1e-5
+
+    # Star coordinates
+    xcen,ycen = coords
+    ny,nx = imshape   # python images are (Y,X)
+    x0 = xcen-radius
+    x1 = xcen+radius
+    y0 = ycen-radius
+    y1 = ycen+radius
+    xlo = np.maximum(int(np.round(x0-eta)),0)
+    xhi = np.minimum(int(np.round(x1-eta))+1,nx)
+    ylo = np.maximum(int(np.round(y0-eta)),0)
+    yhi = np.minimum(int(np.round(y1-eta))+1,ny)
+    # add 1 at the upper end because those values are EXCLUDED
+    # by the standard python convention
+
+    # The old way of doing it
+    #xlo = np.maximum(int(np.floor(xcen-radius)),0)
+    #xhi = np.minimum(int(np.ceil(xcen+radius+1)),nx)
+    #ylo = np.maximum(int(np.floor(ycen-radius)),0)
+    #yhi = np.minimum(int(np.ceil(ycen+radius+1)),ny)
+    return np.array([xlo,xhi,ylo,yhi])
+
+
+@njit
+def getstar(imshape,xcen,ycen,hpsfnpix,fitradius):
+    """ Return a star's full footprint and fitted pixels data."""
+    # always return the same size
+    # a distance of 6.2 pixels spans 6 full pixels but you could have
+    # 0.1 left on one side and 0.1 left on the other side
+    # that's why we have to add 2 pixels
+    nfpix = hpsfnpix*2+1
+    fbbox = starbbox((xcen,ycen),imshape,hpsfnpix)
+    nfx = fbbox[1]-fbbox[0]
+    nfy = fbbox[3]-fbbox[2]
+    # extra buffer is ALWAYS at the end of each dimension    
+    fxdata = np.zeros(nfpix*nfpix,np.int64)-1
+    fydata = np.zeros(nfpix*nfpix,np.int64)-1
+    fravelindex = np.zeros(nfpix*nfpix,np.int64)-1
+    fcount = 0
+    # Fitting pixels
+    npix = int(np.floor(2*fitradius))+2
+    bbox = starbbox((xcen,ycen),imshape,fitradius)
+    nx = bbox[1]-bbox[0]
+    ny = bbox[3]-bbox[2]
+    xdata = np.zeros(npix*npix,np.int64)-1
+    ydata = np.zeros(npix*npix,np.int64)-1
+    ravelindex = np.zeros(npix*npix,np.int64)-1
+    mask = np.zeros(npix*npix,np.int8)
+    fcount = 0
+    count = 0
+    for j in range(nfpix):
+        y = j + fbbox[2]
+        for i in range(nfpix):
+            x = i + fbbox[0]
+            r = np.sqrt((x-xcen)**2 + (y-ycen)**2)
+            if x>=fbbox[0] and x<=fbbox[1]-1 and y>=fbbox[2] and y<=fbbox[3]-1:
+                if r <= 1.0*hpsfnpix:
+                    fxdata[fcount] = x
+                    fydata[fcount] = y
+                    fmulti_index = (np.array([y]),np.array([x]))
+                    fravelindex[fcount] = ravel_multi_index(fmulti_index,imshape)[0]
+                    fcount += 1
+                if r <= fitradius:
+                    xdata[count] = x
+                    ydata[count] = y
+                    multi_index = (np.array([y]),np.array([x]))
+                    ravelindex[count] = ravel_multi_index(multi_index,imshape)[0]
+                    mask[count] = 1
+                    count += 1
+    return (fxdata,fydata,fravelindex,fbbox,nfx,nfy,fcount,
+            xdata,ydata,ravelindex,bbox,count,mask)
+
+@njit
+def collatestars(imshape,starx,stary,hpsfnpix,fitradius):
+    """ Get full footprint and fitted pixels data for all stars."""
+    nstars = len(starx)
+    nfpix = 2*hpsfnpix+1
+    npix = int(np.floor(2*fitradius))+2
+    # Full footprint arrays
+    fxdata = np.zeros((nstars,nfpix*nfpix),np.int64)
+    fydata = np.zeros((nstars,nfpix*nfpix),np.int64)
+    fravelindex = np.zeros((nstars,nfpix*nfpix),np.int64)
+    fbbox = np.zeros((nstars,4),np.int32)
+    fshape = np.zeros((nstars,2),np.int32)
+    fndata = np.zeros(nstars,np.int32)
+    # Fitting pixel arrays
+    xdata = np.zeros((nstars,npix*npix),np.int64)
+    ydata = np.zeros((nstars,npix*npix),np.int64)
+    ravelindex = np.zeros((nstars,npix*npix),np.int64)
+    bbox = np.zeros((nstars,4),np.int32)
+    shape = np.zeros((nstars,2),np.int32)
+    ndata = np.zeros(nstars,np.int32)
+    mask = np.zeros((nstars,npix*npix),np.int8)
+    for i in range(nstars):
+        out = getstar(imshape,starx[i],stary[i],hpsfnpix,fitradius)
+        # full footprint information
+        fxdata1,fydata1,fravelindex1,fbbox1,fnx1,fny1,fn1 = out[:7]
+        fxdata[i,:] = fxdata1
+        fydata[i,:] = fydata1
+        fravelindex[i,:] = fravelindex1
+        fbbox[i,:] = fbbox1
+        fshape[i,0] = fny1
+        fshape[i,1] = fnx1
+        fndata[i] = fn1
+        # fitting pixel information
+        xdata1,ydata1,ravelindex1,bbox1,n1,mask1 = out[7:]
+        xdata[i,:] = xdata1
+        ydata[i,:] = ydata1
+        ravelindex[i,:] = ravelindex1
+        bbox[i,:] = bbox1
+        ndata[i] = n1
+        mask[i,:] = mask1
+    # Trim arrays
+    maxfn = np.max(fndata)
+    fxdata = fxdata[:,:maxfn]
+    fydata = fydata[:,:maxfn]
+    fravelindex = fravelindex[:,:maxfn]
+    maxn = np.max(ndata)
+    xdata = xdata[:,:maxn]
+    ydata = ydata[:,:maxn]
+    ravelindex = ravelindex[:,:maxn]
+    mask = mask[:,:maxn]
+    
+    return (fxdata,fydata,fravelindex,fbbox,fshape,fndata,
+            xdata,ydata,ravelindex,bbox,ndata,mask)
+
+
+@njit
+def getfullstar(imshape,xcen,ycen,hpsfnpix):
+    """ Return the entire footprint image/error/x/y arrays for one star."""
+    # always return the same size
+    # a distance of 6.2 pixels spans 6 full pixels but you could have
+    # 0.1 left on one side and 0.1 left on the other side
+    # that's why we have to add 2 pixels
+    npix = hpsfnpix*2+1
+    bbox = starbbox((xcen,ycen),imshape,hpsfnpix)
+    nx = bbox[1]-bbox[0]
+    ny = bbox[3]-bbox[2]
+    # extra buffer is ALWAYS at the end of each dimension    
+    xdata = np.zeros(npix*npix,np.int32)-1
+    ydata = np.zeros(npix*npix,np.int32)-1
+    ravelindex = np.zeros(npix*npix,np.int64)-1
+    count = 0
+    for j in range(npix):
+        y = j + bbox[2]
+        for i in range(npix):
+            x = i + bbox[0]
+            if x>=bbox[0] and x<=bbox[1]-1 and y>=bbox[2] and y<=bbox[3]-1:
+                xdata[count] = x
+                ydata[count] = y
+                multi_index = (np.array([y]),np.array([x]))
+                ravelindex[count] = ravel_multi_index(multi_index,imshape)[0]
+                count += 1
+    return xdata,ydata,ravelindex,bbox,nx,ny,count
+
+@njit
+def collatefullstars(imshape,starx,stary,hpsfnpix):
+    """ Get the entire footprint image/error/x/y for all of the stars."""
+    nstars = len(starx)
+    npix = 2*hpsfnpix+1
+    # Get xdata, ydata, error
+    xdata = np.zeros((nstars,npix*npix),np.int32)
+    ydata = np.zeros((nstars,npix*npix),np.int32)
+    ravelindex = np.zeros((nstars,npix*npix),np.int64)
+    bbox = np.zeros((nstars,4),np.int32)
+    shape = np.zeros((nstars,2),np.int32)
+    ndata = np.zeros(nstars,np.int32)
+    for i in range(nstars):
+        xdata1,ydata1,ravelindex1,bbox1,nx1,ny1,n1 = getfullstar(imshape,starx[i],stary[i],hpsfnpix)
+        xdata[i,:] = xdata1
+        ydata[i,:] = ydata1
+        ravelindex[i,:] = ravelindex1
+        bbox[i,:] = bbox1
+        shape[i,0] = ny1
+        shape[i,1] = nx1
+        ndata[i] = n1
+    return xdata,ydata,ravelindex,bbox,shape,ndata
+
+@njit
+def getfitstar(imshape,xcen,ycen,fitradius):
+    """ Get the fitting pixel information for a single star."""
+    npix = int(np.floor(2*fitradius))+2
+    bbox = starbbox((xcen,ycen),imshape,fitradius)
+    nx = bbox[1]-bbox[0]
+    ny = bbox[3]-bbox[2]
+    xdata = np.zeros(npix*npix,np.int32)-1
+    ydata = np.zeros(npix*npix,np.int32)-1
+    ravelindex = np.zeros(npix*npix,np.int64)-1
+    mask = np.zeros(npix*npix,np.int32)
+    count = 0
+    for j in range(ny):
+        y = j + bbox[2]
+        for i in range(nx):
+            x = i + bbox[0]
+            r = np.sqrt((x-xcen)**2 + (y-ycen)**2)
+            if r <= fitradius:
+                xdata[count] = x
+                ydata[count] = y
+                multi_index = (np.array([y]),np.array([x]))
+                ravelindex[count] = ravel_multi_index(multi_index,imshape)[0]
+                mask[count] = 1
+                count += 1
+    return xdata,ydata,ravelindex,count,mask
+        
+@njit
+def collatefitstars(imshape,starx,stary,fitradius):
+    """ Get the fitting pixel information for all stars."""
+    nstars = len(starx)
+    npix = int(np.floor(2*fitradius))+2
+    # Get xdata, ydata, error
+    maxpix = nstars*(npix)**2
+    xdata = np.zeros((nstars,npix*npix),np.int32)
+    ydata = np.zeros((nstars,npix*npix),np.int32)
+    ravelindex = np.zeros((nstars,npix*npix),np.int64)
+    mask = np.zeros((nstars,npix*npix),np.int32)
+    ndata = np.zeros(nstars,np.int32)
+    bbox = np.zeros((nstars,4),np.int32)
+    for i in range(nstars):
+        xcen = starx[i]
+        ycen = stary[i]
+        bb = starbbox((xcen,ycen),imshape,fitradius)
+        xdata1,ydata1,ravelindex1,n1,mask1 = getfitstar(imshape,xcen,ycen,fitradius)
+        xdata[i,:] = xdata1
+        ydata[i,:] = ydata1
+        ravelindex[i,:] = ravelindex1
+        mask[i,:] = mask1
+        ndata[i] = n1
+        bbox[i,:] = bb
+    return xdata,ydata,ravelindex,bbox,ndata,mask
