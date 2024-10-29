@@ -29,6 +29,9 @@ spec = [
     ('image', types.float64[:,:]),
     ('error', types.float64[:,:]),
     ('skyim', types.float64[:,:]),
+    ('resid', types.float64[:]),
+    ('xx', types.int64[:]),
+    ('yy', types.int64[:]),
     ('tab', types.float64[:,:]),
     ('initpars', types.float64[:,:]),
     ('pars', types.float64[:]),
@@ -56,17 +59,10 @@ spec = [
     ('star_bbox', types.int32[:,:]),
     ('star_shape', types.int32[:,:]),
     ('star_ndata', types.int32[:]),
-    ('starfit_xdata', types.int64[:,:]),
-    ('starfit_ydata', types.int64[:,:]),
     ('starfit_ravelindex', types.int64[:,:]),
-    ('starfit_mask', types.int8[:,:]),
     ('starfit_bbox', types.int32[:,:]),
     ('starfit_ndata', types.int32[:]),
-    ('starfit_invindex', types.int64[:,:]),
     ('ntotpix', types.int32),
-    ('imflat', types.float64[:]),
-    ('resflat', types.float64[:]),
-    ('errflat', types.float64[:]),
     ('xflat', types.int64[:]),
     ('yflat', types.int64[:]),
     ('indflat', types.int64[:]),
@@ -96,18 +92,22 @@ class AllFitter(object):
         if psforder>1:
             self.psforder = 1
         self.verbose = verbose
-        self.image = image.astype(np.float64)
+        ny,nx = image.shape                             # save image dimensions, python images are (Y,X)
+        self.nx = nx
+        self.ny = ny
+        self.imshape = np.array([ny,nx])
+        self.image = image.copy().astype(np.float64)
         self.error = error.astype(np.float64)
         self.skyim = np.zeros(image.shape,np.float64)
+        self.resid = image.copy().astype(np.float64).flatten()   # flatten makes it easier to modify
+        xx,yy = utils.meshgrid(np.arange(nx),np.arange(ny))
+        self.xx = xx.flatten()
+        self.yy = yy.flatten()
         self.tab = tab                                  # ID, amp, xcen, ycen
         self.initpars = tab[:,1:4]                      # amp, xcen, ycen
         self.nstars = len(tab)                          # number of stars
         self.niter = 0                                  # number of iterations in the solver
         self.npsfpix = npix                             # shape of PSF
-        ny,nx = image.shape                             # save image dimensions, python images are (Y,X)
-        self.nx = nx
-        self.ny = ny
-        self.imshape = np.array([ny,nx])
         self.npix = npix
         self.fitradius = fitradius
         self.nfitpix = int(np.ceil(fitradius))  # +/- nfitpix
@@ -156,12 +156,12 @@ class AllFitter(object):
         # Fitting arrays
         xdata,ydata,ravelindex,sbbox,sndata,smask = out[6:]
         #fxdata,fydata,fravelindex,fbbox,fndata,fmask = collatefitstars(self.imshape,xcen,ycen,fitradius)
-        self.starfit_xdata = xdata
-        self.starfit_ydata = ydata
+        #self.starfit_xdata = xdata
+        #self.starfit_ydata = ydata
         self.starfit_ravelindex = ravelindex
         self.starfit_bbox = sbbox
         self.starfit_ndata = sndata
-        self.starfit_mask = smask
+        #self.starfit_mask = smask
 
         # Combine all of the X and Y values (of the pixels we are fitting) into one array
         ntotpix = np.sum(self.starfit_ndata)
@@ -170,8 +170,11 @@ class AllFitter(object):
         count = 0
         for i in range(self.nstars):
             n1 = self.starfit_ndata[i]
-            xdata1 = self.starfit_xdata[i,:n1]
-            ydata1 = self.starfit_ydata[i,:n1]
+            ravelind1 = self.starfit_ravelindex[i,:n1]
+            xdata1 = self.xx[ravelind1]
+            ydata1 = self.yy[ravelind1]
+            #xdata1 = self.starfit_xdata[i,:n1]
+            #ydata1 = self.starfit_ydata[i,:n1]
             xall[count:count+n1] = xdata1
             yall[count:count+n1] = ydata1
             count += n1
@@ -189,14 +192,14 @@ class AllFitter(object):
         # x/y coordinates of the unique fitted pixels
         
         # Save information on the "flattened" and unique fitted pixel arrays
-        imflat = np.zeros(len(uind1),np.float64)
-        imflat[:] = image.ravel()[uind1]
-        errflat = np.zeros(len(uind1),np.float64)
-        errflat[:] = error.ravel()[uind1]
+        #imflat = np.zeros(len(uind1),np.float64)
+        #imflat[:] = image.ravel()[uind1]
+        #errflat = np.zeros(len(uind1),np.float64)
+        #errflat[:] = error.ravel()[uind1]
         self.ntotpix = ntotpix
-        self.imflat = imflat
-        self.resflat = imflat.copy()
-        self.errflat = errflat
+        #self.imflat = imflat
+        #self.resflat = imflat.copy()
+        #self.errflat = errflat
         self.xflat = xflat
         self.yflat = yflat
         self.indflat = uind1
@@ -206,16 +209,16 @@ class AllFitter(object):
         
         # Add inverse index for the fitted pixels
         #  to be used with imflat/resflat/errflat/xflat/yflat/indflat
-        maxfitpix = np.max(self.starfit_ndata)
-        self.starfit_invindex = np.zeros((self.nstars,maxfitpix),np.int64)-1
-        for i in range(self.nstars):
-            n1 = self.starfit_ndata[i]
-            if i==0:
-                invlo = 0
-            else:
-                invlo = np.sum(self.starfit_ndata[:i])
-            invindex1 = invindex[invlo:invlo+n1]
-            self.starfit_invindex[i,:n1] = invindex1
+        #maxfitpix = np.max(self.starfit_ndata)
+        #self.starfit_invindex = np.zeros((self.nstars,maxfitpix),np.int64)-1
+        #for i in range(self.nstars):
+        #    n1 = self.starfit_ndata[i]
+        #    if i==0:
+        #        invlo = 0
+        #    else:
+        #        invlo = np.sum(self.starfit_ndata[:i])
+        #    invindex1 = invindex[invlo:invlo+n1]
+        #    self.starfit_invindex[i,:n1] = invindex1
 
 
         # Bounding box of all the stars
@@ -229,6 +232,19 @@ class AllFitter(object):
         # Create initial sky image
         self.skyim = utils.sky(self.image)
         #self.sky()
+
+        # This is what we need to do to estimate sky from the 1D resid array
+        #dum = utils.sky(self.resid.copy().reshape(self.imshape[0],self.imshape[1]))
+
+        # Subtract the initial models from the residual array
+        for i in range(self.nstars):
+            pars1 = self.starpars[i]
+            n1 = self.starfit_ndata[i]
+            ravelind1 = self.starfitravelindex(i)
+            xind1 = self.xx[ravelind1]
+            yind1 = self.yy[ravelind1]
+            m = self.psf(xind1,yind1,pars1)
+            self.resid[ravelind1] -= m
         
         return
 
@@ -286,10 +302,10 @@ class AllFitter(object):
 
       
 
-    @property
-    def skyflat(self):
-        """ Return the sky values for the pixels that we are fitting."""
-        return self.skyim.ravel()[self.indflat]
+    #@property
+    #def skyflat(self):
+    #    """ Return the sky values for the pixels that we are fitting."""
+    #    return self.skyim.ravel()[self.indflat]
 
     def starx(self,i):
         """ Return star's full circular footprint x array."""
@@ -317,12 +333,14 @@ class AllFitter(object):
     def starfitx(self,i):
         """ Return star's fitting pixels x values."""
         n = self.starfit_ndata[i]
-        return self.starfit_xdata[i,:n]
+        ravelind = self.starfit_ravelindex[i,:n]
+        return self.xx[ravelind]
 
     def starfity(self,i):
         """ Return star's fitting pixels y values."""
         n = self.starfit_ndata[i]
-        return self.starfit_ydata[i,:n]
+        ravelind = self.starfit_ravelindex[i,:n]
+        return self.xx[ravelind]
 
     def starfitbbox(self,i):
         """ Return star's fitting pixels bounding box."""
@@ -342,26 +360,9 @@ class AllFitter(object):
         n = self.starfit_ndata[i]
         return self.starfit_invindex[i,:n]
 
-    def starflatnpix(self,i):
-        """ Return the number of flat pixels for a star."""
-        return self.starflat_ndata[i]
-    
-    def starflatindex(self,i):
-        """ Return (reverse) index for a star's flat pixels."""
-        n = self.starflat_ndata[i]
-        return self.starflat_index[i,:n]
-        
-    def starflatx(self,i):
-        """ Return star's flat pixel's x values."""
-        return self.xflat[self.starflatindex(i)]
-
-    def starflaty(self,i):
-        """ Return star's flat pixel's y values."""
-        return self.yflat[self.starflatindex(i)]
-    
     def starfitchisq(self,i):
         """ Return chisq of current best-fit for one star."""
-        pars1,xind1,yind1,ravelind1,invind1 = self.getstarfit(i)
+        pars1,xind1,yind1,ravelind1 = self.getstarfit(i)
         n1 = self.starfitnpix(i)
         flux1 = self.image.ravel()[ravelind1].copy()
         err1 = self.error.ravel()[ravelind1].copy()
@@ -372,7 +373,7 @@ class AllFitter(object):
     
     def starfitrms(self,i):
         """ Return rms of current best-fit for one star."""
-        pars1,xind1,yind1,ravelind1,invind1 = self.getstarfit(i)
+        pars1,xind1,yind1,ravelind1 = self.getstarfit(i)
         n1 = self.starfitnpix(i)
         flux1 = self.image.ravel()[ravelind1].copy()
         err1 = self.error.ravel()[ravelind1].copy()
@@ -386,36 +387,35 @@ class AllFitter(object):
         """ Get star full footprint information."""
         pars = self.pars[i*3:(i+1)*3]
         n = self.star_ndata[i]
-        xind = self.star_xdata[i,:n]
-        yind = self.star_ydata[i,:n]
-        ravelindex = self.star_ravelindex[i,:n]
+        ravelindex = self.star_ravelindex[i,:n]        
+        xind = self.xx[ravelindex]
+        yind = self.yy[ravelindex]
         return pars,xind,yind,ravelindex
     
     def getstarfit(self,i):
         """ Get a star fitting pixel information."""
         pars = self.pars[i*3:(i+1)*3]
         n = self.starfit_ndata[i]
-        xind = self.starfit_xdata[i,:n]
-        yind = self.starfit_ydata[i,:n]
         ravelindex = self.starfit_ravelindex[i,:n]
-        invindex = self.starfit_invindex[i,:n]
-        return pars,xind,yind,ravelindex,invindex
+        xind = self.xx[ravelindex]
+        yind = self.yy[ravelindex]
+        return pars,xind,yind,ravelindex
 
-    @property
-    def residfull(self):
-        """ Return the residual values of the fitted pixels in full 2D image format."""
-        resid = np.zeros(self.imshape[0]*self.imshape[1],np.float64)
-        resid[self.indflat] = self.resflat
-        resid = resid.reshape((self.imshape[0],self.imshape[1]))
-        return resid
+    # @property
+    # def residfull(self):
+    #     """ Return the residual values of the fitted pixels in full 2D image format."""
+    #     resid = np.zeros(self.imshape[0]*self.imshape[1],np.float64)
+    #     resid[self.indflat] = self.resflat
+    #     resid = resid.reshape((self.imshape[0],self.imshape[1]))
+    #     return resid
 
-    @property
-    def imfitfull(self):
-        """ Return the flux values of the fitted pixels in full 2D image format."""
-        im = np.zeros(self.imshape[0]*self.imshape[1],np.float64)
-        im[self.indflat] = self.imflat
-        im = im.reshape((self.imshape[0],self.imshape[1]))
-        return im
+    # @property
+    # def imfitfull(self):
+    #     """ Return the flux values of the fitted pixels in full 2D image format."""
+    #     im = np.zeros(self.imshape[0]*self.imshape[1],np.float64)
+    #     im[self.indflat] = self.imflat
+    #     im = im.reshape((self.imshape[0],self.imshape[1]))
+    #     return im
 
     @property
     def imfull(self):
@@ -488,14 +488,14 @@ class AllFitter(object):
                 # Save on what iteration this star was frozen
                 self.starniter[i] = self.niter+1
                 #print('freeze: subtracting model for star ',i)
-                pars1,xind1,yind1,ravelind1,invind1 = self.getstarfit(i)
+                pars1,xind1,yind1,ravelind1 = self.getstarfit(i)
                 n1 = len(xind1)
                 im1 = self.psf(xind1,yind1,pars1)
                 newmodel[ravelind1] += im1
             # Only keep the pixels being fit
             #  and subtract from the residuals
             newmodel1 = newmodel[self.indflat]
-            self.resflat -= newmodel1
+            ##self.resflat -= newmodel1
   
         # Return the new array of free parameters
         frzind = np.arange(len(frzpars))[np.where(frzpars==True)]
@@ -506,7 +506,7 @@ class AllFitter(object):
         """ Unfreeze all parameters and stars."""
         self.freezestars = np.zeros(self.nstars,np.bool_)
         self.freezepars = np.zeros(self.nstars*3+1,np.bool_)
-        self.resflat = self.imflat.copy()
+        ##self.resflat = self.imflat.copy()
 
 
     def mkbounds(self,pars,imshape,xoff=10):
@@ -635,7 +635,7 @@ class AllFitter(object):
 
     def modelstarfit(self,i,full=False):
         """ Return model of one star (only fitted pixels) with the current best values."""
-        pars,xind,yind,ravelind,invind = self.getstarfit(i)
+        pars,xind,yind,ravelind = self.getstarfit(i)
         m = self.psf(xind,yind,pars)        
         if full==True:
             modelim = np.zeros((self.imshape[0]*self.imshape[1]),np.float64)
@@ -730,28 +730,53 @@ class AllFitter(object):
         
         return allim
 
-    def starmodel(self,i):
-        """ Calculate the model for a star."""
+    def starmodelfull(self,i):
+        """ Calculate the model for a star for the full footprint."""
         # This is for a SINGLE star
         # Get all of the star data
-        pars,xind,yind,ravelindex,invindex = self.getstarfit(i)
+        pars,xind,yind,ravelindex,invindex = self.getstar(i)
         n = len(xind)
+        m = self.psf(xind,yind,pars)        
+        return m
+
+    def starmodel(self,i):
+        """ Calculate the model for a star for the fitted pixels."""
+        # This is for a SINGLE star
+        # Get all of the star data
+        pars,xind,yind,ravelindex = self.getstarfit(i)
         m = self.psf(xind,yind,pars)        
         return m
     
     def starjac(self,i):
-        """ Calculate the jacobian for a star."""
+        """ Calculate the jacobian for a star for the fitted pixels."""
         # This is for a SINGLE star
         # Get all of the star data
-        pars,xind,yind,ravelindex,invindex = self.getstarfit(i)
-        n = len(xind)
+        pars,xind,yind,ravelindex = self.getstarfit(i)
         m,j = self.psfjac(xind,yind,pars)        
         return m,j
 
+    def starfitim(self,i):
+        """ Return the image pixels for a star."""
+        n = self.starfit_ndata[i]
+        ravelind = self.starfit_ravelindex[i,:n]
+        return self.image.ravel()[ravelind]
+    
+    def starfiterr(self,i):
+        """ Return the error pixels for a star."""
+        n = self.starfit_ndata[i]
+        ravelind = self.starfit_ravelindex[i,:n]
+        return self.error.ravel()[ravelind]
+    
+    def starfitresid(self,i):
+        """ Return the resid pixels for a star."""
+        n = self.starfit_ndata[i]
+        ravelind = self.starfit_ravelindex[i,:n]
+        return self.resid[ravelind]
+    
     def chisq(self,pars):
         """ Return chi-squared """
-        flux = self.resflat[self.usepix]-self.skyflat[self.usepix]
-        wt = 1/self.errflat[self.usepix]**2
+        flux = self.resid-self.skyflat
+        wt = 1/self.errflat**2
         bestmodel = self.model(pars,False,True)   # allparams,Trim
         resid = flux-bestmodel[self.usepix]
         chisq1 = np.sum(resid**2/self.errflat[self.usepix]**2)
@@ -760,7 +785,7 @@ class AllFitter(object):
     def linesearch(self,bestpar,dbeta,m,jac):
         """ Perform line search along search gradient """
         # Residuals
-        flux = self.resflat-self.skyflat
+        flux = self.resid-self.skyflat
         # Weights
         wt = 1/self.errflat**2
         # Inside model() the parameters are limited to the PSF bounds()
@@ -803,7 +828,7 @@ class AllFitter(object):
         #bestmodel = self.model(xdata,*self.pars,allparams=True,trim=False,verbose=False)
         #resid = self.imflatten-self.skyflatten-bestmodel
         bestmodel = self.model(self.pars,False,True,False)   # trim,allparams
-        resid = self.imflat-bestmodel-self.skyflat
+        resid = self.image-bestmodel-self.skyflat
         #cov = cov_orig * (np.sum(resid**2)/(self.ntotpix-len(self.pars)))
         # Use chi-squared, since we are doing the weighted least-squares and weighted Hessian
         chisq = np.sum(resid**2/self.errflat**2)        
@@ -819,14 +844,17 @@ class AllFitter(object):
         single iteration of the non-linear least-squares loop
         """
 
-        invindex = self.starfitinvindex(i)
-        resid = self.resflat[invindex]
-        err = self.errflat[invindex]
+        # Do we want to 
+
+        pars = self.starpars[i]
+        fravelindex = self.starfitravelindex(i)
+        resid = self.resid[fravelindex]
+        err = self.error.ravel()[fravelindex]
         
         # Jacobian solvers
         # Get the Jacobian and model
         #  only for pixels that are affected by the "free" parameters
-        m,jac = self.jacstar(i)
+        m,jac = self.starjac(i)
         # Residuals
         #dy = self.resflat[self.usepix]-self.skyflat[self.usepix]-m
         # Weights
@@ -875,9 +903,20 @@ class AllFitter(object):
 
         # Get model and chisq
         bestmodel = self.model(self.pars,False,True)  # trim,allparams
-        resid = self.imflat-bestmodel-self.skyflat
+        resid = self.image-bestmodel-self.skyflat
         chisq = np.sum(resid**2/self.errflat**2)
 
+
+        pars,xind,yind,ravelindex = self.getstar(i)
+        
+        # Update the residuals for a star's full footprint
+        #  add in the previous full footprint model
+        #  and subtract the new full footprint model
+        prevmodel = self.psf(xind,yind,oldpars)
+        newmodel = self.psf(xind,yind,bestpar)
+        self.resid[ravelind] += prevmodel
+        self.resid[ravelind] -= newmodel
+        
         # from self.chisq() method
         # flux = self.resflat[self.usepix]-self.skyflat[self.usepix]
         # wt = 1/self.errflat[self.usepix]**2
@@ -1036,7 +1075,7 @@ class AllFitter(object):
     
         # Recalculate chi-squared and RMS of fit
         for i in range(nstars):
-            _,xind1,yind1,ravelind1,invind1 = self.getstarfit(i)
+            _,xind1,yind1,ravelind1 = self.getstarfit(i)
             n1 = self.starfitnpix(i)
             flux1 = image.ravel()[ravelind1].copy() #[yind1,xind1].copy()
             err1 = error.ravel()[ravelind1].copy()  #[yind1,xind1]
