@@ -103,9 +103,14 @@ class AllFitter(object):
         xx,yy = utils.meshgrid(np.arange(nx),np.arange(ny))
         self.xx = xx.flatten()
         self.yy = yy.flatten()
-        self.tab = tab                                  # ID, amp, xcen, ycen
-        self.initpars = tab[:,1:4]                      # amp, xcen, ycen
-        self.nstars = len(tab)                          # number of stars
+        # Order stars by flux, brightest first
+        si = np.argsort(tab[:,1])[::-1]  # largest amp first
+        self.tab = tab[si]                              # ID, amp, xcen, ycen
+        self.initpars = self.tab[:,1:4]                 # amp, xcen, ycen
+        self.nstars = len(self.tab)                     # number of stars
+        #self.tab = tab
+        #self.initpars = tab[:,1:4]                 # amp, xcen, ycen
+        #self.nstars = len(tab)                     # number of stars
         self.niter = 0                                  # number of iterations in the solver
         self.npsfpix = npix                             # shape of PSF
         self.npix = npix
@@ -239,8 +244,8 @@ class AllFitter(object):
         # Subtract the initial models from the residual array
         for i in range(self.nstars):
             pars1 = self.starpars[i]
-            n1 = self.starfit_ndata[i]
-            ravelind1 = self.starfitravelindex(i)
+            n1 = self.star_ndata[i]
+            ravelind1 = self.starravelindex(i)
             xind1 = self.xx[ravelind1]
             yind1 = self.yy[ravelind1]
             m = self.psf(xind1,yind1,pars1)
@@ -299,8 +304,6 @@ class AllFitter(object):
         for i in range(self.nstars):
             self.starsky[i] = self.skyim[int(np.round(self.starycen[i])),
                                          int(np.round(self.starxcen[i]))]
-
-      
 
     #@property
     #def skyflat(self):
@@ -773,33 +776,49 @@ class AllFitter(object):
         ravelind = self.starfit_ravelindex[i,:n]
         return self.resid[ravelind]
     
-    def chisq(self,pars):
-        """ Return chi-squared """
-        flux = self.resid-self.skyflat
-        wt = 1/self.errflat**2
-        bestmodel = self.model(pars,False,True)   # allparams,Trim
-        resid = flux-bestmodel[self.usepix]
-        chisq1 = np.sum(resid**2/self.errflat[self.usepix]**2)
-        return chisq1
+    # def starchisq(self,i,pars):
+    #     """ Return chi-squared """
+    #     fravelindex = self.starfitravelindex(i)
+    #     resid = self.resid[fravelindex]
+    #     # Subtract the sky?        
+    #     err = self.error.ravel()[fravelindex]
+    #     #flux = self.resid-self.skyflat
+    #     #wt = 1/self.errflat**2
+    #     wt = 1/wt**2
+    #     bestmodel = self.model(pars,False,True)   # allparams,Trim
+    #     resid = flux-bestmodel[self.usepix]
+    #     chisq1 = np.sum(resid**2/err**2)
+    #     return chisq1
     
-    def linesearch(self,bestpar,dbeta,m,jac):
-        """ Perform line search along search gradient """
-        # Residuals
-        flux = self.resid-self.skyflat
-        # Weights
-        wt = 1/self.errflat**2
-        # Inside model() the parameters are limited to the PSF bounds()
-        f0 = self.chisq(bestpar)
-        f1 = self.chisq(bestpar+0.5*dbeta)
-        f2 = self.chisq(bestpar+dbeta)
-        print('linesearch:',f0,f1,f2)
-        alpha = utils.quadratic_bisector(np.array([0.0,0.5,1.0]),np.array([f0,f1,f2]))
-        alpha = np.minimum(np.maximum(alpha,0.0),1.0)  # 0<alpha<1
-        if np.isfinite(alpha)==False:
-            alpha = 1.0
-        pars_new = bestpar + alpha * dbeta
-        new_dbeta = alpha * dbeta
-        return alpha,new_dbeta
+    # def starlinesearch(self,i,bestpar,dbeta,m,jac):
+    #     """ Perform line search along search gradient """
+    #     # Inside model() the parameters are limited to the PSF bounds()
+    #     fravelindex = self.starfitravelindex(i)
+    #     xind = self.xx[fravelindex]
+    #     yind = self.yy[fravelindex]
+    #     resid = self.resid[fravelindex]
+    #     # This has the previous best-fit model subtracted
+    #     #  add it back in
+    #     model0 = self.psf(xind,yind,bestpar)
+    #     data = resid + model0
+    #     # Subtract the sky?        
+    #     err = self.error.ravel()[fravelindex]
+    #     wt = 1/wt**2
+    #     # Models
+    #     model1 = self.psf(xind,yind,bestpar+0.5*dbeta)
+    #     model2 = self.psf(xind,yind,bestpar+dbeta)
+    #     chisq0 = np.sum((data-model0)**2/err**2)
+    #     chisq1 = np.sum((data-model1)**2/err**2)
+    #     chisq2 = np.sum((data-model2)**2/err**2)
+    #     print('linesearch:',chisq0,chisq1,chisq2)
+    #     alpha = utils.quadratic_bisector(np.array([0.0,0.5,1.0]),
+    #                                      np.array([chisq0,chisq1,chisq2]))
+    #     alpha = np.minimum(np.maximum(alpha,0.0),1.0)  # 0<alpha<1
+    #     if np.isfinite(alpha)==False:
+    #         alpha = 1.0
+    #     pars_new = bestpar + alpha * dbeta
+    #     new_dbeta = alpha * dbeta
+    #     return alpha,new_dbeta
         
     def cov(self):
         """ Determine the covariance matrix."""
@@ -844,17 +863,15 @@ class AllFitter(object):
         single iteration of the non-linear least-squares loop
         """
 
-        # Do we want to 
-
-        pars = self.starpars[i]
-        fravelindex = self.starfitravelindex(i)
+        # Get fitting pixel information
+        pars,fxind,fyind,fravelindex = self.getstarfit(i)
         resid = self.resid[fravelindex]
         err = self.error.ravel()[fravelindex]
         
         # Jacobian solvers
         # Get the Jacobian and model
         #  only for pixels that are affected by the "free" parameters
-        m,jac = self.starjac(i)
+        model0,j = self.psfjac(fxind,fyind,pars)
         # Residuals
         #dy = self.resflat[self.usepix]-self.skyflat[self.usepix]-m
         # Weights
@@ -864,35 +881,58 @@ class AllFitter(object):
         dbeta[~np.isfinite(dbeta)] = 0.0  # deal with NaNs, shouldn't happen
             
         # Perform line search
-        alpha,new_dbeta = self.linesearch(bestpar,dbeta,m,jac)
+        #alpha,new_dbeta = self.starlinesearch(i,bestpar,dbeta,m,jac)
+        # This has the previous best-fit model subtracted
+        #  add it back in
+        #model0 = self.psf(xind,yind,bestpar)
+        data = resid + model0
+        # Subtract the sky?        
+        #err = self.error.ravel()[fravelindex]
+        #wt = 1/wt**2
+        # Models
+        model1 = self.psf(fxind,fyind,pars+0.5*dbeta)
+        model2 = self.psf(fxind,fyind,pars+dbeta)
+        chisq0 = np.sum((data-model0)**2/err**2)
+        chisq1 = np.sum((data-model1)**2/err**2)
+        chisq2 = np.sum((data-model2)**2/err**2)
+        print('linesearch:',chisq0,chisq1,chisq2)
+        alpha = utils.quadratic_bisector(np.array([0.0,0.5,1.0]),
+                                         np.array([chisq0,chisq1,chisq2]))
+        alpha = np.minimum(np.maximum(alpha,0.0),1.0)  # 0<alpha<1
+        if np.isfinite(alpha)==False:
+            alpha = 1.0
+        pars_new = pars + alpha * dbeta
+        new_dbeta = alpha * dbeta
 
         # Update parameters
-        oldpar = bestpar.copy()
-        bestpar = self.newpars(bestpar,new_dbeta,bounds,maxsteps)
+        oldpars = pars.copy()
+        bestpars = self.newpars(pars,new_dbeta,bounds,maxsteps)
         # Check differences and changes
-        diff = np.abs(bestpar_all-oldpar_all)
+        diff = np.abs(bestpars-oldpars)
         percdiff = diff.copy()*0
-        percdiff[0] = diff[0]/np.maximum(oldpar[0],0.0001)*100  # amp
+        percdiff[0] = diff[0]/np.maximum(oldpars[0],0.0001)*100  # amp
         percdiff[1] = diff[1]*100               # x
         percdiff[2] = diff[2]*100               # y
         
         # Freeze parameters/stars that converged
         #  also subtract models of fixed stars
         #  also return new free parameters
-        if self.nofreeze==False:
-            frzpars = percdiff<=minpercdiff
-            freeparsind, = np.where(self.freezepars==False)
-            bestpar = self.freeze(bestpar,frzpars)
+        if self.nofreeze==False and np.sum(percdiff<=minpercdiff)==3:
+            # frzpars = percdiff<=minpercdiff
+            # freeparsind, = np.where(self.freezepars==False)
+            # bestpar = self.freeze(bestpar,frzpars)
 
             # set NITER for this star
 
+            self.freezestars[i] = True
             
-            # If the only free parameter is the sky offset,
-            #  then freeze it as well
-            if self.nfreepars==1 and self.freepars[-1]==True:
-                self.freezepars[-1] = True
-                bestpar = np.zeros((1),np.float64)
-            npar = len(bestpar)
+            
+            # # If the only free parameter is the sky offset,
+            # #  then freeze it as well
+            # if self.nfreepars==1 and self.freepars[-1]==True:
+            #     self.freezepars[-1] = True
+            #     bestpar = np.zeros((1),np.float64)
+            # npar = len(bestpar)
             if verbose:
                 print('Nfrozen pars = '+str(self.nfreezepars))
                 print('Nfrozen stars = '+str(self.nfreezestars))
@@ -902,28 +942,20 @@ class AllFitter(object):
         maxpercdiff = np.max(percdiff)
 
         # Get model and chisq
-        bestmodel = self.model(self.pars,False,True)  # trim,allparams
-        resid = self.image-bestmodel-self.skyflat
-        chisq = np.sum(resid**2/self.errflat**2)
-
-
-        pars,xind,yind,ravelindex = self.getstar(i)
-        
+        #bestmodel = self.model(self.pars,False,True)  # trim,allparams
+        #resid = self.image-bestmodel-self.skyflat
+        #chisq = np.sum(resid**2/self.errflat**2)
+        bestmodel = self.psf(fxind,fyind,bestpars)
+                
         # Update the residuals for a star's full footprint
         #  add in the previous full footprint model
         #  and subtract the new full footprint model
+        _,xind,yind,ravelindex = self.getstar(i)        
         prevmodel = self.psf(xind,yind,oldpars)
         newmodel = self.psf(xind,yind,bestpar)
         self.resid[ravelind] += prevmodel
         self.resid[ravelind] -= newmodel
-        
-        # from self.chisq() method
-        # flux = self.resflat[self.usepix]-self.skyflat[self.usepix]
-        # wt = 1/self.errflat[self.usepix]**2
-        # bestmodel = self.model(pars) #,allparams=True,trim=False,verbose=False)
-        # resid = flux-bestmodel[self.usepix]
-        # chisq1 = np.sum(resid**2/self.errflat[self.usepix]**2)
-        
+
         if verbose:
             print('Iter = ',self.niter)
             print('Pars = ',self.pars)
