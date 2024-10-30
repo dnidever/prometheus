@@ -16,6 +16,9 @@ from . import utils_numba as utils, groupfit_numba as gfit, models_numba as mnb
 from .clock_numba import clock
 
 
+def test(im,index,rnd):
+    im[index] = rnd
+    return im
 
     
 kv_ty = (types.int64, types.unicode_type)
@@ -23,6 +26,7 @@ spec = [
     ('psftype', types.int32),
     ('psfparams', types.float64[:]),
     ('verbose', types.boolean),
+    ('nofreeze', types.boolean),
     ('psflookup', types.float64[:,:,:]),
     ('psforder', types.int32),
     #('fwhm', types.float64),
@@ -76,7 +80,7 @@ spec = [
 class AllFitter(object):
 
     def __init__(self,psftype,psfparams,image,error,tab,fitradius,
-                 psflookup,npix,verbose):
+                 psflookup,npix,verbose=False,nofreeze=False):
         #         psflookup=np.zeros((1,1,1),np.float64),npix=51,verbose=False):
         # Save the input values
         self.psftype = psftype
@@ -92,6 +96,7 @@ class AllFitter(object):
         if psforder>1:
             self.psforder = 1
         self.verbose = verbose
+        self.nofreeze = nofreeze
         ny,nx = image.shape                             # save image dimensions, python images are (Y,X)
         self.nx = nx
         self.ny = ny
@@ -111,7 +116,7 @@ class AllFitter(object):
         #self.tab = tab
         #self.initpars = tab[:,1:4]                 # amp, xcen, ycen
         #self.nstars = len(tab)                     # number of stars
-        self.niter = 0                                  # number of iterations in the solver
+        self.niter = 1                                  # number of iterations in the solver
         self.npsfpix = npix                             # shape of PSF
         self.npix = npix
         self.fitradius = fitradius
@@ -137,6 +142,7 @@ class AllFitter(object):
         # Sky and Niter arrays for the stars
         self.starsky = np.zeros(self.nstars,float)
         self.starniter = np.zeros(self.nstars,np.int32)
+        self.starchisq = np.zeros(self.nstars,np.float64)
         self.njaciter = 0  # initialize njaciter
         # Initialize the freezepars and freezestars arrays
         self.freezestars = np.zeros(self.nstars,np.bool_)
@@ -253,7 +259,10 @@ class AllFitter(object):
         
         return
 
-        
+
+    def test(self,index,rnd):
+        self.resid[index] += rnd
+    
     @property
     def starpars(self):
         """ Return the [amp,xcen,ycen] parameters in [Nstars,3] array.
@@ -564,7 +573,7 @@ class AllFitter(object):
         outsteps *= signs
         return outsteps
 
-    def steps(self,pars,bounds=None,dx=0.5):
+    def steps(self,pars,dx=0.5):
         """ Return step sizes to use when fitting the stellar parameters."""
         npars = len(pars)
         fsteps = np.zeros(npars,float)
@@ -662,9 +671,9 @@ class AllFitter(object):
             using the PARS values."""
         modelim = np.zeros((self.imshape[0],self.imshape[1]),np.float64).ravel()
         for i in range(self.nstars):
-            pars1,xind1,yind1,ravelindex1 = self.getstar(i)
-            modelim1 = self.psf(xind1,yind1,pars1)
-            modelim[ravelindex1] += modelim1
+            pars,xind,yind,ravelindex = self.getstar(i)
+            m = self.psf(xind,yind,pars)
+            modelim[ravelindex] += m
         modelim = modelim.reshape((self.imshape[0],self.imshape[1]))
         return modelim
         
@@ -674,9 +683,8 @@ class AllFitter(object):
     #         using the PARS values."""
     #     return self.model(np.arange(10),*self.pars,allparams=True,verbose=False)
         
-    def model(self,args,trim=False,allparams=False,verbose=False):
+    def model(self,args,verbose=False):
         """ Calculate the model for the stars and pixels we are fitting."""
-        # ALLPARAMS:  all of the parameters were input
 
         if verbose==True or self.verbose:
             print('model: ',self.niter,args)
@@ -820,23 +828,27 @@ class AllFitter(object):
     #     new_dbeta = alpha * dbeta
     #     return alpha,new_dbeta
         
-    def cov(self):
-        """ Determine the covariance matrix."""
+    def starcov(self,i):
+        """ Determine the covariance matrix for a single star."""
 
         # https://stats.stackexchange.com/questions/93316/parameter-uncertainty-after-non-linear-least-squares-estimation
-        # more background here, too: http://ceres-solver.org/nnls_covariance.html        
-        xdata = np.arange(self.ntotpix)
+        # more background here, too: http://ceres-solver.org/nnls_covariance.html
+
+        # Get fitting pixel information
+        pars,fxind,fyind,fravelindex = self.getstarfit(i)
+        resid = self.resid[fravelindex]
+        err = self.error.ravel()[fravelindex]
+        wt = 1/err**2    # weights
+        n = len(fxind)
         # Hessian = J.T * T, Hessian Matrix
         #  higher order terms are assumed to be small
         # https://www8.cs.umu.se/kurser/5DA001/HT07/lectures/lsq-handouts.pdf
-        #mjac = self.jac(xdata,self.pars,allparams=True,trim=False,verbose=False)
-        _,mjac = self.jac(self.pars)
+        m,j = self.psfjac(fxind,fyind,pars)
         # Weights
         #   If weighted least-squares then
         #   J.T * W * J
         #   where W = I/sig_i**2
-        wt = np.diag(1/self.errflat**2)
-        hess = mjac.T @ (wt @ mjac)
+        hess = j.T @ (wt @ j)
         #hess = mjac.T @ mjac  # not weighted
         # cov = H-1, covariance matrix is inverse of Hessian matrix
         cov_orig = utils.inverse(hess)
@@ -844,51 +856,43 @@ class AllFitter(object):
         # cov_scaled = cov * (RSS/(m-n)), where m=number of measurements, n=number of parameters
         # RSS = residual sum of squares
         #  using rss gives values consistent with what curve_fit returns
-        #bestmodel = self.model(xdata,*self.pars,allparams=True,trim=False,verbose=False)
-        #resid = self.imflatten-self.skyflatten-bestmodel
-        bestmodel = self.model(self.pars,False,True,False)   # trim,allparams
-        resid = self.image-bestmodel-self.skyflat
         #cov = cov_orig * (np.sum(resid**2)/(self.ntotpix-len(self.pars)))
         # Use chi-squared, since we are doing the weighted least-squares and weighted Hessian
-        chisq = np.sum(resid**2/self.errflat**2)        
-        cov = cov_orig * (chisq/(self.ntotpix-len(self.pars)))  # what MPFITFUN suggests, but very small
+        chisq = np.sum(resid**2/err**2)
+        cov = cov_orig * (chisq/(n-3))  # what MPFITFUN suggests, but very small
 
         # cov = lqr.jac_covariange(mjac,resid,wt)
         
         return cov
 
-    def starfit(self,i):
+    def starfit(self,i,minpercdiff=0.5):
         """
         Fit a single star
         single iteration of the non-linear least-squares loop
         """
 
+        if self.freezestars[i]:
+            return
+        
         # Get fitting pixel information
         pars,fxind,fyind,fravelindex = self.getstarfit(i)
         resid = self.resid[fravelindex]
         err = self.error.ravel()[fravelindex]
+        wt = 1/err**2    # weights
         
         # Jacobian solvers
         # Get the Jacobian and model
         #  only for pixels that are affected by the "free" parameters
         model0,j = self.psfjac(fxind,fyind,pars)
-        # Residuals
-        #dy = self.resflat[self.usepix]-self.skyflat[self.usepix]-m
-        # Weights
-        wt = 1/err**2
         # Solve Jacobian
-        dbeta = utils.qr_jac_solve(jac,resid,weight=wt)
+        dbeta = utils.qr_jac_solve(j,resid,weight=wt)
         dbeta[~np.isfinite(dbeta)] = 0.0  # deal with NaNs, shouldn't happen
             
         # Perform line search
-        #alpha,new_dbeta = self.starlinesearch(i,bestpar,dbeta,m,jac)
         # This has the previous best-fit model subtracted
         #  add it back in
-        #model0 = self.psf(xind,yind,bestpar)
         data = resid + model0
         # Subtract the sky?        
-        #err = self.error.ravel()[fravelindex]
-        #wt = 1/wt**2
         # Models
         model1 = self.psf(fxind,fyind,pars+0.5*dbeta)
         model2 = self.psf(fxind,fyind,pars+dbeta)
@@ -906,6 +910,8 @@ class AllFitter(object):
 
         # Update parameters
         oldpars = pars.copy()
+        bounds = self.mkbounds(pars,self.imshape)
+        maxsteps = self.steps(pars)
         bestpars = self.newpars(pars,new_dbeta,bounds,maxsteps)
         # Check differences and changes
         diff = np.abs(bestpars-oldpars)
@@ -933,39 +939,36 @@ class AllFitter(object):
             #     self.freezepars[-1] = True
             #     bestpar = np.zeros((1),np.float64)
             # npar = len(bestpar)
-            if verbose:
-                print('Nfrozen pars = '+str(self.nfreezepars))
-                print('Nfrozen stars = '+str(self.nfreezestars))
-                print('Nfree pars = '+str(npar))
+            if self.verbose:
+                print('Star ',i,' frozen')
         else:
-            self.pars[:len(bestpar)] = bestpar    # also works if skyfit=False
+            self.pars[3*i:3*i+3] = bestpars
         maxpercdiff = np.max(percdiff)
-
-        # Get model and chisq
-        #bestmodel = self.model(self.pars,False,True)  # trim,allparams
-        #resid = self.image-bestmodel-self.skyflat
-        #chisq = np.sum(resid**2/self.errflat**2)
-        bestmodel = self.psf(fxind,fyind,bestpars)
                 
         # Update the residuals for a star's full footprint
         #  add in the previous full footprint model
         #  and subtract the new full footprint model
         _,xind,yind,ravelindex = self.getstar(i)        
         prevmodel = self.psf(xind,yind,oldpars)
-        newmodel = self.psf(xind,yind,bestpar)
-        self.resid[ravelind] += prevmodel
-        self.resid[ravelind] -= newmodel
+        newmodel = self.psf(xind,yind,bestpars)
+        self.resid[ravelindex] += prevmodel
+        self.resid[ravelindex] -= newmodel
 
-        if verbose:
+        # # Calculate chisq with updated resid array
+        bestchisq = np.sum(self.resid[fravelindex]**2/err**2)
+        print('best chisq =',bestchisq)
+        self.starchisq[i] = bestchisq
+        
+        if self.verbose:
             print('Iter = ',self.niter)
-            print('Pars = ',self.pars)
+            print('Pars = ',self.starpars[i])
             print('Percent diff = ',percdiff)
             print('Diff = ',diff)
-            print('chisq = ',chisq)
+            print('chisq = ',bestchisq)
 
 
     def fit(self,fitradius=0.0,recenter=True,maxiter=10,minpercdiff=0.5,
-            reskyiter=2,nofreeze=False,skyfit=True,absolute=False,verbose=False):
+            reskyiter=2,nofreeze=False,skyfit=True,verbose=False):
         """
         Fit PSF to all stars iteratively
 
@@ -1006,53 +1009,25 @@ class AllFitter(object):
 
         """
 
-        start = clock()
-
-        if skyfit==False:
-            self.freezepars[-1] = True  # freeze sky value
+        # if skyfit==False:
+        #     self.freezepars[-1] = True  # freeze sky value
         
-        # Centroids fixed
-        if recenter==False:
-            self.freezepars[1::3] = True  # freeze X values
-            self.freezepars[2::3] = True  # freeze Y values
-        
-        # Perform the fitting
-        #--------------------
-    
-        # Initial estimates
-        initpar = np.zeros(nstars*3+1,float)
-        initpar[0:-1:3] = self.staramp
-        initpar[1::3] = self.starxcen
-        initpar[2::3] = self.starycen
-        initpar[-1] = 0.0
-    
-        # Make bounds
-        #  this requires all 3*Nstars parameters to be input
-        bounds = self.mkbounds(initpar,image.shape,2)    
+        # # Centroids fixed
+        # if recenter==False:
+        #     self.freezepars[1::3] = True  # freeze X values
+        #     self.freezepars[2::3] = True  # freeze Y values
 
         # Iterate
-        bestpar_all = initpar.copy()        
-        # centroids fixed, only keep amps
-        if recenter==False:
-            initpar = initpar[0::3]  # amps and sky offset
-        # sky offset fixed
-        if skyfit==False:
-            initpar = initpar[0:-1]  # no sky offset
-        self.niter = 0
+        self.niter = 1
         maxpercdiff = 1e10
-        bestpar = initpar.copy()
-        npars = len(bestpar)
-        maxsteps = self.steps(self.pars,bounds)  # maximum steps, requires all 3*Nstars parameters
-        while (self.niter<maxiter and maxpercdiff>minpercdiff and self.nfreepars>0):
+        while (self.niter<maxiter and self.nfreestars>0):
             start0 = clock()
 
             # Star loop
             for i in range(self.nstars):
-                # Skip if the star is frozen
-                if self.freezestars[i]:
-                    continue
-                # Fit the single star
-                self.starfit(i)
+                # Fit the single star (if not frozen)
+                if self.freezestars[i]==False:
+                    self.starfit(i)
 
             # Re-estimate the sky
             if self.niter % reskyiter == 0:
@@ -1066,68 +1041,138 @@ class AllFitter(object):
 
             print('niter=',self.niter)
 
-
-            
         # Check that all starniter are set properly
         #  if we stopped "prematurely" then not all stars were frozen
         #  and didn't have starniter set
         self.starniter[np.where(self.starniter==0)] = self.niter
-    
-        # Make final model
-        self.unfreeze()
-        model = self.modelim
+
+
+def allfit(psf,image,tab,fitradius=0.0,recenter=True,maxiter=10,minpercdiff=0.5,
+        reskyiter=2,nofreeze=False,skyfit=True,verbose=False):
+    """
+    Fit PSF to all stars in an image iteratively.
+
+    Parameters
+    ----------
+    psf : PSF object
+       PSF object with initial parameters to use.
+    image : CCDData object
+       Image to use to fit PSF model to stars.
+    tab : table
+       Catalog with initial amp/x/y values for the stars to use to fit the PSF.
+       To pre-group the stars, add a "group_id" in the catalog.
+    fitradius : float, optional
+       The fitting radius in pixels.  By default the PSF FWHM is used.
+           reskyiter=2,nofreeze=False,skyfit=True,verbose=False):
+    recenter : boolean, optional
+       Allow the centroids to be fit.  Default is True.
+    maxiter : int, optional
+       Maximum number of iterations to allow.  Only for methods "cholesky", "qr" or "svd".
+       Default is 10.
+    minpercdiff : float, optional
+       Minimum percent change in the parameters to allow until the solution is
+       considered converged and the iteration loop is stopped.  Only for methods
+       "cholesky", "qr" and "svd".  Default is 0.5.
+    reskyiter : int, optional
+       After how many iterations to re-calculate the sky background. Default is 2.
+    nofreeze : boolean, optional
+       Do not freeze any parameters even if they have converged.  Default is False.
+    skyfit : boolean, optional
+       Fit a constant sky offset with the stellar parameters.  Default is True.
+    verbose : boolean, optional
+       Verbose output.
+
+    Returns
+    -------
+    out : table
+       Table of best-fitting parameters for each star.
+       id, amp, amp_error, x, x_err, y, y_err, sky
+    model : numpy array
+       Best-fitting model of the stars and sky background.
+    sky : numpy array
+       Best-fitting sky image.
+
+    Example
+    -------
+
+    outtab,model,sky = gf.fit()
+
+    """
+
+    start = clock()
+
+    # if skyfit==False:
+    #     self.freezepars[-1] = True  # freeze sky value
         
-        # estimate uncertainties
-        # Calculate covariance matrix
-        cov = self.cov()
-        perror = np.sqrt(np.diag(cov))
+    # # Centroids fixed
+    # if recenter==False:
+    #     self.freezepars[1::3] = True  # freeze X values
+    #     self.freezepars[2::3] = True  # freeze Y values
+
+    # Create AllFitter object
+    af = afit.AllFitter(psf.psftype,psf.params,image.data,image.error,tab,
+                        3.0,np.zeros((1,1,1),np.float64),psf.npix,verbose,nofreeze)
+    # skyfit=False
+    # Fit the stars iteratively
+    af.fit()
+
+    # Make final model
+    # self.unfreeze()
+    model = af.modelim
         
-        pars = self.pars
-        if verbose:
-            print('Best-fitting parameters: ',pars)
-            print('Errors: ',perror)
+    # estimate uncertainties
+    # Calculate covariance matrix
+    perror = np.zeros(len(af.pars),np.float64)
+    for i in range(af.nstars):
+        cov1 = af.starcov(i)
+        perror1 = np.sqrt(np.diag(cov1))
+        perror[3*i:3*i+3] = perror1
+            
+    pars = self.pars
+    # if verbose:
+    #     print('Best-fitting parameters: ',pars)
+    #     print('Errors: ',perror)
 
-        # Put in catalog
-        outtab = np.zeros((nstars,15),np.float64)
-        outtab[:,0] = np.arange(nstars)+1                # id
-        outtab[:,1] = pars[0:-1:3]                       # amp
-        outtab[:,2] = perror[0:-1:3]                     # amp_error
-        outtab[:,3] = pars[1::3]                         # x
-        outtab[:,4] = perror[1::3]                       # x_error
-        outtab[:,5] = pars[2::3]                         # y
-        outtab[:,6] = perror[2::3]                       # y_error
-        outtab[:,7] = self.starsky + pars[-1]              # sky
-        outtab[:,8] = outtab[:,1]*psf.flux()             # flux
-        outtab[:,9] = outtab[:,2]*psf.flux()             # flux_error
-        outtab[:,10] = -2.5*np.log10(np.maximum(outtab[:,8],1e-10))+25.0   # mag
-        outtab[:,11] = (2.5/np.log(10))*outtab[:,9]/outtab[:,8]            # mag_error
-        # rms
-        # chisq
-        outtab[:,14] = self.starniter                      # niter, what iteration it converged on
+    # Put in catalog
+    outtab = np.zeros((af.nstars,15),np.float64)
+    outtab[:,0] = np.arange(af.nstars)+1           # id
+    outtab[:,1] = pars[0:-1:3]                       # amp
+    outtab[:,2] = perror[0:-1:3]                     # amp_error
+    outtab[:,3] = pars[1::3]                         # x
+    outtab[:,4] = perror[1::3]                       # x_error
+    outtab[:,5] = pars[2::3]                         # y
+    outtab[:,6] = perror[2::3]                       # y_error
+    #outtab[:,7] = af.starsky + pars[-1]              # sky
+    #outtab[:,8] = outtab[:,1]*psf.flux()             # flux
+    #outtab[:,9] = outtab[:,2]*psf.flux()             # flux_error
+    #outtab[:,10] = -2.5*np.log10(np.maximum(outtab[:,8],1e-10))+25.0   # mag
+    #outtab[:,11] = (2.5/np.log(10))*outtab[:,9]/outtab[:,8]            # mag_error
+    # rms
+    # chisq
+    outtab[:,14] = self.starniter                      # niter, what iteration it converged on
     
-        # Recalculate chi-squared and RMS of fit
-        for i in range(nstars):
-            _,xind1,yind1,ravelind1 = self.getstarfit(i)
-            n1 = self.starfitnpix(i)
-            flux1 = image.ravel()[ravelind1].copy() #[yind1,xind1].copy()
-            err1 = error.ravel()[ravelind1].copy()  #[yind1,xind1]
-            pars1 = np.zeros(3,np.float64)
-            pars1[0] = outtab[i,1]  # amp
-            pars1[1] = outtab[i,3]  # x
-            pars1[2] = outtab[i,5]  # y
-            model1 = self.psf(xind1,yind1,pars1)
-            sky1 = outtab[i,7]
-            chisq1 = np.sum((flux1-sky1-model1)**2/err1**2)/n1
-            outtab[i,13] = chisq1
-            # chi value, RMS of the residuals as a fraction of the amp
-            rms1 = np.sqrt(np.mean(((flux1-sky1-model1)/pars1[0])**2))
-            outtab[i,12] = rms1
+    # # Recalculate chi-squared and RMS of fit
+    # for i in range(nstars):
+    #     _,xind1,yind1,ravelind1 = self.getstarfit(i)
+    #     n1 = self.starfitnpix(i)
+    #     flux1 = image.ravel()[ravelind1].copy() #[yind1,xind1].copy()
+    #     err1 = error.ravel()[ravelind1].copy()  #[yind1,xind1]
+    #     pars1 = np.zeros(3,np.float64)
+    #     pars1[0] = outtab[i,1]  # amp
+    #     pars1[1] = outtab[i,3]  # x
+    #     pars1[2] = outtab[i,5]  # y
+    #     model1 = self.psf(xind1,yind1,pars1)
+    #     sky1 = outtab[i,7]
+    #     chisq1 = np.sum((flux1-sky1-model1)**2/err1**2)/n1
+    #     outtab[i,13] = chisq1
+    #     # chi value, RMS of the residuals as a fraction of the amp
+    #     rms1 = np.sqrt(np.mean(((flux1-sky1-model1)/pars1[0])**2))
+    #     outtab[i,12] = rms1
 
-        if verbose:
-            print('dt =',(clock()-start)/1e9,'sec.')
- 
-        return outtab,model,self.skyim.copy()
-
+    # if verbose:
+    #     print('dt =',(clock()-start)/1e9,'sec.')
+    
+    return outtab,model #,self.skyim.copy()
 
         
 
