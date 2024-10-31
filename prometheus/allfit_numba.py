@@ -16,9 +16,89 @@ from . import utils_numba as utils, groupfit_numba as gfit, models_numba as mnb
 from .clock_numba import clock
 
 
-def test(im,index,rnd):
-    im[index] = rnd
-    return im
+@njit
+def getstar(imshape,xcen,ycen,hpsfnpix,fitradius,skyradius):
+    """ Return a star's full footprint and fitted pixels data."""
+    # always return the same size
+    # a distance of 6.2 pixels spans 6 full pixels but you could have
+    # 0.1 left on one side and 0.1 left on the other side
+    # that's why we have to add 2 pixels
+    maxpix = int(3.14*skyradius**2)
+    nskypix = int(2*skyradius+1)
+    skybbox = utils.starbbox((xcen,ycen),imshape,int(skyradius))
+    nsx = skybbox[1]-skybbox[0]
+    nsy = skybbox[3]-skybbox[2]
+    skyravelindex = np.zeros(maxpix,np.int64)-1
+    nfpix = hpsfnpix*2+1
+    #fbbox = utils.starbbox((xcen,ycen),imshape,hpsfnpix)
+    # extra buffer is ALWAYS at the end of each dimension    
+    fravelindex = np.zeros(nfpix*nfpix,np.int64)-1
+    # Fitting pixels
+    npix = int(np.floor(2*fitradius))+2
+    bbox = utils.starbbox((xcen,ycen),imshape,fitradius)
+    nx = bbox[1]-bbox[0]
+    ny = bbox[3]-bbox[2]
+    ravelindex = np.zeros(npix*npix,np.int64)-1
+    fcount = 0
+    count = 0
+    skycount = 0
+    for j in range(nskypix):
+        y = j + skybbox[2]
+        for i in range(nskypix):
+            x = i + skybbox[0]
+            r = np.sqrt((x-xcen)**2 + (y-ycen)**2)
+            if x>=skybbox[0] and x<=skybbox[1]-1 and y>=skybbox[2] and y<=skybbox[3]-1:
+            #if x>=fbbox[0] and x<=fbbox[1]-1 and y>=fbbox[2] and y<=fbbox[3]-1:
+                if r <= 1.0*skyradius:
+                    skymulti_index = (np.array([y]),np.array([x]))
+                    skyravelindex[fcount] = utils.ravel_multi_index(skymulti_index,imshape)[0]
+                    skycount += 1
+                if r <= 1.0*hpsfnpix:
+                    fmulti_index = (np.array([y]),np.array([x]))
+                    fravelindex[fcount] = utils.ravel_multi_index(fmulti_index,imshape)[0]
+                    fcount += 1
+                if r <= fitradius:
+                    multi_index = (np.array([y]),np.array([x]))
+                    ravelindex[count] = utils.ravel_multi_index(multi_index,imshape)[0]
+                    count += 1
+    return (fravelindex,fcount,ravelindex,count,skyravelindex,skycount)
+
+@njit
+def collatestars(imshape,starx,stary,hpsfnpix,fitradius,skyradius):
+    """ Get full footprint and fitted pixels data for all stars."""
+    nstars = len(starx)
+    nfpix = 2*hpsfnpix+1
+    npix = int(np.floor(2*fitradius))+2
+    # Full footprint arrays
+    fravelindex = np.zeros((nstars,nfpix*nfpix),np.int64)
+    fndata = np.zeros(nstars,np.int32)
+    # Fitting pixel arrays
+    ravelindex = np.zeros((nstars,npix*npix),np.int64)
+    ndata = np.zeros(nstars,np.int32)
+    skyravelindex = np.zeros((nstars,int(3.14*skyradius**2)),np.int64)
+    skyndata = np.zeros(nstars,np.int32)
+    for i in range(nstars):
+        out = getstar(imshape,starx[i],stary[i],hpsfnpix,fitradius,skyradius)
+        # full footprint information
+        fravelindex1,fn1,ravelindex1,n1,skyravelindex1,skyn1 = out
+        fravelindex[i,:] = fravelindex1
+        fndata[i] = fn1
+        # fitting pixel information
+        ravelindex[i,:] = ravelindex1
+        ndata[i] = n1
+        # sky pixel information
+        skyravelindex[i,:] = skyravelindex1
+        skyndata[i] = skyn1
+    # Trim arrays
+    maxfn = np.max(fndata)
+    fravelindex = fravelindex[:,:maxfn]
+    maxn = np.max(ndata)
+    ravelindex = ravelindex[:,:maxn]
+    maxskyn = np.max(skyndata)
+    skyravelindex = skyravelindex[:,:maxskyn]
+    
+    return (fravelindex,fndata,ravelindex,ndata,skyravelindex,skyndata)
+
 
     
 kv_ty = (types.int64, types.unicode_type)
@@ -47,6 +127,7 @@ spec = [
     ('imshape', types.int64[:]),
     ('npix', types.int32),    
     ('fitradius', types.float64),
+    ('skyradius', types.float64),
     ('nfitpix', types.int32),
     ('radius', types.int32),
     ('starsky', types.float64[:]),
@@ -57,15 +138,12 @@ spec = [
     ('pixused', types.int32),
     ('starchisq', types.float64[:]),
     ('starrms', types.float64[:]),
-    ('star_xdata', types.int64[:,:]),
-    ('star_ydata', types.int64[:,:]),
     ('star_ravelindex', types.int64[:,:]),
-    ('star_bbox', types.int32[:,:]),
-    ('star_shape', types.int32[:,:]),
     ('star_ndata', types.int32[:]),
     ('starfit_ravelindex', types.int64[:,:]),
-    ('starfit_bbox', types.int32[:,:]),
     ('starfit_ndata', types.int32[:]),
+    ('starsky_ravelindex', types.int64[:,:]),
+    ('starsky_ndata', types.int32[:]),
     ('ntotpix', types.int32),
     ('xflat', types.int64[:]),
     ('yflat', types.int64[:]),
@@ -121,6 +199,7 @@ class AllFitter(object):
         self.npix = npix
         self.fitradius = fitradius
         self.nfitpix = int(np.ceil(fitradius))  # +/- nfitpix
+        self.skyradius = npix//2 + 10
         # Star amps
         # if 'amp' in cat.colnames:
         #     staramp = cat['amp'].copy()
@@ -148,32 +227,22 @@ class AllFitter(object):
         self.freezestars = np.zeros(self.nstars,np.bool_)
         self.freezepars = np.zeros(self.nstars*3+1,np.bool_)
         self.pixused = -1   # initialize pixused
-
-        #(fxdata,fydata,fravelindex,fbbox,fshape,fndata,
-        #    xdata,ydata,ravelindex,bbox,ndata,mask)
         
         # Get information for all the stars
         xcen = self.pars[1::3]
         ycen = self.pars[2::3]
         hpsfnpix = self.npsfpix//2
-        out = utils.collatestars(self.imshape,xcen,ycen,hpsfnpix,fitradius)
-        fxdata,fydata,fravelindex,fsbbox,fsshape,fsndata = out[:6]
-        self.star_xdata = fxdata
-        self.star_ydata = fydata
+        out = collatestars(self.imshape,xcen,ycen,hpsfnpix,fitradius,self.skyradius)
+        fravelindex,fsndata,ravelindex,sndata,skyravelindex,skyndata = out
         self.star_ravelindex = fravelindex
-        self.star_bbox = fsbbox
-        self.star_shape = fsshape
         self.star_ndata = fsndata
         # Fitting arrays
-        xdata,ydata,ravelindex,sbbox,sndata,smask = out[6:]
-        #fxdata,fydata,fravelindex,fbbox,fndata,fmask = collatefitstars(self.imshape,xcen,ycen,fitradius)
-        #self.starfit_xdata = xdata
-        #self.starfit_ydata = ydata
         self.starfit_ravelindex = ravelindex
-        self.starfit_bbox = sbbox
         self.starfit_ndata = sndata
-        #self.starfit_mask = smask
-
+        # Sky arrays
+        self.starsky_ravelindex = skyravelindex
+        self.starsky_ndata = skyndata
+        
         # Combine all of the X and Y values (of the pixels we are fitting) into one array
         ntotpix = np.sum(self.starfit_ndata)
         xall = np.zeros(ntotpix,np.int32)
@@ -230,15 +299,6 @@ class AllFitter(object):
         #        invlo = np.sum(self.starfit_ndata[:i])
         #    invindex1 = invindex[invlo:invlo+n1]
         #    self.starfit_invindex[i,:n1] = invindex1
-
-
-        # Bounding box of all the stars
-        xmin = np.min(self.star_bbox[:,0])  # xmin
-        xmax = np.max(self.star_bbox[:,1])  # xmax
-        ymin = np.min(self.star_bbox[:,2])  # ymin
-        ymax = np.max(self.star_bbox[:,3])  # ymax
-        bb = np.array([xmin,xmax,ymin,ymax])
-        self.bbox = bb
 
         # Create initial sky image
         self.skyim = utils.sky(self.image)
@@ -319,19 +379,19 @@ class AllFitter(object):
     #    """ Return the sky values for the pixels that we are fitting."""
     #    return self.skyim.ravel()[self.indflat]
 
-    def starx(self,i):
-        """ Return star's full circular footprint x array."""
-        n = self.star_ndata[i]
-        return self.star_xdata[i,:n]
+    # def starx(self,i):
+    #     """ Return star's full circular footprint x array."""
+    #     n = self.star_ndata[i]
+    #     return self.star_xdata[i,:n]
 
-    def stary(self,i):
-        """ Return star's full circular footprint y array."""
-        n = self.star_ndata[i]
-        return self.star_ydata[i,:n]
+    # def stary(self,i):
+    #     """ Return star's full circular footprint y array."""
+    #     n = self.star_ndata[i]
+    #     return self.star_ydata[i,:n]
 
-    def starbbox(self,i):
-        """ Return star's full circular footprint bounding box."""
-        return self.star_bbox[i,:]
+    # def starbbox(self,i):
+    #     """ Return star's full circular footprint bounding box."""
+    #     return self.star_bbox[i,:]
 
     def starnpix(self,i):
         """ Return number of pixels in a star's full circular footprint."""
@@ -342,21 +402,21 @@ class AllFitter(object):
         n = self.star_ndata[i]
         return self.star_ravelindex[i,:n]
 
-    def starfitx(self,i):
-        """ Return star's fitting pixels x values."""
-        n = self.starfit_ndata[i]
-        ravelind = self.starfit_ravelindex[i,:n]
-        return self.xx[ravelind]
+    # def starfitx(self,i):
+    #     """ Return star's fitting pixels x values."""
+    #     n = self.starfit_ndata[i]
+    #     ravelind = self.starfit_ravelindex[i,:n]
+    #     return self.xx[ravelind]
 
-    def starfity(self,i):
-        """ Return star's fitting pixels y values."""
-        n = self.starfit_ndata[i]
-        ravelind = self.starfit_ravelindex[i,:n]
-        return self.xx[ravelind]
+    # def starfity(self,i):
+    #     """ Return star's fitting pixels y values."""
+    #     n = self.starfit_ndata[i]
+    #     ravelind = self.starfit_ravelindex[i,:n]
+    #     return self.xx[ravelind]
 
-    def starfitbbox(self,i):
-        """ Return star's fitting pixels bounding box."""
-        return self.starfit_bbox[i,:]
+    # def starfitbbox(self,i):
+    #     """ Return star's fitting pixels bounding box."""
+    #     return self.starfit_bbox[i,:]
 
     def starfitnpix(self,i):
         """ Return number of fitted pixels for a star."""
@@ -429,15 +489,15 @@ class AllFitter(object):
     #     im = im.reshape((self.imshape[0],self.imshape[1]))
     #     return im
 
-    @property
-    def imfull(self):
-        """ Return the flux values of the full footprint pixels in full 2D image format."""
-        im = np.zeros((self.imshape[0],self.imshape[1]),np.float64)
-        for i in range(self.nstars):
-            pars1,xind1,yind1,ravelindex1 = self.getstar(i)
-            bbox1 = self.star_bbox[i,:]
-            im[bbox1[2]:bbox1[3],bbox1[0]:bbox1[1]] = self.image[bbox1[2]:bbox1[3],bbox1[0]:bbox1[1]].copy()
-        return im
+    # @property
+    # def imfull(self):
+    #     """ Return the flux values of the full footprint pixels in full 2D image format."""
+    #     im = np.zeros((self.imshape[0],self.imshape[1]),np.float64)
+    #     for i in range(self.nstars):
+    #         pars1,xind1,yind1,ravelindex1 = self.getstar(i)
+    #         bbox1 = self.star_bbox[i,:]
+    #         im[bbox1[2]:bbox1[3],bbox1[0]:bbox1[1]] = self.image[bbox1[2]:bbox1[3],bbox1[0]:bbox1[1]].copy()
+    #     return im
     
     @property
     def nfreezepars(self):
@@ -625,45 +685,45 @@ class AllFitter(object):
         return mnb.psf(x,y,pars,self.psftype,self.psfparams,self.psflookup,self.imshape,
                       deriv=True,verbose=False)
     
-    def modelstar(self,i,full=False):
-        """ Return model of one star (full footprint) with the current best values."""
-        pars,xind,yind,ravelind = self.getstar(i)
-        m = self.psf(xind,yind,pars)        
-        if full==True:
-            modelim = np.zeros((self.imshape[0]*self.imshape[1]),np.float64)
-            modelim[ravelind] = m
-            modelim = modelim.reshape((self.imshape[0],self.imshape[1]))
-        else:
-            bbox = self.star_bbox[i,:]
-            nx = bbox[1]-bbox[0]+1
-            ny = bbox[3]-bbox[2]+1
-            xind1 = xind-bbox[0]
-            yind1 = yind-bbox[2]
-            ind1 = utils.ravel_multi_index((xind1,yind1),(ny,nx))
-            modelim = np.zeros(nx*ny,np.float64)
-            modelim[ind1] = m
-            modelim = modelim.reshape((ny,nx))
-        return modelim
+    # def modelstar(self,i,full=False):
+    #     """ Return model of one star (full footprint) with the current best values."""
+    #     pars,xind,yind,ravelind = self.getstar(i)
+    #     m = self.psf(xind,yind,pars)        
+    #     if full==True:
+    #         modelim = np.zeros((self.imshape[0]*self.imshape[1]),np.float64)
+    #         modelim[ravelind] = m
+    #         modelim = modelim.reshape((self.imshape[0],self.imshape[1]))
+    #     else:
+    #         bbox = self.star_bbox[i,:]
+    #         nx = bbox[1]-bbox[0]+1
+    #         ny = bbox[3]-bbox[2]+1
+    #         xind1 = xind-bbox[0]
+    #         yind1 = yind-bbox[2]
+    #         ind1 = utils.ravel_multi_index((xind1,yind1),(ny,nx))
+    #         modelim = np.zeros(nx*ny,np.float64)
+    #         modelim[ind1] = m
+    #         modelim = modelim.reshape((ny,nx))
+    #     return modelim
 
-    def modelstarfit(self,i,full=False):
-        """ Return model of one star (only fitted pixels) with the current best values."""
-        pars,xind,yind,ravelind = self.getstarfit(i)
-        m = self.psf(xind,yind,pars)        
-        if full==True:
-            modelim = np.zeros((self.imshape[0]*self.imshape[1]),np.float64)
-            modelim[ravelind] = m
-            modelim = modelim.reshape((self.imshape[0],self.imshape[1]))
-        else:
-            bbox = self.starfit_bbox[i,:]
-            nx = bbox[1]-bbox[0]+1
-            ny = bbox[3]-bbox[2]+1
-            xind1 = xind-bbox[0]
-            yind1 = yind-bbox[2]
-            ind1 = utils.ravel_multi_index((xind1,yind1),(ny,nx))
-            modelim = np.zeros(nx*ny,np.float64)
-            modelim[ind1] = m
-            modelim = modelim.reshape((ny,nx))
-        return modelim
+    # def modelstarfit(self,i,full=False):
+    #     """ Return model of one star (only fitted pixels) with the current best values."""
+    #     pars,xind,yind,ravelind = self.getstarfit(i)
+    #     m = self.psf(xind,yind,pars)        
+    #     if full==True:
+    #         modelim = np.zeros((self.imshape[0]*self.imshape[1]),np.float64)
+    #         modelim[ravelind] = m
+    #         modelim = modelim.reshape((self.imshape[0],self.imshape[1]))
+    #     else:
+    #         bbox = self.starfit_bbox[i,:]
+    #         nx = bbox[1]-bbox[0]+1
+    #         ny = bbox[3]-bbox[2]+1
+    #         xind1 = xind-bbox[0]
+    #         yind1 = yind-bbox[2]
+    #         ind1 = utils.ravel_multi_index((xind1,yind1),(ny,nx))
+    #         modelim = np.zeros(nx*ny,np.float64)
+    #         modelim[ind1] = m
+    #         modelim = modelim.reshape((ny,nx))
+    #     return modelim
     
     @property
     def modelim(self):
