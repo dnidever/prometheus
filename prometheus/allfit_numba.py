@@ -15,7 +15,18 @@ from numba.experimental import jitclass
 from . import utils_numba as utils, groupfit_numba as gfit, models_numba as mnb
 from .clock_numba import clock
 
-
+@njit
+def skyval(array,sigma):
+    """  Estimate sky value from sky pixels."""
+    wt = 1/sigma**2
+    med = np.median(array)
+    sig = utils.mad(array)
+    # reweight outlier pixels using Stetson's method
+    resid = array-med
+    wt2 = wt/(1+np.abs(resid)**2/np.median(sigma))
+    xmn = np.sum(wt2*array)/np.sum(wt2)
+    return xmn
+    
 @njit
 def getstar(imshape,xcen,ycen,hpsfnpix,fitradius,skyradius):
     """ Return a star's full footprint and fitted pixels data."""
@@ -49,9 +60,9 @@ def getstar(imshape,xcen,ycen,hpsfnpix,fitradius,skyradius):
             r = np.sqrt((x-xcen)**2 + (y-ycen)**2)
             if x>=skybbox[0] and x<=skybbox[1]-1 and y>=skybbox[2] and y<=skybbox[3]-1:
             #if x>=fbbox[0] and x<=fbbox[1]-1 and y>=fbbox[2] and y<=fbbox[3]-1:
-                if r <= 1.0*skyradius:
+                if r <= 1.0*skyradius and r >= 0.7*skyradius:
                     skymulti_index = (np.array([y]),np.array([x]))
-                    skyravelindex[fcount] = utils.ravel_multi_index(skymulti_index,imshape)[0]
+                    skyravelindex[skycount] = utils.ravel_multi_index(skymulti_index,imshape)[0]
                     skycount += 1
                 if r <= 1.0*hpsfnpix:
                     fmulti_index = (np.array([y]),np.array([x]))
@@ -112,7 +123,8 @@ spec = [
     #('fwhm', types.float64),
     ('image', types.float64[:,:]),
     ('error', types.float64[:,:]),
-    ('skyim', types.float64[:,:]),
+    ('skyim', types.float64[:]),
+    ('modelim', types.float64[:]),
     ('resid', types.float64[:]),
     ('xx', types.int64[:]),
     ('yy', types.int64[:]),
@@ -130,7 +142,7 @@ spec = [
     ('skyradius', types.float64),
     ('nfitpix', types.int32),
     ('radius', types.int32),
-    ('starsky', types.float64[:]),
+    ('_starsky', types.float64[:]),
     ('starniter', types.int32[:]),
     ('njaciter', types.int32),
     ('freezestars', types.boolean[:]),
@@ -145,12 +157,13 @@ spec = [
     ('starsky_ravelindex', types.int64[:,:]),
     ('starsky_ndata', types.int32[:]),
     ('ntotpix', types.int32),
-    ('xflat', types.int64[:]),
-    ('yflat', types.int64[:]),
-    ('indflat', types.int64[:]),
-    ('invindex', types.int64[:]),
-    ('bbox', types.int32[:]),
-    ('usepix', types.boolean[:]),
+    ('ravelindex', types.int64[:]),
+   # ('xflat', types.int64[:]),
+   # ('yflat', types.int64[:]),
+   # ('indflat', types.int64[:]),
+   # ('invindex', types.int64[:]),
+   # ('bbox', types.int32[:]),
+   # ('usepix', types.boolean[:]),
   #  ('usepix', types.int8[:]),
 ]
 
@@ -181,8 +194,8 @@ class AllFitter(object):
         self.imshape = np.array([ny,nx])
         self.image = image.copy().astype(np.float64)
         self.error = error.astype(np.float64)
-        self.skyim = np.zeros(image.shape,np.float64)
-        self.resid = image.copy().astype(np.float64).flatten()   # flatten makes it easier to modify
+        #self.skyim = np.zeros(image.shape,np.float64)
+        #self.resid = image.copy().astype(np.float64).flatten()   # flatten makes it easier to modify
         xx,yy = utils.meshgrid(np.arange(nx),np.arange(ny))
         self.xx = xx.flatten()
         self.yy = yy.flatten()
@@ -219,7 +232,7 @@ class AllFitter(object):
         pars[-1] = 0.0  # sky offset
         self.pars = pars
         # Sky and Niter arrays for the stars
-        self.starsky = np.zeros(self.nstars,float)
+        self._starsky = np.zeros(self.nstars,float)
         self.starniter = np.zeros(self.nstars,np.int32)
         self.starchisq = np.zeros(self.nstars,np.float64)
         self.njaciter = 0  # initialize njaciter
@@ -242,50 +255,47 @@ class AllFitter(object):
         # Sky arrays
         self.starsky_ravelindex = skyravelindex
         self.starsky_ndata = skyndata
-        
-        # Combine all of the X and Y values (of the pixels we are fitting) into one array
+
+        # Get indices of all the unique fitted pixels into one array
         ntotpix = np.sum(self.starfit_ndata)
-        xall = np.zeros(ntotpix,np.int32)
-        yall = np.zeros(ntotpix,np.int32)
+        allravelindex = np.zeros(ntotpix,np.int64)
         count = 0
         for i in range(self.nstars):
             n1 = self.starfit_ndata[i]
             ravelind1 = self.starfit_ravelindex[i,:n1]
-            xdata1 = self.xx[ravelind1]
-            ydata1 = self.yy[ravelind1]
-            #xdata1 = self.starfit_xdata[i,:n1]
-            #ydata1 = self.starfit_ydata[i,:n1]
-            xall[count:count+n1] = xdata1
-            yall[count:count+n1] = ydata1
+            allravelindex[count:count+n1] = ravelind1
             count += n1
+        allravelindex = np.unique(allravelindex)
+        self.ravelindex = allravelindex
+        self.ntotpix = len(allravelindex)
             
-        # Create 1D unraveled indices, python images are (Y,X)
-        ind1 = utils.ravel_multi_index((yall,xall),self.imshape)
-        # Get unique indices and inverse indices
-        #   the inverse index list takes you from the full/duplicated pixels
-        #   to the unique ones
-        uind1,uindex1,invindex = utils.unique_index(ind1)
-        ntotpix = len(uind1)
-        ucoords = utils.unravel_index(uind1,image.shape)
-        yflat = ucoords[:,0]
-        xflat = ucoords[:,1]
-        # x/y coordinates of the unique fitted pixels
+        # # Create 1D unraveled indices, python images are (Y,X)
+        # ind1 = utils.ravel_multi_index((yall,xall),self.imshape)
+        # # Get unique indices and inverse indices
+        # #   the inverse index list takes you from the full/duplicated pixels
+        # #   to the unique ones
+        # uind1,uindex1,invindex = utils.unique_index(ind1)
+        # ntotpix = len(uind1)
+        # ucoords = utils.unravel_index(uind1,image.shape)
+        # yflat = ucoords[:,0]
+        # xflat = ucoords[:,1]
+        # # x/y coordinates of the unique fitted pixels
         
-        # Save information on the "flattened" and unique fitted pixel arrays
-        #imflat = np.zeros(len(uind1),np.float64)
-        #imflat[:] = image.ravel()[uind1]
-        #errflat = np.zeros(len(uind1),np.float64)
-        #errflat[:] = error.ravel()[uind1]
-        self.ntotpix = ntotpix
-        #self.imflat = imflat
-        #self.resflat = imflat.copy()
-        #self.errflat = errflat
-        self.xflat = xflat
-        self.yflat = yflat
-        self.indflat = uind1
-        self.invindex = invindex
+        # # Save information on the "flattened" and unique fitted pixel arrays
+        # #imflat = np.zeros(len(uind1),np.float64)
+        # #imflat[:] = image.ravel()[uind1]
+        # #errflat = np.zeros(len(uind1),np.float64)
+        # #errflat[:] = error.ravel()[uind1]
+        # self.ntotpix = ntotpix
+        # #self.imflat = imflat
+        # #self.resflat = imflat.copy()
+        # #self.errflat = errflat
+        # self.xflat = xflat
+        # self.yflat = yflat
+        # self.indflat = uind1
+        # self.invindex = invindex
 
-        self.usepix = np.ones(self.ntotpix,np.bool_)
+        # self.usepix = np.ones(self.ntotpix,np.bool_)
         
         # Add inverse index for the fitted pixels
         #  to be used with imflat/resflat/errflat/xflat/yflat/indflat
@@ -300,14 +310,13 @@ class AllFitter(object):
         #    invindex1 = invindex[invlo:invlo+n1]
         #    self.starfit_invindex[i,:n1] = invindex1
 
-        # Create initial sky image
-        self.skyim = utils.sky(self.image)
+        # Create initial smooth sky image
+        self.skyim = utils.sky(self.image).flatten()
         #self.sky()
-
-        # This is what we need to do to estimate sky from the 1D resid array
-        #dum = utils.sky(self.resid.copy().reshape(self.imshape[0],self.imshape[1]))
-
         # Subtract the initial models from the residual array
+        self.resid = image.copy().astype(np.float64).flatten()   # flatten makes it easier to modify
+        self.resid[:] -= self.skyim   # subtract smooth sky
+        self.modelim = np.zeros(self.imshape[0]*self.imshape[1],np.float64)
         for i in range(self.nstars):
             pars1 = self.starpars[i]
             n1 = self.star_ndata[i]
@@ -316,13 +325,14 @@ class AllFitter(object):
             yind1 = self.yy[ravelind1]
             m = self.psf(xind1,yind1,pars1)
             self.resid[ravelind1] -= m
+            self.modelim[ravelind1] += m
+            
+        # This is what we need to do to estimate sky from the 1D resid array
+        #dum = utils.sky(self.resid.copy().reshape(self.imshape[0],self.imshape[1]))
+
         
         return
 
-
-    def test(self,index,rnd):
-        self.resid[index] += rnd
-    
     @property
     def starpars(self):
         """ Return the [amp,xcen,ycen] parameters in [Nstars,3] array.
@@ -363,17 +373,26 @@ class AllFitter(object):
         """ Set starycen values."""
         self.pars[2::3] = val
     
-    def sky(self,method='sep',rin=None,rout=None):
-        """ (Re)calculate the sky."""
+    def sky(self):
+        """ (Re)calculate the smooth sky."""
         # Remove the current best-fit model
-        resid = self.image-self.modelim    # remove model
-        self.skyim = utils.sky(resid)
-        # Calculate sky value for each star
-        #  use center position
-        for i in range(self.nstars):
-            self.starsky[i] = self.skyim[int(np.round(self.starycen[i])),
-                                         int(np.round(self.starxcen[i]))]
-
+        resid = self.image-self.modelim.copy().reshape(self.imshape[0],self.imshape[1])    # remove model
+        prevsky = self.skyim.copy()
+        self.skyim[:] = utils.sky(resid).flatten()
+        # Update resid
+        self.resid[:] += prevsky
+        self.resid[:] -= self.skyim
+        
+    def starsky(self,i):
+        """ Calculate the local sky for a single star."""
+        n = self.starsky_ndata[i]
+        skyravelindex = self.starsky_ravelindex[i,:n]
+        resid = self.resid[skyravelindex]
+        err = self.error.ravel()[skyravelindex]
+        sky = skyval(resid,err)
+        self._starsky[i] = sky
+        return sky
+            
     #@property
     #def skyflat(self):
     #    """ Return the sky values for the pixels that we are fitting."""
@@ -725,17 +744,17 @@ class AllFitter(object):
     #         modelim = modelim.reshape((ny,nx))
     #     return modelim
     
-    @property
-    def modelim(self):
-        """ This returns the full image of the current best model (no sky)
-            using the PARS values."""
-        modelim = np.zeros((self.imshape[0],self.imshape[1]),np.float64).ravel()
-        for i in range(self.nstars):
-            pars,xind,yind,ravelindex = self.getstar(i)
-            m = self.psf(xind,yind,pars)
-            modelim[ravelindex] += m
-        modelim = modelim.reshape((self.imshape[0],self.imshape[1]))
-        return modelim
+    # @property
+    # def modelim(self):
+    #     """ This returns the full image of the current best model (no sky)
+    #         using the PARS values."""
+    #     modelim = np.zeros((self.imshape[0],self.imshape[1]),np.float64).ravel()
+    #     for i in range(self.nstars):
+    #         pars,xind,yind,ravelindex = self.getstar(i)
+    #         m = self.psf(xind,yind,pars)
+    #         modelim[ravelindex] += m
+    #     modelim = modelim.reshape((self.imshape[0],self.imshape[1]))
+    #     return modelim
         
     # @property
     # def modelflatten(self):
@@ -931,14 +950,22 @@ class AllFitter(object):
         single iteration of the non-linear least-squares loop
         """
 
+        if i > self.nstars-1:
+            raise IndexError('Index',i,' is out of bounds.',self.nstars,' stars')
+        
         if self.freezestars[i]:
             return
-        
+
         # Get fitting pixel information
         pars,fxind,fyind,fravelindex = self.getstarfit(i)
         resid = self.resid[fravelindex]
         err = self.error.ravel()[fravelindex]
         wt = 1/err**2    # weights
+
+        # Calculate the local sky for this star (relative to the smooth sky image)
+        sky = self.starsky(i)
+        # subtract sky from the residuals
+        resid -= sky
         
         # Jacobian solvers
         # Get the Jacobian and model
@@ -952,7 +979,6 @@ class AllFitter(object):
         # This has the previous best-fit model subtracted
         #  add it back in
         data = resid + model0
-        # Subtract the sky?        
         # Models
         model1 = self.psf(fxind,fyind,pars+0.5*dbeta)
         model2 = self.psf(fxind,fyind,pars+dbeta)
@@ -1014,7 +1040,11 @@ class AllFitter(object):
         self.resid[ravelindex] += prevmodel
         self.resid[ravelindex] -= newmodel
 
-        # # Calculate chisq with updated resid array
+        # Update the model image
+        self.modelim[ravelindex] += prevmodel
+        self.modelim[ravelindex] -= newmodel
+        
+        # Calculate chisq with updated resid array
         bestchisq = np.sum(self.resid[fravelindex]**2/err**2)
         print('best chisq =',bestchisq)
         self.starchisq[i] = bestchisq
@@ -1026,9 +1056,15 @@ class AllFitter(object):
             print('Diff = ',diff)
             print('chisq = ',bestchisq)
 
-
+    def chisq(self):
+        """ Compute total chi-square of the current best-fit solution for all
+        fitting pixels."""
+        ravelindex = self.ravelindex    # all fitting pixels
+        chisq = np.sum(self.resid[ravelindex]**2/self.error.ravel()[ravelindex]**2)
+        return chisq
+        
     def fit(self,fitradius=0.0,recenter=True,maxiter=10,minpercdiff=0.5,
-            reskyiter=2,nofreeze=False,skyfit=True,verbose=False):
+            reskyiter=2,nofreeze=False,verbose=False):
         """
         Fit PSF to all stars iteratively
 
@@ -1047,8 +1083,6 @@ class AllFitter(object):
            After how many iterations to re-calculate the sky background. Default is 2.
         nofreeze : boolean, optional
            Do not freeze any parameters even if they have converged.  Default is False.
-        skyfit : boolean, optional
-           Fit a constant sky offset with the stellar parameters.  Default is True.
         verbose : boolean, optional
            Verbose output.
 
@@ -1069,9 +1103,6 @@ class AllFitter(object):
 
         """
 
-        # if skyfit==False:
-        #     self.freezepars[-1] = True  # freeze sky value
-        
         # # Centroids fixed
         # if recenter==False:
         #     self.freezepars[1::3] = True  # freeze X values
@@ -1082,7 +1113,7 @@ class AllFitter(object):
         maxpercdiff = 1e10
         while (self.niter<maxiter and self.nfreestars>0):
             start0 = clock()
-
+            
             # Star loop
             for i in range(self.nstars):
                 # Fit the single star (if not frozen)
@@ -1092,7 +1123,7 @@ class AllFitter(object):
             # Re-estimate the sky
             if self.niter % reskyiter == 0:
                 print('Re-estimating the sky')
-                #self.sky()
+                self.sky()
 
             if verbose:
                 print('iter dt =',(clock()-start0)/1e9,'sec.')
