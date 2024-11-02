@@ -11,7 +11,7 @@ from numba import jit,njit,types
 from numba.experimental import jitclass
 from . import leastsquares as lsq, utils_numba as utils
 
-@njit
+@njit(cache=True)
 def gaussfwhm(im):
     """
     Use the Gaussian equation Area
@@ -24,7 +24,7 @@ def gaussfwhm(im):
     fwhm = 2.35*sigma
     return fwhm
 
-@njit
+@njit(cache=True)
 def contourfwhm(im):
     """                                                                                         
     Measure the FWHM of a PSF or star image using contours.                                     
@@ -117,7 +117,7 @@ def imfwhm(im):
     return fwhm
 
 
-@njit
+@njit(cache=True)
 def numba_linearinterp(binim,fullim,binsize):
     """ linear interpolation"""
     ny,nx = fullim.shape
@@ -167,7 +167,7 @@ def numba_linearinterp(binim,fullim,binsize):
 
     return fullim
 
-@njit
+@njit(cache=True)
 def checkbounds(pars,bounds):
     """ Check the parameters against the bounds."""
     # 0 means it's fine
@@ -181,7 +181,7 @@ def checkbounds(pars,bounds):
     check[pars>=ubounds] = 2
     return check
 
-@njit
+@njit(cache=True)
 def limbounds(pars,bounds):
     """ Limit the parameters to the boundaries."""
     lbounds = bounds[:,0]
@@ -189,7 +189,7 @@ def limbounds(pars,bounds):
     outpars = np.minimum(np.maximum(pars,lbounds),ubounds)
     return outpars
 
-@njit
+@njit(cache=True)
 def limsteps(steps,maxsteps):
     """ Limit the parameter steps to maximum step sizes."""
     signs = np.sign(steps)
@@ -197,7 +197,7 @@ def limsteps(steps,maxsteps):
     outsteps *= signs
     return outsteps
 
-@njit
+@njit(cache=True)
 def newlsqpars(pars,steps,bounds,maxsteps):
     """ Return new parameters that fit the constraints."""
     # Limit the steps to maxsteps
@@ -230,7 +230,7 @@ def newlsqpars(pars,steps,bounds,maxsteps):
         newparams = np.minimum(np.maximum(newparams,lbounds+1e-30),ubounds-1e-30)
     return newparams
 
-@njit
+@njit(cache=True)
 def newbestpars(bestpars,dbeta):
     """ Get new pars from offsets."""
     newpars = np.zeros(3,float)
@@ -253,7 +253,7 @@ def newbestpars(bestpars,dbeta):
     newpars[2] = newy
     return newpars
 
-@njit
+@njit(cache=True)
 def starbbox(coords,imshape,radius):
     """                                                                                         
     Return the boundary box for a star given radius and image size.                             
@@ -327,7 +327,7 @@ def bbox2xy(bbox):
 ###################################################################
 # Numba analytical PSF models
 
-@njit
+@njit(cache=True)
 def gauss_abt2cxy(asemi,bsemi,theta):
     """ Convert asemi/bsemi/theta to cxx/cyy/cxy. """
     # theta in radians
@@ -342,7 +342,7 @@ def gauss_abt2cxy(asemi,bsemi,theta):
     cxy = 2*costheta*sintheta*(1/asemi2-1/bsemi2)
     return cxx,cyy,cxy
 
-@njit
+@njit(cache=True)
 def gauss_cxy2abt(cxx,cyy,cxy):
     """ Convert asemi/bsemi/theta to cxx/cyy/cxy. """
 
@@ -376,7 +376,7 @@ def gauss_cxy2abt(cxx,cyy,cxy):
 
 ####### GAUSSIAN ########
 
-@njit
+@njit(cache=True)
 def gaussian2d_flux(pars):
     """
     Return the total flux (or volume) of a 2D Gaussian.
@@ -404,7 +404,7 @@ def gaussian2d_flux(pars):
     volume = 2*np.pi*amp*xsig*ysig
     return volume
 
-@njit
+@njit(cache=True)
 def gaussian2d_fwhm(pars):
     """
     Return the FWHM of a 2D Gaussian.
@@ -445,7 +445,7 @@ def gaussian2d_fwhm(pars):
 
     return fwhm
 
-@njit
+@njit(cache=True)
 def agaussian2d(x,y,pars,nderiv):
     """
     Two dimensional Gaussian model function with x/y array inputs.
@@ -514,7 +514,7 @@ def agaussian2d(x,y,pars,nderiv):
             deriv[i,:] = deriv1
     return g,deriv
     
-@njit
+@njit(cache=True)
 def gaussian2d(x,y,pars,nderiv):
     """
     Two dimensional Gaussian model function.
@@ -610,7 +610,7 @@ def gaussian2d(x,y,pars,nderiv):
 
 
 
-#@njit
+#@njit(cache=True)
 def gaussian2dfit(im,err,ampc,xc,yc,verbose):
     """
     Fit a single Gaussian 2D model to data.
@@ -743,7 +743,7 @@ def gaussian2dfit(im,err,ampc,xc,yc,verbose):
 
 ####### MOFFAT ########
 
-@njit
+@njit(cache=True)
 def moffat2d_fwhm(pars):
     """
     Return the FWHM of a 2D Moffat function.
@@ -779,7 +779,7 @@ def moffat2d_fwhm(pars):
     
     return 2.0 * np.abs(mnsig) * np.sqrt(2.0 ** (1.0/beta) - 1.0)
 
-@njit
+@njit(cache=True)
 def moffat2d_flux(pars):
     """
     Return the total Flux of a 2D Moffat.
@@ -821,7 +821,7 @@ def moffat2d_flux(pars):
     return volume
 
 
-@njit
+@njit(cache=True)
 def amoffat2d(x,y,pars,nderiv):
     """
     Two dimensional Moffat model function with x/y array inputs.
@@ -889,7 +889,7 @@ def amoffat2d(x,y,pars,nderiv):
     return g,deriv
 
     
-@njit
+@njit(cache=True)
 def moffat2d(x,y,pars,nderiv):
     """
     Two dimensional Moffat model function for a single point.
@@ -989,7 +989,7 @@ def moffat2d(x,y,pars,nderiv):
                 
     return g,deriv
 
-#@njit
+#@njit(cache=True)
 def moffat2dfit(im,err,ampc,xc,yc,verbose):
     """
     Fit a single Moffat 2D model to data.
@@ -1124,7 +1124,7 @@ def moffat2dfit(im,err,ampc,xc,yc,verbose):
 
 ####### PENNY ########
 
-@njit
+@njit(cache=True)
 def penny2d_fwhm(pars):
     """
     Return the FWHM of a 2D Penny function.
@@ -1178,7 +1178,7 @@ def penny2d_fwhm(pars):
         
     return fwhm
 
-@njit
+@njit(cache=True)
 def penny2d_flux(pars):
     """
     Return the total Flux of a 2D Penny function.
@@ -1225,7 +1225,7 @@ def penny2d_flux(pars):
     
     return volume
 
-@njit
+@njit(cache=True)
 def apenny2d(x,y,pars,nderiv):
     """
     Two dimensional Penny model function with x/y array inputs.
@@ -1293,7 +1293,7 @@ def apenny2d(x,y,pars,nderiv):
     return g,deriv
 
     
-@njit
+@njit(cache=True)
 def penny2d(x,y,pars,nderiv):
     """
     Two dimensional Penny model function for a single point.
@@ -1408,7 +1408,7 @@ def penny2d(x,y,pars,nderiv):
             
     return f,deriv
 
-#@njit
+#@njit(cache=True)
 def penny2dfit(im,err,ampc,xc,yc,verbose):
     """
     Fit a single Penny 2D model to data.
@@ -1544,7 +1544,7 @@ def penny2dfit(im,err,ampc,xc,yc,verbose):
 
 ####### GAUSSPOW ########
 
-@njit
+@njit(cache=True)
 def gausspow2d_fwhm(pars):
     """
     Return the FWHM of a 2D DoPHOT Gausspow function.
@@ -1605,7 +1605,7 @@ def gausspow2d_fwhm(pars):
     
     return fwhm
 
-@njit
+@njit(cache=True)
 def gausspow2d_flux(pars):
     """
     Return the flux of a 2D DoPHOT Gausspow function.
@@ -1654,7 +1654,7 @@ def gausspow2d_flux(pars):
     return volume
 
 
-@njit
+@njit(cache=True)
 def agausspow2d(x,y,pars,nderiv):
     """
     Two dimensional Gausspow model function with x/y array inputs.
@@ -1723,7 +1723,7 @@ def agausspow2d(x,y,pars,nderiv):
     return g,deriv
 
     
-@njit
+@njit(cache=True)
 def gausspow2d(x,y,pars,nderiv):
     """
     DoPHOT PSF, sum of elliptical Gaussians.
@@ -1840,7 +1840,7 @@ def gausspow2d(x,y,pars,nderiv):
             
     return g,deriv
 
-#@njit
+#@njit(cache=True)
 def gausspow2dfit(im,err,ampc,xc,yc,verbose):
     """
     Fit a single GaussPOW 2D model to data.
@@ -1977,7 +1977,7 @@ def gausspow2dfit(im,err,ampc,xc,yc,verbose):
 
 ####### SERSIC ########
 
-@njit
+@njit(cache=True)
 def asersic2d(x,y,pars,nderiv):
     """
     Sersic profile and can be elliptical and rotated.
@@ -2035,7 +2035,7 @@ def asersic2d(x,y,pars,nderiv):
             deriv[i,:] = deriv1
     return g,deriv
 
-@njit  
+@njit(cache=True)  
 def sersic2d(x, y, pars, nderiv):
     """
     Sersic profile and can be elliptical and rotated.
@@ -2165,7 +2165,7 @@ def sersic2d(x, y, pars, nderiv):
 
     return g,deriv
 
-@njit
+@njit(cache=True)
 def sersic2d_fwhm(pars):
     """
     Return the FWHM of a 2D Sersic function.
@@ -2220,7 +2220,7 @@ def sersic2d_fwhm(pars):
     
     return fwhm
 
-@njit
+@njit(cache=True)
 def sersic_b(n):
     # Normalisation constant
     # bn ~ 2n-1/3 for n>8
@@ -2229,7 +2229,7 @@ def sersic_b(n):
     #return gammaincinv(2*n, 0.5)
     return utils.gammaincinv05(2*n)
 
-#@njit
+#@njit(cache=True)
 def create_sersic_function(Ie, re, n):
     # Not required for integrals - provided for reference
     # This returns a "closure" function, which is fast to call repeatedly with different radii
@@ -2240,14 +2240,14 @@ def create_sersic_function(Ie, re, n):
         return Ie * np.exp(f * r ** reciprocal_n - neg_bn)
     return sersic_wrapper
 
-@njit
+@njit(cache=True)
 def sersic_lum(Ie, re, n):
     # total luminosity (integrated to infinity)
     bn = sersic_b(n)
     g2n = utils.gamma(2*n)
     return Ie * re**2 * 2*np.pi*n * np.exp(bn)/(bn**(2*n)) * g2n
 
-@njit
+@njit(cache=True)
 def sersic_full2half(I0,kserc,alpha):
     # Convert Io and k to Ie and Re
     # Ie = Io * exp(-bn)
@@ -2258,7 +2258,7 @@ def sersic_full2half(I0,kserc,alpha):
     Re = (bn/kserc)**n
     return Ie,Re
 
-@njit
+@njit(cache=True)
 def sersic_half2full(Ie,Re,alpha):
     # Convert Ie and Re to Io and k
     # Ie = Io * exp(-bn)
@@ -2269,7 +2269,7 @@ def sersic_half2full(Ie,Re,alpha):
     kserc = bn/Re**alpha
     return I0,kserc
 
-@njit
+@njit(cache=True)
 def sersic2d_flux(pars):
     """
     Return the total Flux of a 2D Sersic function.
@@ -2321,7 +2321,7 @@ def sersic2d_flux(pars):
     
     return volume
 
-#@njit
+#@njit(cache=True)
 def sersic2d_estimates(pars):
     # calculate estimates for the Sersic parameters using
     # peak, x0, y0, flux, asemi, bsemi, theta
@@ -2396,7 +2396,7 @@ def sersic2d_estimates(pars):
 
 # Generic model routines
 
-@njit
+@njit(cache=True)
 def model2d(x,y,psftype,pars,nderiv):
     """
     Two dimensional model function.
@@ -2452,7 +2452,7 @@ def model2d(x,y,psftype,pars,nderiv):
         print('psftype=',psftype,'not supported')
         return
 
-@njit
+@njit(cache=True)
 def amodel2d(x,y,psftype,pars,nderiv):
     """
     Two dimensional model function with x/y array inputs.
@@ -2510,7 +2510,7 @@ def amodel2d(x,y,psftype,pars,nderiv):
         print('psftype=',psftype,'not supported')
         return
 
-@njit
+@njit(cache=True)
 def model2d_flux(psftype,pars):
     """
     Return the flux of a 2D model.
@@ -2557,7 +2557,7 @@ def model2d_flux(psftype,pars):
         print('psftype=',psftype,'not supported')
         return
 
-@njit
+@njit(cache=True)
 def model2d_fwhm(psftype,pars):
     """
     Return the fwhm of a 2D model.
@@ -2606,7 +2606,7 @@ def model2d_fwhm(psftype,pars):
     return fwhm
 
 
-@njit
+@njit(cache=True)
 def model2d_estimates(psftype,ampc,xc,yc):
     """
     Get initial estimates for parameters
@@ -2672,7 +2672,7 @@ def model2d_estimates(psftype,ampc,xc,yc):
         print('psftype=',psftype,'not supported')
         return
 
-@njit
+@njit(cache=True)
 def model2d_bounds(psftype):
     """
     Return upper and lower fitting bounds for the parameters.
@@ -2732,7 +2732,7 @@ def model2d_bounds(psftype):
         print('psftype=',psftype,'not supported')
         return
     
-@njit
+@njit(cache=True)
 def model2d_maxsteps(psftype,pars):
     """
     Get maximum steps for parameters.
@@ -2789,7 +2789,7 @@ def model2d_maxsteps(psftype,pars):
         print('psftype=',psftype,'not supported')
         return
 
-@njit
+@njit(cache=True)
 def model2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
     """
     Fit all parameters of a single 2D model to data.
@@ -2912,7 +2912,7 @@ def model2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
 #########################################################################
 # Empirical PSF
 
-@njit
+@njit(cache=True)
 def relcoord(x,y,shape):
     """
     Convert absolute X/Y coordinates to relative ones to use
@@ -2946,7 +2946,7 @@ def relcoord(x,y,shape):
     rely = (y-midpt[0])/shape[0]*2
     return relx,rely
 
-@njit
+@njit(cache=True)
 def empirical(x, y, pars, data, imshape=None, deriv=False):
     """
     Evaluate an empirical PSF.
@@ -3073,7 +3073,7 @@ def empirical(x, y, pars, data, imshape=None, deriv=False):
 # Generic PSF
 
 
-@njit
+@njit(cache=True)
 def unpackpsf(psf):
     """
     Unpack the PSF description that are in a 1D array.
@@ -3134,7 +3134,7 @@ def unpackpsf(psf):
         
     return psftype,pars,lookup,imshape
 
-@njit
+@njit(cache=True)
 def packpsf(psftype,pars,lookup=np.zeros((1,1,1),float),imshape=(0,0)):
     """ Put all of the PSF information into a 1D array."""
     # Figure out how many elements we need in the array
@@ -3171,7 +3171,7 @@ def packpsf(psftype,pars,lookup=np.zeros((1,1,1),float),imshape=(0,0)):
         psf[count+5:] = lookup.ravel()
     return psf
 
-@njit
+@njit(cache=True)
 def psfinfo(psf):
     """ Print out information about the PSF."""
     psftype,pars,lookup,imshape = unpackpsf(psf)
@@ -3192,7 +3192,7 @@ def psfinfo(psf):
         if psforder > 0:
             print('Image size = [',nimx,nimy,']')
 
-@njit
+@njit(cache=True)
 def psf2d_fwhm(psf):
     """
     Return the FWHM of the PSF
@@ -3206,7 +3206,7 @@ def psf2d_fwhm(psf):
     
     return fwhm
 
-@njit
+@njit(cache=True)
 def psf2d_flux(psf,amp,xc,yc):
     """
     Return the flux of the PSF
@@ -3220,9 +3220,9 @@ def psf2d_flux(psf,amp,xc,yc):
     
     return flux
 
-#@njit
+#@njit(cache=True)
 #@jit('Tuple((float64[:], float64[:]))(int32[:],int32[:],float64[:],int32,float64[:],float64[:,:,:],int32[:],boolean,boolean)',nopython=True)
-@njit
+@njit(cache=True)
 def psf(x,y,pars,psftype,psfparams,lookup,imshape,deriv=False,verbose=False):
     """
     Return a PSF model.
@@ -3312,7 +3312,7 @@ def psf(x,y,pars,psftype,psfparams,lookup,imshape,deriv=False,verbose=False):
     
     return g,derivative
 
-@njit
+@njit(cache=True)
 def psffit(im,err,x,y,pars,psftype,psfparams,lookup,imshape=None,verbose=False):
     """
     Fit a PSF model to data.
@@ -3440,7 +3440,7 @@ def psffit(im,err,x,y,pars,psftype,psfparams,lookup,imshape=None,verbose=False):
     
     return bestpar,perror,cov,flux,fluxerr,chisq
 
-@njit
+@njit(cache=True)
 def psf2d(x,y,psf,amp,xc,yc,deriv=False,verbose=False):
     """
     Return a PSF model.
@@ -3534,7 +3534,7 @@ def psf2d(x,y,psf,amp,xc,yc,deriv=False,verbose=False):
     
     return g,derivative
 
-@njit
+@njit(cache=True)
 def psf2dfit(im,err,x,y,psf,ampc,xc,yc,verbose=False):
     """
     Fit a PSF model to data.
@@ -3672,7 +3672,7 @@ spec = [
     ('iymin', types.int32),
     ('iymax', types.int32),
 ]
-@jitclass(spec)
+@jitclass(spec,cache=True)
 class BoundingBox(object):
 
     def __init__(self, ixmin, ixmax, iymin, iymax):
@@ -3739,7 +3739,7 @@ spec = [
     #('labels', types.ListType(types.string)),
 ]
 
-@jitclass(spec)
+@jitclass(spec,cache=True)
 #class PSFGaussian(PSFBase):
 class PSFGaussian(object):    
 
@@ -3887,7 +3887,7 @@ spec = [
     ('order', types.int32),
 ]
 
-@jitclass(spec)
+@jitclass(spec,cache=True)
 class PSF(object):    
 
     # Initalize the object

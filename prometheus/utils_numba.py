@@ -11,7 +11,7 @@ from . import models_numba as mnb
 
 PI = 3.141592653589793
 
-@njit
+@njit(cache=True)
 def nansum(data):
     """ Get the sum ignoring nans """
     data1d = data.ravel()
@@ -22,7 +22,7 @@ def nansum(data):
         sm = np.sum(data1d[gd])
     return sm
 
-@njit
+@njit(cache=True)
 def sum(data,ignore_nan=False):
     """Get the sum."""
     if ignore_nan:
@@ -31,7 +31,7 @@ def sum(data,ignore_nan=False):
         sm = np.sum(data.ravel())
     return sm
 
-@njit
+@njit(cache=True)
 def sum2d(data,axis=-1,ignore_nan=False):
     """Get the sum."""
     if axis==-1:
@@ -56,7 +56,7 @@ def sum2d(data,axis=-1,ignore_nan=False):
                 sm[i] = np.sum(data[i,:])
     return sm
 
-@njit
+@njit(cache=True)
 def sum3d(data,axis=-1,ignore_nan=False):
     """Get the sum."""
     if axis==-1:
@@ -87,7 +87,7 @@ def sum3d(data,axis=-1,ignore_nan=False):
                     sm[i,j] = np.sum(data[i,j,:])
     return sm
 
-@njit
+@njit(cache=True)
 def nanmean(data):
     """ Get the mean ignoring nans """
     data1d = data.ravel()
@@ -98,7 +98,7 @@ def nanmean(data):
         mn = np.mean(data1d[gd])
     return mn
 
-@njit
+@njit(cache=True)
 def mean(data,ignore_nan=False):
     """Get the mean."""
     if ignore_nan:
@@ -107,7 +107,7 @@ def mean(data,ignore_nan=False):
         mn = np.mean(data.ravel())
     return mn
 
-@njit
+@njit(cache=True)
 def mean2d(data,axis=-1,ignore_nan=False):
     """Get the mean."""
     if axis==-1:
@@ -132,7 +132,7 @@ def mean2d(data,axis=-1,ignore_nan=False):
                 mn[i] = np.mean(data[i,:])
     return mn
 
-@njit
+@njit(cache=True)
 def mean3d(data,axis=-1,ignore_nan=False):
     """Get the mean."""
     if axis==-1:
@@ -163,7 +163,7 @@ def mean3d(data,axis=-1,ignore_nan=False):
                     mn[i,j] = np.mean(data[i,j,:])
     return mn
 
-@njit
+@njit(cache=True)
 def nanmedian(data):
     """ Get the median ignoring nans """
     data1d = data.ravel()
@@ -174,7 +174,7 @@ def nanmedian(data):
         med = np.median(data1d[gd])
     return med
 
-@njit
+@njit(cache=True)
 def median(data,ignore_nan=False):
     """Get the median."""
     if ignore_nan:
@@ -183,7 +183,7 @@ def median(data,ignore_nan=False):
         med = np.median(data.ravel())
     return med
 
-@njit
+@njit(cache=True)
 def median2d(data,axis=-1,ignore_nan=False):
     """Get the median."""
     if axis==-1:
@@ -208,7 +208,7 @@ def median2d(data,axis=-1,ignore_nan=False):
                 med[i] = np.median(data[i,:])
     return med
 
-@njit
+@njit(cache=True)
 def median3d(data,axis=-1,ignore_nan=False):
     """Get the median."""
     if axis==-1:
@@ -239,7 +239,7 @@ def median3d(data,axis=-1,ignore_nan=False):
                     med[i,j] = np.median(data[i,j,:])
     return med
 
-@njit
+@njit(cache=True)
 def mad(data, ignore_nan=True, zero=False):
     """ Calculate the median absolute deviation of an array."""
     data1d = data.ravel()
@@ -260,7 +260,7 @@ def mad(data, ignore_nan=True, zero=False):
             result = nanmedian(np.abs(data))
     return result * 1.482602218505602
 
-@njit
+@njit(cache=True)
 def mad2d(data, axis=-1, func=None, ignore_nan=True, zero=False):
     """ Calculate the median absolute deviation of an array."""
     if axis==-1:
@@ -292,7 +292,7 @@ def mad2d(data, axis=-1, func=None, ignore_nan=True, zero=False):
 
     return result * 1.482602218505602
 
-@njit
+@njit(cache=True)
 def mad3d(data, axis=-1, func=None, ignore_nan=True, zero=False):
     """ Calculate the median absolute deviation of an array."""
     if axis==-1:
@@ -323,7 +323,7 @@ def mad3d(data, axis=-1, func=None, ignore_nan=True, zero=False):
             result = median3d(np.abs(data),axis=axis)
     return result * 1.482602218505602
 
-@njit
+@njit(cache=True)
 def quadratic_bisector(x,y):
     """ Calculate the axis of symmetric or bisector of parabola"""
     #https://www.azdhs.gov/documents/preparedness/state-laboratory/lab-licensure-certification/technical-resources/
@@ -348,7 +348,7 @@ def quadratic_bisector(x,y):
         return np.nan
     return -b/(2*a)
 
-@njit
+@njit(cache=True)
 def meshgrid(x,y):
     """ Implementation of numpy's meshgrid function."""
     nx = len(x)
@@ -362,7 +362,7 @@ def meshgrid(x,y):
         yy[:,i] = y
     return xx,yy
 
-@njit
+@njit(cache=True)
 def aclip(val,minval,maxval):
     newvals = np.zeros(len(val),float)
     for i in range(len(val)):
@@ -375,7 +375,7 @@ def aclip(val,minval,maxval):
         newvals[i] = nval
     return newvals
 
-@njit
+@njit(cache=True)
 def clip(val,minval,maxval):
     if val < minval:
         nval = minval
@@ -385,14 +385,14 @@ def clip(val,minval,maxval):
         nval = val
     return nval
 
-@njit
+@njit(cache=True)
 def drop_imag(z):
     EPSILON = 1e-07    
     if abs(z.imag) <= EPSILON:
         z = z.real
     return z
 
-@njit
+@njit(cache=True)
 def gamma(z):
     # Gamma function for a single z value
     # Using the Lanczos approximation
@@ -421,7 +421,7 @@ def gamma(z):
         y = np.sqrt(2 * PI) * t ** (z + 0.5) * np.exp(-t) * x
     return y
 
-@njit
+@njit(cache=True)
 def gammaincinv05(a):
     """ gammaincinv(a,0.5) """
     n = np.array([1.00e-03, 1.12e-01, 2.23e-01, 3.34e-01, 4.45e-01, 5.56e-01,
@@ -460,7 +460,7 @@ def gammaincinv05(a):
     return out
 
     
-@njit
+@njit(cache=True)
 def linearinterp(data,x,y):
     """
     Linear interpolation.
@@ -517,7 +517,7 @@ def linearinterp(data,x,y):
 
     return f
 
-@njit
+@njit(cache=True)
 def alinearinterp(data,x,y):
     """
     Linear interpolation.
@@ -556,7 +556,7 @@ def alinearinterp(data,x,y):
     return f
 
 
-@njit
+@njit(cache=True)
 def inverse(a):
     """ Safely take the inverse of a square 2D matrix."""
     # This checks for zeros on the diagonal and "fixes" them.
@@ -577,7 +577,7 @@ def inverse(a):
     
     return ainv
 
-@njit
+@njit(cache=True)
 def qr_jac_solve(jac,resid,weight=None):
     """ Solve part of a non-linear least squares equation using QR decomposition
         using the Jacobian."""
@@ -599,7 +599,7 @@ def qr_jac_solve(jac,resid,weight=None):
     return dbeta
 
 
-@njit
+@njit(cache=True)
 def jac_covariance(jac,resid,wt):
     """ Determine the covariance matrix. """
     
@@ -634,7 +634,7 @@ def jac_covariance(jac,resid,wt):
         
     return cov
 
-@njit
+@njit(cache=True)
 def checkbounds(pars,bounds):
     """ Check the parameters against the bounds."""
     # 0 means it's fine
@@ -651,14 +651,14 @@ def checkbounds(pars,bounds):
         check[badhigh] = 2
     return check
 
-@njit
+@njit(cache=True)
 def limbounds(pars,bounds):
     """ Limit the parameters to the boundaries."""
     lbounds,ubounds = bounds[:,0],bounds[:,1]
     outpars = np.minimum(np.maximum(pars,lbounds),ubounds)
     return outpars
 
-@njit
+@njit(cache=True)
 def limsteps(steps,maxsteps):
     """ Limit the parameter steps to maximum step sizes."""
     signs = np.sign(steps)
@@ -666,7 +666,7 @@ def limsteps(steps,maxsteps):
     outsteps *= signs
     return outsteps
 
-@njit
+@njit(cache=True)
 def newpars(pars,steps,bounds=None,maxsteps=None):
     """ Return new parameters that fit the constraints."""
     # Limit the steps to maxsteps
@@ -705,14 +705,14 @@ def newpars(pars,steps,bounds=None,maxsteps=None):
         newpars = np.minimum(np.maximum(newpars,lbounds+1e-30),ubounds-1e-30)
     return newpars
 
-@njit
+@njit(cache=True)
 def poly2d(xdata,pars):
     """ model of 2D linear polynomial."""
     x = xdata[:,0]
     y = xdata[:,1]
     return pars[0]+pars[1]*x+pars[2]*y+pars[3]*x*y
 
-@njit
+@njit(cache=True)
 def jacpoly2d(xdata,pars):
     """ jacobian of 2D linear polynomial."""
     x = xdata[:,0]
@@ -728,7 +728,7 @@ def jacpoly2d(xdata,pars):
     jac[:,3] = x*y  # xy-coefficient
     return m,jac
 
-@njit
+@njit(cache=True)
 def poly2dfit(x,y,data,error,maxiter=2,minpercdiff=0.5,verbose=False):
     """ Fit a 2D linear function to data robustly."""
     ndata = len(data)
@@ -901,7 +901,7 @@ class Index(object):
         return self._invindex
             
 # from astroML
-@njit
+@njit(cache=True)
 def crossmatch(X1, X2, max_distance=np.inf,k=1):
     """Cross-match the values between X1 and X2
 
@@ -942,7 +942,7 @@ def crossmatch(X1, X2, max_distance=np.inf,k=1):
     
 
 # from astroML, modified by D. Nidever
-@njit
+@njit(cache=True)
 def xmatch(ra1, dec1, ra2, dec2, dcr=2.0, unique=False, sphere=True):
     """Cross-match angular values between RA1/DEC1 and RA2/DEC2
 
@@ -1145,7 +1145,7 @@ def xmatch(ra1, dec1, ra2, dec2, dcr=2.0, unique=False, sphere=True):
                                 
     return ind1, ind2, mindist
 
-@njit
+@njit(cache=True)
 def ravel_multi_index(multi_index,imshape):
     """ ravel indices"""
     # multi_index: tuple of integer arrays
@@ -1165,7 +1165,7 @@ def ravel_multi_index(multi_index,imshape):
     
     return index
 
-@njit
+@njit(cache=True)
 def unravel_index(indices,imshape):
     """ return multi-dimensional index. """
 
@@ -1185,7 +1185,7 @@ def unravel_index(indices,imshape):
 
     return unraveled_coords
 
-@njit
+@njit(cache=True)
 def unique_index(array):
     """ return unique values, index and reverse indez."""
     index = Index(array)
@@ -1199,7 +1199,7 @@ def unique_index(array):
     return uvals,uindex,invindex
 
 
-@njit
+@njit(cache=True)
 def smooth2d(im,binsize,med=0):
     """ Do smoothing of a 2D image."""
     # mean by default
@@ -1222,7 +1222,7 @@ def smooth2d(im,binsize,med=0):
             smim[y1:y2,x1:x2] = sm
     return smim
 
-@njit
+@njit(cache=True)
 def skygrid(im,binsize,tot=0,med=1):
     """ Estimate the background."""
     #binsize = 200
@@ -1248,7 +1248,7 @@ def skygrid(im,binsize,tot=0,med=1):
                 bgim[j,i] = np.mean(im[y1:y2,x1:x2].ravel()[sample])
     return bgim
 
-@njit
+@njit(cache=True)
 def skyinterp(binim,fullim,binsize):
     """ linear interpolation"""
     ny,nx = fullim.shape
@@ -1318,7 +1318,7 @@ def skyinterp(binim,fullim,binsize):
     return fullim
                     
 
-@njit
+@njit(cache=True)
 def sky(im,binsize=0):
     ny,nx = im.shape
 
@@ -1345,7 +1345,7 @@ def sky(im,binsize=0):
 
     return bgim
 
-@njit
+@njit(cache=True)
 def numba_sky2(im,binsize,tot,med):
     """ Estimate the background."""
     ny,nx = im.shape
@@ -1394,7 +1394,7 @@ def detection(im,nsig=10):
     
     return xpeak,ypeak
 
-@njit
+@njit(cache=True)
 def detectpeaks(im,sig,nsig):
     """ Detect peaks"""
     # input sky subtracted image
@@ -1442,7 +1442,7 @@ def detectpeaks(im,sig,nsig):
                     count = count + 1
     return xpeak,ypeak,count
 
-@njit
+@njit(cache=True)
 def boundingbox(im,xp,yp,thresh,bmax):
     """ Get bounding box for the source """
 
@@ -1503,7 +1503,7 @@ def boundingbox(im,xp,yp,thresh,bmax):
 
     return leftxp,rightxp,downyp,upyp
 
-@njit
+@njit(cache=True)
 def morpho(im,xp,yp,x0,x1,y0,y1,thresh):
     """ Measure morphology parameters """
     ny,nx = im.shape
@@ -1563,7 +1563,7 @@ def morpho(im,xp,yp,x0,x1,y0,y1,thresh):
 
     return flux,mnx,mny,sigx,sigy,sigxy,fwhm,asemi,bsemi,theta
 
-@njit
+@njit(cache=True)
 def morphology(im,xpeak,ypeak,thresh,bmax):
     """ Measure morphology of the peaks."""
 
@@ -1594,7 +1594,7 @@ def morphology(im,xpeak,ypeak,thresh,bmax):
 
     return mout
 
-@njit
+@njit(cache=True)
 def create_table(names, data):
     """Creates a table-like structure using NumPy structured arrays."""
     dtype = np.dtype([(name, data[0].dtype) for name in names])
@@ -1603,14 +1603,14 @@ def create_table(names, data):
         table[name] = data[i]
     return table
 
-@njit
+@njit(cache=True)
 def convertstringlist(norm_list):
     numba_list = typed.List.empty_list(types.string)
     for e in norm_list:
         numba_list.append(e)
     return numba_list
 
-@njit
+@njit(cache=True)
 def asciicode(a):
     """ Get ascii code for a character."""
     if a==',':
@@ -1744,7 +1744,7 @@ def asciicode(a):
     elif a=='z':
         return 122
 
-@njit
+@njit(cache=True)
 def asciichar(code):
     """ Return ascii character given the code."""
     vals = ['','','','','','','','','','',   # 0-9
@@ -1762,7 +1762,7 @@ def asciichar(code):
             'x','y','z','','','','','','','']   # 120-129
     return vals[code]
     
-@njit
+@njit(cache=True)
 def convertasciitoint(data):
     """ Convert ascii string to integer."""
     n = len(data)
@@ -1771,7 +1771,7 @@ def convertasciitoint(data):
         out[i] = asciicode(data[i])
     return out
 
-@njit
+@njit(cache=True)
 def convertinttoascii(data):
     """ Convert array of ascii code integers to string."""
     n = len(data)
@@ -1780,7 +1780,7 @@ def convertinttoascii(data):
         out += asciichar(data[i])
     return out
 
-@njit
+@njit(cache=True)
 def asciiintvalue(arr):
     """ Convert ascii code array to an integer value."""
     out = 0
@@ -1788,7 +1788,7 @@ def asciiintvalue(arr):
         out += arr[i]*1000**i
     return out
 
-@njit
+@njit(cache=True)
 def isinteger(val):
     """ Check if this is an integer."""
     sval = str(val)
@@ -1799,7 +1799,7 @@ def isinteger(val):
     else:
         return False
 
-@njit
+@njit(cache=True)
 def formatfloat(val,ndigits):
     """ Format a floating point number for string output."""
     if val<0:
@@ -1969,7 +1969,7 @@ class Table(object):
             self.data[ind[0],rows[i]] = data[i]
 
 
-@njit
+@njit(cache=True)
 def starbbox(coords,imshape,radius):
     """                                                                                         
     Return the boundary box for a star given radius and image size.                             
@@ -2021,7 +2021,7 @@ def starbbox(coords,imshape,radius):
     return np.array([xlo,xhi,ylo,yhi])
 
 
-@njit
+@njit(cache=True)
 def getstar(imshape,xcen,ycen,hpsfnpix,fitradius):
     """ Return a star's full footprint and fitted pixels data."""
     # always return the same size
@@ -2070,7 +2070,7 @@ def getstar(imshape,xcen,ycen,hpsfnpix,fitradius):
     return (fxdata,fydata,fravelindex,fbbox,nfx,nfy,fcount,
             xdata,ydata,ravelindex,bbox,count,mask)
 
-@njit
+@njit(cache=True)
 def collatestars(imshape,starx,stary,hpsfnpix,fitradius):
     """ Get full footprint and fitted pixels data for all stars."""
     nstars = len(starx)
@@ -2125,7 +2125,7 @@ def collatestars(imshape,starx,stary,hpsfnpix,fitradius):
             xdata,ydata,ravelindex,bbox,ndata,mask)
 
 
-@njit
+@njit(cache=True)
 def getfullstar(imshape,xcen,ycen,hpsfnpix):
     """ Return the entire footprint image/error/x/y arrays for one star."""
     # always return the same size
@@ -2153,7 +2153,7 @@ def getfullstar(imshape,xcen,ycen,hpsfnpix):
                 count += 1
     return xdata,ydata,ravelindex,bbox,nx,ny,count
 
-@njit
+@njit(cache=True)
 def collatefullstars(imshape,starx,stary,hpsfnpix):
     """ Get the entire footprint image/error/x/y for all of the stars."""
     nstars = len(starx)
@@ -2176,7 +2176,7 @@ def collatefullstars(imshape,starx,stary,hpsfnpix):
         ndata[i] = n1
     return xdata,ydata,ravelindex,bbox,shape,ndata
 
-@njit
+@njit(cache=True)
 def getfitstar(imshape,xcen,ycen,fitradius):
     """ Get the fitting pixel information for a single star."""
     npix = int(np.floor(2*fitradius))+2
@@ -2202,7 +2202,7 @@ def getfitstar(imshape,xcen,ycen,fitradius):
                 count += 1
     return xdata,ydata,ravelindex,count,mask
         
-@njit
+@njit(cache=True)
 def collatefitstars(imshape,starx,stary,fitradius):
     """ Get the fitting pixel information for all stars."""
     nstars = len(starx)

@@ -42,7 +42,7 @@ from .clock_numba import clock
 
 # For each star's footprint, save the indices into the whole image
 
-@njit
+@njit(cache=True)
 def getstar(imshape,xcen,ycen,hpsfnpix,fitradius):
     """ Return a star's full footprint and fitted pixels data."""
     # always return the same size
@@ -91,7 +91,7 @@ def getstar(imshape,xcen,ycen,hpsfnpix,fitradius):
     return (fxdata,fydata,fravelindex,fbbox,nfx,nfy,fcount,
             xdata,ydata,ravelindex,bbox,count,mask)
 
-@njit
+@njit(cache=True)
 def collatestars(imshape,starx,stary,hpsfnpix,fitradius):
     """ Get full footprint and fitted pixels data for all stars."""
     nstars = len(starx)
@@ -146,7 +146,7 @@ def collatestars(imshape,starx,stary,hpsfnpix,fitradius):
             xdata,ydata,ravelindex,bbox,ndata,mask)
 
 
-@njit
+@njit(cache=True)
 def getfullstar(imshape,xcen,ycen,hpsfnpix):
     """ Return the entire footprint image/error/x/y arrays for one star."""
     # always return the same size
@@ -174,7 +174,7 @@ def getfullstar(imshape,xcen,ycen,hpsfnpix):
                 count += 1
     return xdata,ydata,ravelindex,bbox,nx,ny,count
 
-@njit
+@njit(cache=True)
 def collatefullstars(imshape,starx,stary,hpsfnpix):
     """ Get the entire footprint image/error/x/y for all of the stars."""
     nstars = len(starx)
@@ -197,7 +197,7 @@ def collatefullstars(imshape,starx,stary,hpsfnpix):
         ndata[i] = n1
     return xdata,ydata,ravelindex,bbox,shape,ndata
 
-# @njit
+# @njit(cache=True)
 # def unpackstar(xdata,ydata,bbox,shape,istar):
 #     """ Return unpacked data for one star."""
 #     xdata1 = xdata[istar,:].copy()
@@ -215,7 +215,7 @@ def collatefullstars(imshape,starx,stary,hpsfnpix):
 #         ydata1 = ydata1[:shape1[0],:shape1[1]]
 #     return xdata1,ydata1,bbox1,shape1
 
-@njit
+@njit(cache=True)
 def getfitstar(imshape,xcen,ycen,fitradius):
     """ Get the fitting pixel information for a single star."""
     npix = int(np.floor(2*fitradius))+2
@@ -241,7 +241,7 @@ def getfitstar(imshape,xcen,ycen,fitradius):
                 count += 1
     return xdata,ydata,ravelindex,count,mask
         
-@njit
+@njit(cache=True)
 def collatefitstars(imshape,starx,stary,fitradius):
     """ Get the fitting pixel information for all stars."""
     nstars = len(starx)
@@ -267,7 +267,7 @@ def collatefitstars(imshape,starx,stary,fitradius):
         bbox[i,:] = bb
     return xdata,ydata,ravelindex,bbox,ndata,mask
 
-# @njit
+# @njit(cache=True)
 # def unpackfitstar(xdata,ydata,bbox,ndata,istar):
 #     """ Return unpacked fitting pixel data for one star."""
 #     xdata1 = xdata[istar,:]
@@ -294,7 +294,7 @@ spec = [
     ('fit_n', types.int64),
     ('fit_invindex', types.int64[:]),
 ]
-@jitclass(spec)
+@jitclass(spec,cache=True)
 class StarData(object):
     # Just a container for star data
     def __init__(self,x,y,bbox,ravelindex,shape,n,fit_x,fit_y,fit_bbox,
@@ -378,7 +378,7 @@ spec = [
   #  ('usepix', types.int8[:]),
 ]
 
-@jitclass(spec)
+@jitclass(spec,cache=True)
 class GroupFitter(object):
 
     def __init__(self,psftype,psfparams,image,error,tab,fitradius,
@@ -1452,7 +1452,7 @@ class GroupFitter(object):
         return cov
 
         
-#@njit
+#@njit(cache=True)
 def fit(psf,image,error,tab,fitradius=0.0,recenter=True,maxiter=10,minpercdiff=0.5,
         reskyiter=2,nofreeze=False,skyfit=True,absolute=False,verbose=False):
     """
