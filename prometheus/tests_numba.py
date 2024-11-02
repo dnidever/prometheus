@@ -1,7 +1,8 @@
 import os
 import numpy as np
-from prometheus import utils_numba as utils, models_numba as mnb, getpsf_numba as gnm
-
+from prometheus import utils_numba as utils, models_numba as mnb, getpsf_numba as gnb
+from prometheus import groupfit_numba as gfit, allfit_numba as afit
+from prometheus import ccddata
 
 def tests():
     utils_tests()
@@ -234,10 +235,10 @@ def utils_tests():
     out = index.invindex
     print('utils_numba.Index okay')
 
-    ra = np.random.rand(100)*10
-    dec = np.random.rand(100)*10
-    ra2 = ra + np.random.randn(100)*0.1
-    dec2 = ra + np.random.randn(100)*0.1
+    ra1 = np.random.rand(100)*10
+    dec1 = np.random.rand(100)*10
+    ra2 = ra1 + np.random.randn(100)*0.1
+    dec2 = ra1 + np.random.randn(100)*0.1
     n1 = len(ra1)
     n2 = len(ra2)
     X1 = np.zeros((n1,2),float)
@@ -251,8 +252,8 @@ def utils_tests():
 
     ra1 = np.random.rand(100)*10
     dec1 = np.random.rand(100)*10
-    ra2 = ra + np.random.randn(100)*0.001
-    dec2 = ra + np.random.randn(100)*0.001
+    ra2 = ra1 + np.random.randn(100)*0.001
+    dec2 = dec1 + np.random.randn(100)*0.001
     out = utils.xmatch(ra1, dec1, ra2, dec2, dcr=2.0, unique=False, sphere=False)
     out = utils.xmatch(ra1, dec1, ra2, dec2, dcr=2.0, unique=True, sphere=False)
     out = utils.xmatch(ra1, dec1, ra2, dec2, dcr=2.0, unique=False, sphere=True)
@@ -754,3 +755,328 @@ def getpsf_tests():
     out = gnb.getpsf(psf,image,tab,fitradius=None,lookup=False,lorder=0,method='qr',subnei=False,
                      alltab=None,maxiter=10,minpercdiff=1.0,reject=False,maxrejiter=3,verbose=False)
     print('getpsf_numba.getpsf() okay')
+
+
+def groupfit_tests():
+    """  Testing the groupfit code."""
+
+    psftab = np.zeros((4,4),np.float64)
+    psftab[:,0] = np.arange(4)+1
+    psftab[:,1] = [100,200,300,400]   # amp
+    psftab[:,2] = [10,11,19,18]       # xcen
+    psftab[:,3] = [20,30,31,21]       # ycen
+    mpars = np.array([3.1,3.0,0.1])
+    psf = mnb.PSF(1,mpars,21)
+    xx,yy = np.meshgrid(np.arange(51),np.arange(51))
+    model = np.zeros(51*51,float)
+    for i in range(4):
+        model += psf.model(xx,yy,psftab[i,1:])
+    model = model.reshape(51,51)
+
+    err = np.sqrt(model+10)
+    sky = 0.0 #10.0
+    im = model + sky + np.random.rand(51,51)*err
+    mask = np.zeros(im.shape,bool)
+    image = ccddata.CCDData(im,error=err,mask=mask)
+    
+    # initial estimates
+    objtab = np.zeros((4,4),np.float64)
+    objtab[:,0] = np.arange(4)+1
+    objtab[:,1] = [80,250,200,500]           # amp
+    objtab[:,2] = [9.5,11.6,19.2,17.8]       # xcen
+    objtab[:,3] = [20.3,29.7,30.9,21.2]      # ycen
+
+    gf = gfit.GroupFitter(psf.psftype,psf.params,im,err,objtab,3.0,
+                          np.zeros((1,1,1),np.float64),psf.npix,True)
+    print('groupfit.GroupFitter.__init__() okay')
+
+    #out = gf.ampfit()
+    #print('groupfit.GroupFitter.ampfit() okay')
+
+    #out = gf.centroid()
+    #print('groupfit.GroupFitter.centroid() okay')
+
+    pars = np.zeros(7,np.float64)
+    pars[:] = [100.0,3.4,5.5, 200.0,4.6,7.5, 100.0]
+    bounds = [np.zeros(7,np.float64)-np.inf,np.zeros(7,np.float64)+np.inf]
+    out = gf.checkbounds(pars,bounds)
+    print('groupfit.GroupFitter.checkbounds() okay')
+
+    out = gf.chisq(gf.pars)
+    print('groupfit.GroupFitter.chisq() okay')
+
+    out = gf.cov()
+    print('groupfit.GroupFitter.cov() okay')
+
+    out = gf.getstar(0)
+    print('groupfit.GroupFitter.getstar() okay')
+
+    out = gf.getstarfit(0)
+    print('groupfit.GroupFitter.getstarfit() okay')
+
+    out = gf.jac(gf.pars)
+    print('groupfit.GroupFitter.jac() okay')
+
+    pars = np.zeros(7,np.float64)
+    pars[:] = [100.0,3.4,5.5, 200.0,4.6,7.5, 100.0]
+    bounds = [np.zeros(7,np.float64)-np.inf,np.zeros(7,np.float64)+np.inf]
+    out = gf.limbounds(pars,bounds)
+    print('groupfit.GroupFitter.limbounds() okay')
+
+    steps = np.zeros(6,np.float64)+0.1
+    maxsteps = np.zeros(6,np.float64)+0.5
+    out = gf.limsteps(steps,maxsteps)
+    print('groupfit.GroupFitter.limsteps() okay')
+
+    m,j = gf.jac(gf.pars)
+    dbeta = utils.qr_jac_solve(j,gf.resflat)
+    out = gf.linesearch(gf.pars,dbeta,m,j)
+    print('groupfit.GroupFitter.linesearch() okay')
+
+    out = gf.mkbounds(gf.pars,gf.imshape)
+    print('groupfit.GroupFitter.mkbounds() okay')
+
+    out = gf.model(gf.pars)
+    print('groupfit.GroupFitter.model() okay')
+
+    out = gf.modelstar(0)
+    print('groupfit.GroupFitter.modelstar() okay')
+
+    out = gf.modelstarfit(0)
+    print('groupfit.GroupFitter.modelstarfit() okay')
+
+    bounds = [np.zeros(13,np.float64)-np.inf,np.zeros(13,np.float64)+np.inf]
+    steps = np.zeros(13,np.float64)+0.1
+    maxsteps = np.zeros(13,np.float64)+0.5
+    out = gf.newpars(gf.pars,steps,bounds,maxsteps)
+    print('groupfit.GroupFitter.newpars() okay')
+
+    out = gf.psf(gf.starx(0),gf.stary(0),gf.pars[:3])
+    print('groupfit.GroupFitter.psf() okay')
+
+    out = gf.psfjac(gf.starx(0),gf.stary(0),gf.pars[:3])
+    print('groupfit.GroupFitter.psfjac() okay')
+
+    #out = gf.score(0)
+    #print('groupfit.GroupFitter.score() okay')
+
+    out = gf.sky()
+    print('groupfit.GroupFitter.sky() okay')
+
+    out = gf.starbbox(0)
+    print('groupfit.GroupFitter.starbbox() okay')
+
+    out = gf.starfitbbox(0)
+    print('groupfit.GroupFitter.starfitbbox() okay')
+
+    out = gf.starfitchisq(0)
+    print('groupfit.GroupFitter.starfitchisq() okay')
+
+    out = gf.starfitinvindex(0)
+    print('groupfit.GroupFitter.starfitinvindex() okay')
+
+    out = gf.starfitnpix(0)
+    print('groupfit.GroupFitter.starfitnpix() okay')
+
+    out = gf.starfitravelindex(0)
+    print('groupfit.GroupFitter.starfitravelindex() okay')
+
+    out = gf.starfitrms(0)
+    print('groupfit.GroupFitter.starfitrms() okay')
+
+    out = gf.starfitx(0)
+    print('groupfit.GroupFitter.starfitx() okay')
+
+    out = gf.starfity(0)
+    print('groupfit.GroupFitter.starfity() okay')
+
+    out = gf.starflatindex(0)
+    print('groupfit.GroupFitter.starflatindex() okay')
+
+    out = gf.starflatnpix(0)
+    print('groupfit.GroupFitter.starflatnpix() okay')
+
+    out = gf.starflatx(0)
+    print('groupfit.GroupFitter.starflatx() okay')
+
+    out = gf.starflaty(0)
+    print('groupfit.GroupFitter.starflaty() okay')
+
+    out = gf.starnpix(0)
+    print('groupfit.GroupFitter.starnpix() okay')
+    
+    out = gf.starravelindex(0)
+    print('groupfit.GroupFitter.starravelindex() okay')
+
+    out = gf.starx(0)
+    print('groupfit.GroupFitter.starx() okay')
+
+    out = gf.stary(0)
+    print('groupfit.GroupFitter.stary() okay')
+
+    out = gf.steps(gf.pars)
+    print('groupfit.GroupFitter.steps() okay')
+
+    out = gf.unfreeze()
+    print('groupfit.GroupFitter.unfreeze() okay')
+    
+    out = gfit.fit(psf,im,err,objtab,verbose=False)
+    print('groupfit.fit() okay')
+
+    
+def allfit_tests():
+    """  Testing the allfit code."""
+
+    psftab = np.zeros((4,4),np.float64)
+    psftab[:,0] = np.arange(4)+1
+    psftab[:,1] = [100,200,300,400]   # amp
+    psftab[:,2] = [10,11,19,18]       # xcen
+    psftab[:,3] = [20,30,31,21]       # ycen
+    mpars = np.array([3.1,3.0,0.1])
+    psf = mnb.PSF(1,mpars,21)
+    xx,yy = np.meshgrid(np.arange(51),np.arange(51))
+    model = np.zeros(51*51,float)
+    for i in range(4):
+        model += psf.model(xx,yy,psftab[i,1:])
+    model = model.reshape(51,51)
+
+    err = np.sqrt(model+10)
+    sky = 0.0 #10.0
+    im = model + sky + np.random.rand(51,51)*err
+    mask = np.zeros(im.shape,bool)
+    image = ccddata.CCDData(im,error=err,mask=mask)
+    
+    # initial estimates
+    objtab = np.zeros((4,4),np.float64)
+    objtab[:,0] = np.arange(4)+1
+    objtab[:,1] = [80,250,200,500]           # amp
+    objtab[:,2] = [9.5,11.6,19.2,17.8]       # xcen
+    objtab[:,3] = [20.3,29.7,30.9,21.2]      # ycen
+
+    fitradius = 3.0
+    psflookup = np.zeros((1,1,1),np.float64)
+    verbose = False
+    nofreeze = False
+    af = afit.AllFitter(psf.psftype,psf.params,psf.npix,psflookup,
+                        image.data,image.error,image.mask,objtab,
+                        fitradius,verbose,nofreeze)
+    print('allfit.AllFitter.__init__() okay')
+
+    pars = np.zeros(7,np.float64)
+    pars[:] = [100.0,3.4,5.5, 200.0,4.6,7.5, 100.0]
+    bounds = [np.zeros(7,np.float64)-np.inf,np.zeros(7,np.float64)+np.inf]
+    out = af.checkbounds(pars,bounds)
+    print('allfit.AllFitter.checkbounds() okay')
+
+    out = af.chisq()
+    print('allfit.AllFitter.chisq() okay')
+
+    out = af.collatestars(af.imshape,af.starxcen,af.starycen,af.npix//2,af.fitradius,af.skyradius)
+    print('allfit.AllFitter.collatestars() okay')
+
+    out = af.fit()
+    print('allfit.AllFitter.fit() okay')
+
+    out = af.getstar(af.imshape,af.starxcen[0],af.starycen[0],af.npix//2,af.fitradius,af.skyradius)
+    print('allfit.AllFitter.getstar() okay')
+
+    pars = np.zeros(6,np.float64)
+    pars[:] = [100.0,3.4,5.5, 200.0,4.6,7.5]
+    bounds = [np.zeros(6,np.float64)-np.inf,np.zeros(6,np.float64)+np.inf]
+    out = af.limbounds(pars,bounds)
+    print('allfit.AllFitter.limbounds() okay')
+
+    steps = np.zeros(6,np.float64)+0.1
+    maxsteps = np.zeros(6,np.float64)+0.5
+    out = af.limsteps(steps,maxsteps)
+    print('allfit.AllFitter.limsteps() okay')
+
+    out = af.mkbounds(af.pars,af.imshape)
+    print('allfit.AllFitter.mkbounds() okay')
+
+    bounds = [np.zeros(12,np.float64)-np.inf,np.zeros(12,np.float64)+np.inf]
+    steps = np.zeros(12,np.float64)+0.1
+    maxsteps = np.zeros(12,np.float64)+0.5
+    out = af.newpars(af.pars,steps,bounds,maxsteps)
+    print('allfit.AllFitter.newpars() okay')
+
+    pars1,xind1,yind1,ravelindex1 = af.stardata(0)
+    out = af.psf(xind1,yind1,pars1)
+    print('allfit.AllFitter.psf() okay')
+
+    pars1,xind1,yind1,ravelindex1 = af.stardata(0)
+    out = af.psfjac(xind1,yind1,pars1)
+    print('allfit.AllFitter.psfjac() okay')
+
+    out = af.sky()
+    print('allfit.AllFitter.sky() okay')
+    
+    out = af.starcov(0)
+    print('allfit.AllFitter.starcov() okay')
+
+    out = af.stardata(0)
+    print('allfit.AllFitter.stardata() okay')
+
+    out = af.starfit(0)
+    print('allfit.AllFitter.starfit() okay')
+    
+    out = af.starfitchisq(0)
+    print('allfit.AllFitter.starfitchisq() okay')
+
+    out = af.starfitdata(0)
+    print('allfit.AllFitter.starfitdata() okay')
+
+    out = af.starfiterr(0)
+    print('allfit.AllFitter.starfiterr() okay')
+
+    out = af.starfitim(0)
+    print('allfit.AllFitter.starfitim() okay')
+
+    out = af.starfitnpix(0)
+    print('allfit.AllFitter.starfitnpix() okay')
+
+    out = af.starfitravelindex(0)
+    print('allfit.AllFitter.starfitravelindex() okay')
+
+    out = af.starfitresid(0)
+    print('allfit.AllFitter.starfitresid() okay')
+
+    out = af.starfitrms(0)
+    print('allfit.AllFitter.starfitrms() okay')
+
+    out = af.starjac(0)
+    print('allfit.AllFitter.starjac() okay')
+
+    out = af.starmodel(0)
+    print('allfit.AllFitter.starmodel() okay')
+
+    out = af.starmodelfull(0)
+    print('allfit.AllFitter.starmodelfull() okay')
+
+    out = af.starnpix(0)
+    print('allfit.AllFitter.starnpix() okay')
+
+    out = af.starravelindex(0)
+    print('allfit.AllFitter.starravelindex() okay')
+
+    out = af.starsky(0)
+    print('allfit.AllFitter.starsky() okay')
+
+    out = af.steps(af.pars)
+    print('allfit.AllFitter.steps() okay')
+
+    out = af.unfreeze()
+    print('allfit.AllFitter.unfreeze() okay')
+
+
+    out = afit.numba_allfit(psf.psftype,psf.params,psf.npix,psflookup,psf.flux(),
+                            image.data,image.error,image.mask,objtab,fitradius,maxiter=10,
+                            minpercdiff=0.5,reskyiter=2,verbose=False,
+                            nofreeze=False)
+    print('allfit.numba_allfit() okay')
+
+    out = afit.allfit(psf,image,objtab)
+    print('allfit.allfit() okay')
+
+    #out = afit.fit(psf,image,objtab)
+    #print('allfit.fit() okay')

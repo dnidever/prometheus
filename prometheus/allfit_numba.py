@@ -352,11 +352,6 @@ class AllFitter(object):
         n = self.starfit_ndata[i]
         return self.starfit_ravelindex[i,:n]
 
-    def starfitinvindex(self,i):
-        """ Return inverse index of the star's fitted pixels."""
-        n = self.starfit_ndata[i]
-        return self.starfit_invindex[i,:n]
-
     def starfitchisq(self,i):
         """ Return chisq of current best-fit for one star."""
         pars1,xind1,yind1,ravelind1 = self.starfitdata(i)
@@ -412,50 +407,6 @@ class AllFitter(object):
     def nfreestars(self):
         """ Return the number of free stars."""
         return np.sum(self.freestars) 
-    
-    def freeze(self,pars,frzpars):
-        """ Freeze stars and parameters"""
-        # PARS: best-fit values of free parameters
-        # FRZPARS: boolean array of which "free" parameters
-        #            should now be frozen
-
-        # Update all the free parameters
-        self.pars[self.freepars] = pars
-
-        # Update freeze values for "free" parameters
-        self.freezepars[np.where(self.freepars==True)] = frzpars   # stick in the new values for the "free" parameters
-        
-        # Check if we need to freeze any new parameters
-        nfrz = np.sum(frzpars)
-        if nfrz==0:
-            return pars
-        
-        # Freeze new stars
-        oldfreezestars = self.freezestars.copy()
-        self.freezestars = np.sum(self.freezepars[0:3*self.nstars].copy().reshape(self.nstars,3),axis=1)==3
-        # Subtract model for newly frozen stars
-        newfreezestars, = np.where((oldfreezestars==False) & (self.freezestars==True))
-        if len(newfreezestars)>0:
-            # add models to a full image
-            # WHY FULL IMAGE??
-            newmodel = np.zeros(self.imshape[0]*self.imshape[1],np.float64)
-            for i in newfreezestars:
-                # Save on what iteration this star was frozen
-                self.starniter[i] = self.niter+1
-                #print('freeze: subtracting model for star ',i)
-                pars1,xind1,yind1,ravelind1 = self.starfitdata(i)
-                n1 = len(xind1)
-                im1 = self.psf(xind1,yind1,pars1)
-                newmodel[ravelind1] += im1
-            # Only keep the pixels being fit
-            #  and subtract from the residuals
-            newmodel1 = newmodel[self.indflat]
-            ##self.resflat -= newmodel1
-  
-        # Return the new array of free parameters
-        frzind = np.arange(len(frzpars))[np.where(frzpars==True)]
-        pars = np.delete(pars,frzind)
-        return pars
 
     def unfreeze(self):
         """ Unfreeze all parameters and stars."""
@@ -571,7 +522,7 @@ class AllFitter(object):
         """ Calculate the model for a star for the full footprint."""
         # This is for a SINGLE star
         # Get all of the star data
-        pars,xind,yind,ravelindex,invindex = self.stardata(i)
+        pars,xind,yind,ravelindex = self.stardata(i)
         n = len(xind)
         m = self.psf(xind,yind,pars)        
         return m

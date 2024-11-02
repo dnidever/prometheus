@@ -294,7 +294,7 @@ spec = [
     ('fit_n', types.int64),
     ('fit_invindex', types.int64[:]),
 ]
-@jitclass(spec,cache=True)
+@jitclass(spec)
 class StarData(object):
     # Just a container for star data
     def __init__(self,x,y,bbox,ravelindex,shape,n,fit_x,fit_y,fit_bbox,
@@ -378,7 +378,7 @@ spec = [
   #  ('usepix', types.int8[:]),
 ]
 
-@jitclass(spec,cache=True)
+@jitclass(spec)
 class GroupFitter(object):
 
     def __init__(self,psftype,psfparams,image,error,tab,fitradius,

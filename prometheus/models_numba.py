@@ -3672,7 +3672,7 @@ spec = [
     ('iymin', types.int32),
     ('iymax', types.int32),
 ]
-@jitclass(spec,cache=True)
+@jitclass(spec)
 class BoundingBox(object):
 
     def __init__(self, ixmin, ixmax, iymin, iymax):
@@ -3739,7 +3739,7 @@ spec = [
     #('labels', types.ListType(types.string)),
 ]
 
-@jitclass(spec,cache=True)
+@jitclass(spec)
 #class PSFGaussian(PSFBase):
 class PSFGaussian(object):    
 
@@ -3887,7 +3887,7 @@ spec = [
     ('order', types.int32),
 ]
 
-@jitclass(spec,cache=True)
+@jitclass(spec)
 class PSF(object):    
 
     # Initalize the object
