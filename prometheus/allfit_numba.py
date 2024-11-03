@@ -28,168 +28,7 @@ def skyval(array,sigma):
     xmn = np.sum(wt2*array)/np.sum(wt2)
     return xmn
 
-    
-kv_ty = (types.int64, types.unicode_type)
-spec = [
-    ('psftype', types.int32),
-    ('psfparams', types.float64[:]),
-    ('verbose', types.boolean),
-    ('nofreeze', types.boolean),
-    ('psflookup', types.float64[:,:,:]),
-    ('psforder', types.int32),
-    #('fwhm', types.float64),
-    ('image', types.float64[:,:]),
-    ('error', types.float64[:,:]),
-    ('mask', types.boolean[:,:]),
-    ('skyim', types.float64[:]),
-    ('modelim', types.float64[:]),
-    ('resid', types.float64[:]),
-    ('xx', types.int64[:]),
-    ('yy', types.int64[:]),
-    ('tab', types.float64[:,:]),
-    ('initpars', types.float64[:,:]),
-    ('pars', types.float64[:]),
-    ('perror', types.float64[:]),
-    ('nstars', types.int32),
-    ('niter', types.int32),    
-    ('npsfpix', types.int32),    
-    ('nx', types.int32),
-    ('ny', types.int32),
-    ('imshape', types.int64[:]),
-    ('npix', types.int32),    
-    ('fitradius', types.float64),
-    ('skyradius', types.float64),
-    ('nfitpix', types.int32),
-    ('radius', types.int32),
-    ('_starsky', types.float64[:]),
-    ('starniter', types.int32[:]),
-    ('njaciter', types.int32),
-    ('freezestars', types.boolean[:]),
-    ('starchisq', types.float64[:]),
-    ('starrms', types.float64[:]),
-    ('star_ravelindex', types.int64[:,:]),
-    ('star_ndata', types.int32[:]),
-    ('starfit_ravelindex', types.int64[:,:]),
-    ('starfit_ndata', types.int32[:]),
-    ('starsky_ravelindex', types.int64[:,:]),
-    ('starsky_ndata', types.int32[:]),
-    ('ntotpix', types.int32),
-    ('ravelindex', types.int64[:]),
-]
 
-@jitclass(spec)
-#@jitclass(spec, cache=True)
-class AllFitter(object):
-
-    def __init__(self,psftype,psfparams,npix,psflookup,image,error,mask,
-                 tab,fitradius,verbose=False,nofreeze=False):
-        # Save the input values
-        self.psftype = psftype
-        self.psfparams = psfparams
-        self.psflookup = psflookup
-        _,_,npsforder = psflookup.shape
-        self.psforder = 0
-        if npsforder==4:
-            self.psforder = 1
-        if psflookup.ndim != 3:
-            raise Exception('psflookup must have 3 dimensions')
-        psforder = psflookup.shape[2]
-        if psforder>1:
-            self.psforder = 1
-        self.verbose = verbose
-        self.nofreeze = nofreeze
-        ny,nx = image.shape                             # save image dimensions, python images are (Y,X)
-        self.nx = nx
-        self.ny = ny
-        self.imshape = np.array([ny,nx])
-        self.image = image.copy().astype(np.float64)
-        self.error = error.astype(np.float64)
-        self.mask = mask.astype(np.bool_)
-        xx,yy = utils.meshgrid(np.arange(nx),np.arange(ny))
-        self.xx = xx.flatten()
-        self.yy = yy.flatten()
-        # Order stars by flux, brightest first
-        si = np.argsort(tab[:,1])[::-1]  # largest amp first
-        self.tab = tab[si]                              # ID, amp, xcen, ycen
-        self.initpars = self.tab[:,1:4]                 # amp, xcen, ycen
-        self.nstars = len(self.tab)                     # number of stars
-        self.niter = 1                                  # number of iterations in the solver
-        self.npsfpix = npix                             # shape of PSF
-        self.npix = npix
-        self.fitradius = fitradius
-        self.nfitpix = int(np.ceil(fitradius))  # +/- nfitpix
-        self.skyradius = npix//2 + 10
-        # Star amps
-        # if 'amp' in cat.colnames:
-        #     staramp = cat['amp'].copy()
-        # else:
-        #     # estimate amp from flux and fwhm
-        #     # area under 2D Gaussian is 2*pi*A*sigx*sigy
-        #     if 'fwhm' in cat.columns:
-        #         amp = cat['flux']/(2*np.pi*(cat['fwhm']/2.35)**2)
-        #     else:
-        #         amp = cat['flux']/(2*np.pi*(psf.fwhm()/2.35)**2)                
-        #     staramp = np.maximum(amp,0)   # make sure it's positive
-        # Initialize the parameter array
-        pars = np.zeros(self.nstars*3,float) # amp, xcen, ycen
-        pars[0::3] = self.initpars[:,0]
-        pars[1::3] = self.initpars[:,1]
-        pars[2::3] = self.initpars[:,2]
-        self.pars = pars
-        self.perror = np.zeros(len(pars),np.float64)
-        # Sky and Niter arrays for the stars
-        self._starsky = np.zeros(self.nstars,float)
-        self.starniter = np.zeros(self.nstars,np.int32)
-        self.starchisq = np.zeros(self.nstars,np.float64)
-        self.starrms = np.zeros(self.nstars,np.float64)
-        self.njaciter = 0  # initialize njaciter
-        # Initialize the freezestars array
-        self.freezestars = np.zeros(self.nstars,np.bool_)
-        
-        # Get information for all the stars
-        xcen = self.pars[1::3]
-        ycen = self.pars[2::3]
-        hpsfnpix = self.npsfpix//2
-        out = self.collatestars(self.imshape,xcen,ycen,hpsfnpix,fitradius,self.skyradius)
-        fravelindex,fsndata,ravelindex,sndata,skyravelindex,skyndata = out
-        self.star_ravelindex = fravelindex
-        self.star_ndata = fsndata
-        # Fitting arrays
-        self.starfit_ravelindex = ravelindex
-        self.starfit_ndata = sndata
-        # Sky arrays
-        self.starsky_ravelindex = skyravelindex
-        self.starsky_ndata = skyndata
-        
-        # Put indices of all the unique fitted pixels into one array
-        ntotpix = np.sum(self.starfit_ndata)
-        allravelindex = np.zeros(ntotpix,np.int64)
-        count = 0
-        for i in range(self.nstars):
-            n1 = self.starfit_ndata[i]
-            ravelind1 = self.starfit_ravelindex[i,:n1]
-            allravelindex[count:count+n1] = ravelind1
-            count += n1
-        allravelindex = np.unique(allravelindex)
-        self.ravelindex = allravelindex
-        self.ntotpix = len(allravelindex)
-        
-        # Create initial smooth sky image
-        self.skyim = utils.sky(self.image).flatten()
-        # Subtract the initial models from the residual array
-        self.resid = image.copy().astype(np.float64).flatten()   # flatten makes it easier to modify
-        self.resid[:] -= self.skyim   # subtract smooth sky
-        self.modelim = np.zeros(self.imshape[0]*self.imshape[1],np.float64)
-        for i in range(self.nstars):
-            pars1 = self.starpars[i]
-            n1 = self.star_ndata[i]
-            ravelind1 = self.starravelindex(i)
-            xind1 = self.xx[ravelind1]
-            yind1 = self.yy[ravelind1]
-            m = self.psf(xind1,yind1,pars1)
-            self.resid[ravelind1] -= m
-            self.modelim[ravelind1] += m
-            
 
     def getstar(self,imshape,xcen,ycen,hpsfnpix,fitradius,skyradius):
         """ Return a star's full footprint and fitted pixels data."""
@@ -736,6 +575,126 @@ class AllFitter(object):
         chisq = np.sum(self.resid[ravelindex]**2/self.error.ravel()[ravelindex]**2)
         return chisq
     
+
+
+        Example
+        -------
+
+        outtab,model,sky = gf.fit()
+
+        """
+
+
+
+
+def initialize(psftype,psfparams,npix,psflookup,image,error,mask,
+               tab,fitradius,verbose=False,nofreeze=False):
+    # Save the input values
+    psftype = psftype
+    psfparams = psfparams
+    psflookup = psflookup
+    _,_,npsforder = psflookup.shape
+    psforder = 0
+    if npsforder==4:
+        psforder = 1
+    if psflookup.ndim != 3:
+        raise Exception('psflookup must have 3 dimensions')
+    psforder = psflookup.shape[2]
+    if psforder>1:
+        psforder = 1
+    ny,nx = image.shape                             # save image dimensions, python images are (Y,X)
+    nx = nx
+    ny = ny
+    imshape = np.array([ny,nx])
+    image = image.copy().astype(np.float64)
+    error = error.astype(np.float64)
+    mask = mask.astype(np.bool_)
+    xx,yy = utils.meshgrid(np.arange(nx),np.arange(ny))
+    xx = xx.flatten()
+    yy = yy.flatten()
+    # Order stars by flux, brightest first
+    si = np.argsort(tab[:,1])[::-1]  # largest amp first
+    tab = tab[si]                              # ID, amp, xcen, ycen
+    initpars = tab[:,1:4]                 # amp, xcen, ycen
+    nstars = len(tab)                     # number of stars
+    niter = 1                                  # number of iterations in the solver
+    npsfpix = npix                             # shape of PSF
+    npix = npix
+    fitradius = fitradius
+    nfitpix = int(np.ceil(fitradius))  # +/- nfitpix
+    skyradius = npix//2 + 10
+    # Star amps
+    # if 'amp' in cat.colnames:
+    #     staramp = cat['amp'].copy()
+    # else:
+    #     # estimate amp from flux and fwhm
+    #     # area under 2D Gaussian is 2*pi*A*sigx*sigy
+    #     if 'fwhm' in cat.columns:
+    #         amp = cat['flux']/(2*np.pi*(cat['fwhm']/2.35)**2)
+    #     else:
+    #         amp = cat['flux']/(2*np.pi*(psf.fwhm()/2.35)**2)                
+    #     staramp = np.maximum(amp,0)   # make sure it's positive
+    # Initialize the parameter array
+    pars = np.zeros(nstars*3,float) # amp, xcen, ycen
+    pars[0::3] = initpars[:,0]
+    pars[1::3] = initpars[:,1]
+    pars[2::3] = initpars[:,2]
+    pars = pars
+
+        
+    # Get information for all the stars
+    xcen = pars[1::3]
+    ycen = pars[2::3]
+    hpsfnpix = npsfpix//2
+    out = collatestars(imshape,xcen,ycen,hpsfnpix,fitradius,skyradius)
+    fravelindex,fsndata,ravelindex,sndata,skyravelindex,skyndata = out
+
+        
+    # Put indices of all the unique fitted pixels into one array
+    ntotpix = np.sum(starfit_ndata)
+    allravelindex = np.zeros(ntotpix,np.int64)
+    count = 0
+    for i in range(nstars):
+        n1 = starfit_ndata[i]
+        ravelind1 = starfit_ravelindex[i,:n1]
+        allravelindex[count:count+n1] = ravelind1
+        count += n1
+    allravelindex = np.unique(allravelindex)
+    ravelindex = allravelindex
+    ntotpix = len(allravelindex)
+        
+    # Create initial smooth sky image
+    skyim = utils.sky(image).flatten()
+    # Subtract the initial models from the residual array
+    resid = image.copy().astype(np.float64).flatten()   # flatten makes it easier to modify
+    resid[:] -= skyim   # subtract smooth sky
+    modelim = np.zeros(imshape[0]*imshape[1],np.float64)
+    for i in range(nstars):
+        pars1 = starpars[i]
+        n1 = star_ndata[i]
+        ravelind1 = starravelindex(i)
+        xind1 = xx[ravelind1]
+        yind1 = yy[ravelind1]
+        m = psf(xind1,yind1,pars1)
+        resid[ravelind1] -= m
+        modelim[ravelind1] += m
+
+    return (fravelindex,fsndata,ravelindex,sndata,skyravelindex,skyndata,
+           modelim,resid)
+    
+ 
+
+@njit(cache=True)
+def allfit(psftype,psfparams,psfnpix,psflookup,psfflux,
+           image,error,mask,tab,fitradius,maxiter=10,
+           minpercdiff=0.5,reskyiter=2,verbose=False,
+           nofreeze=False):
+    """
+    Fit all stars iteratively
+    """
+
+
+
     def fit(self,maxiter=10,minpercdiff=0.5,reskyiter=2,nofreeze=False,verbose=False):
         """
         Fit PSF to all stars iteratively
@@ -766,95 +725,149 @@ class AllFitter(object):
         sky : numpy array
            Best-fitting sky image.
 
-        Example
-        -------
-
-        outtab,model,sky = gf.fit()
-
-        """
-
-        # Iterate
-        self.niter = 1
-        maxpercdiff = 1e10
-        while (self.niter<maxiter and self.nfreestars>0):
-            start0 = clock()
-            
-            # Star loop
-            for i in range(self.nstars):
-                # Fit the single star (if not frozen)
-                if self.freezestars[i]==False:
-                    self.starfit(i)
-
-            # Re-estimate the sky
-            if self.niter % reskyiter == 0:
-                if self.verbose:
-                    print('Re-estimating the sky')
-                self.sky()
-
-            if verbose:
-                print('iter dt =',(clock()-start0)/1e9,'sec.')
-                
-            self.niter += 1     # increment counter
-
-            if self.verbose:
-                print('niter=',self.niter)
-
-        # Check that all starniter are set properly
-        #  if we stopped "prematurely" then not all stars were frozen
-        #  and didn't have starniter set
-        self.starniter[np.where(self.starniter==0)] = self.niter
-
-        # Calculate parameter uncertainties
-        # estimate uncertainties
-        # Calculate covariance matrix
-        perror = np.zeros(len(self.pars),np.float64)
-        for i in range(self.nstars):
-            cov1 = self.starcov(i)
-            perror1 = np.sqrt(np.diag(cov1))
-            perror[3*i:3*i+3] = perror1
-        self.perror[:] = perror
-
-@njit(cache=True)
-def numba_allfit(psftype,psfparams,psfnpix,psflookup,psfflux,
-                 image,error,mask,tab,fitradius,maxiter=10,
-                 minpercdiff=0.5,reskyiter=2,verbose=False,
-                 nofreeze=False):
-    """
-    This is a thin wrapper around AllFitter()
-    so we can cache it.
-    """
-    af = AllFitter(psftype,psfparams,psfnpix,psflookup,
-                   image,error,mask,tab,fitradius,verbose,nofreeze)
-    # Fit the stars iteratively
-    #af.fit()
-    af.fit(maxiter,minpercdiff,reskyiter,nofreeze,verbose)
     
+    nstars = len(tab)
+    _,_,npsforder = psflookup.shape
+    psforder = 0
+    if npsforder==4:
+        psforder = 1
+    if psflookup.ndim != 3:
+        raise Exception('psflookup must have 3 dimensions')
+    psforder = psflookup.shape[2]
+    if psforder>1:
+        psforder = 1
+    ny,nx = image.shape                             # save image dimensions, python images are (Y,X)
+    nx = nx
+    ny = ny
+    imshape = np.array([ny,nx])
+    image = image.copy().astype(np.float64)
+    error = error.astype(np.float64)
+    mask = mask.astype(np.bool_)
+    xx,yy = utils.meshgrid(np.arange(nx),np.arange(ny))
+    xx = xx.flatten()
+    yy = yy.flatten()
+    # Order stars by flux, brightest first
+    si = np.argsort(tab[:,1])[::-1]  # largest amp first
+    tab = tab[si]                              # ID, amp, xcen, ycen
+    initpars = tab[:,1:4]                 # amp, xcen, ycen
+    nfitpix = int(np.ceil(fitradius))  # +/- nfitpix
+    skyradius = npix//2 + 10
+        
+    # Get information for all the stars
+    xcen = pars[1::3]
+    ycen = pars[2::3]
+    hpsfnpix = npsfpix//2
+    out = collatestars(imshape,xcen,ycen,hpsfnpix,fitradius,skyradius)
+    starfitravelindex,starfitndata,starravelindex,starndata,skyravelindex,skyndata = out
+        
+    # Put indices of all the unique fitted pixels into one array
+    ntotpix = np.sum(starfitndata)
+    allravelindex = np.zeros(ntotpix,np.int64)
+    count = 0
+    for i in range(nstars):
+        n1 = starfitndata[i]
+        ravelind1 = starfitravelindex[i,:n1]
+        allravelindex[count:count+n1] = ravelind1
+        count += n1
+    allravelindex = np.unique(allravelindex)
+    ravelindex = allravelindex
+    ntotpix = len(allravelindex)
+        
+    # Create initial smooth sky image
+    skyim = utils.sky(image).flatten()
+    # Subtract the initial models from the residual array
+    resid = image.copy().astype(np.float64).flatten()   # flatten makes it easier to modify
+    resid[:] -= skyim   # subtract smooth sky
+    modelim = np.zeros(imshape[0]*imshape[1],np.float64)
+    for i in range(nstars):
+        pars1 = starpars[i]
+        n1 = star_ndata[i]
+        ravelind1 = starravelindex(i)
+        xind1 = xx[ravelind1]
+        yind1 = yy[ravelind1]
+        m = psf(xind1,yind1,pars1)
+        resid[ravelind1] -= m
+        modelim[ravelind1] += m
+    
+    # # Initialize the arrays
+    # out = initialize(psftype,psfparams,psfnpix,psflookup,
+    #                  image,error,mask,tab,fitradius,verbose,nofreeze)
+    # fravelindex,fsndata,ravelindex,sndata,skyravelindex = out[:5]
+    # skyndata,modelim,resid = out[5:]
+
+    # Sky and Niter arrays for the stars
+    starsky = np.zeros(nstars,float)
+    starniter = np.zeros(nstars,np.int32)
+    starchisq = np.zeros(nstars,np.float64)
+    starrms = np.zeros(nstars,np.float64)
+    freezestars = np.zeros(nstars,np.bool_)
+    
+    # While loop
+    niter = 1
+    maxpercdiff = 1e10
+    while (niter<maxiter and nfreestars>0):
+        start0 = clock()
+            
+        # Star loop
+        for i in range(nstars):
+            # Fit the single star (if not frozen)
+            if freezestars[i]==False:
+                starfit(i)
+
+        # Re-estimate the sky
+        if self.niter % reskyiter == 0:
+            if self.verbose:
+                print('Re-estimating the sky')
+            sky()
+
+        if verbose:
+            print('iter dt =',(clock()-start0)/1e9,'sec.')
+                
+        niter += 1     # increment counter
+
+        if verbose:
+            print('niter=',niter)
+
+    # Check that all starniter are set properly
+    #  if we stopped "prematurely" then not all stars were frozen
+    #  and didn't have starniter set
+    starniter[np.where(starniter==0)] = niter
+
+    # Calculate parameter uncertainties
+    # estimate uncertainties
+    # Calculate covariance matrix
+    perror = np.zeros(len(self.pars),np.float64)
+    for i in range(self.nstars):
+        cov1 = self.starcov(i)
+        perror1 = np.sqrt(np.diag(cov1))
+        perror[3*i:3*i+3] = perror1
+    perror[:] = perror
+
+
     # Return the information that we want
-    model = af.modelim.copy() #.reshape(af.imshape)
-    skyim = af.skyim.copy()  #.reshape(af.imshape)
-    pars = af.pars
-    perror = af.perror
+    model = modelim.copy() #.reshape(af.imshape)
+    skyim = skyim.copy()  #.reshape(af.imshape)
     # Put in catalog
-    outtab = np.zeros((af.nstars,15),np.float64)
-    outtab[:,0] = np.arange(af.nstars)+1           # id
+    outtab = np.zeros((nstars,15),np.float64)
+    outtab[:,0] = np.arange(nstars)+1                # id
     outtab[:,1] = pars[0:-1:3]                       # amp
     outtab[:,2] = perror[0:-1:3]                     # amp_error
     outtab[:,3] = pars[1::3]                         # x
     outtab[:,4] = perror[1::3]                       # x_error
     outtab[:,5] = pars[2::3]                         # y
     outtab[:,6] = perror[2::3]                       # y_error
-    outtab[:,7] = af._starsky                        # sky
+    outtab[:,7] = starsky                            # sky
     outtab[:,8] = outtab[:,1]*psfflux                # flux
     outtab[:,9] = outtab[:,2]*psfflux                # flux_error
     outtab[:,10] = -2.5*np.log10(np.maximum(outtab[:,8],1e-10))+25.0   # mag
     outtab[:,11] = (2.5/np.log(10))*outtab[:,9]/outtab[:,8]            # mag_error
-    outtab[:,12] = af.starrms
-    outtab[:,13] = af.starchisq
-    outtab[:,14] = af.starniter                      # niter, what iteration it converged on
+    outtab[:,12] = starrms
+    outtab[:,13] = starchisq
+    outtab[:,14] = starniter                      # niter, what iteration it converged on
     return outtab,model,skyim
     
 
-def allfit(psf,image,tab,fitradius=0.0,maxiter=10,minpercdiff=0.5,
+def pallfit(psf,image,tab,fitradius=0.0,maxiter=10,minpercdiff=0.5,
            reskyiter=2,nofreeze=False,verbose=False):
     """
     Fit PSF to all stars in an image iteratively.
