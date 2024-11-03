@@ -331,7 +331,7 @@ def allfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     ycen = pars[2::3]
     hpsfnpix = psfnpix//2
     out = collatestars(imshape,msk,xcen,ycen,hpsfnpix,fitradius,skyradius)
-    starfitravelindex,starfitndata,starravelindex,starndata,skyravelindex,skyndata = out
+    starravelindex,starndata,starfitravelindex,starfitndata,skyravelindex,skyndata = out
     
     # Put indices of all the unique fitted pixels into one array
     ntotpix = np.sum(starfitndata)
@@ -429,10 +429,10 @@ def allfit(psftype,psfparams,psfnpix,psflookup,psfflux,
             starchisq[i] = chisq1
             starrms[i] = rms1
     
-            #if verbose:
-            print('Iter = ',niter)
-            print('Pars = ',newpars1)
-            print('chisq = ',chisq1)
+            if verbose:
+                print('Iter = ',niter)
+                print('Pars = ',newpars1)
+                print('chisq = ',chisq1)
                 
         # Re-estimate the sky
         if niter % reskyiter == 0:
