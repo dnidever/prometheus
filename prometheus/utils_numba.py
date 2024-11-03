@@ -2227,3 +2227,109 @@ def collatefitstars(imshape,starx,stary,fitradius):
         ndata[i] = n1
         bbox[i,:] = bb
     return xdata,ydata,ravelindex,bbox,ndata,mask
+
+@njit(cache=True)
+def skyval(array,sigma):
+    """  Estimate sky value from sky pixels."""
+    wt = 1/sigma**2
+    med = np.median(array)
+    sig = mad(array)
+    # reweight outlier pixels using Stetson's method
+    resid = array-med
+    wt2 = wt/(1+np.abs(resid)**2/np.median(sigma))
+    xmn = np.sum(wt2*array)/np.sum(wt2)
+    return xmn
+
+@njit(cache=True)
+def mkbounds(pars,imshape,xoff=10):
+    """ Make bounds for a set of input parameters."""
+    # is [amp1,xcen1,ycen1,amp2,xcen2,ycen2, ...]
+    npars = len(pars)
+    ny,nx = imshape
+    # Make bounds
+    lbounds = np.zeros(npars,float)
+    ubounds = np.zeros(npars,float)
+    lbounds[0:-1:3] = 0
+    lbounds[1::3] = np.maximum(pars[1::3]-xoff,0)
+    lbounds[2::3] = np.maximum(pars[2::3]-xoff,0)
+    lbounds[-1] = -np.inf
+    ubounds[0:-1:3] = np.inf
+    ubounds[1::3] = np.minimum(pars[1::3]+xoff,nx-1)
+    ubounds[2::3] = np.minimum(pars[2::3]+xoff,ny-1)
+    ubounds[-1] = np.inf
+    bounds = (lbounds,ubounds)
+    return bounds
+
+@njit(cache=True)
+def checkbounds(pars,bounds):
+    """ Check the parameters against the bounds."""
+    # 0 means it's fine
+    # 1 means it's beyond the lower bound
+    # 2 means it's beyond the upper bound
+    npars = len(pars)
+    lbounds,ubounds = bounds
+    check = np.zeros(npars,np.int32)
+    badlo, = np.where(pars<=lbounds)
+    if len(badlo)>0:
+        check[badlo] = 1
+    badhi, = np.where(pars>=ubounds)
+    if len(badhi):
+        check[badhi] = 2
+    return check
+
+@njit(cache=True)
+def limbounds(pars,bounds):
+    """ Limit the parameters to the boundaries."""
+    lbounds,ubounds = bounds
+    outpars = np.minimum(np.maximum(pars,lbounds),ubounds)
+    return outpars
+
+@njit(cache=True)
+def limsteps(steps,maxsteps):
+    """ Limit the parameter steps to maximum step sizes."""
+    signs = np.sign(steps)
+    outsteps = np.minimum(np.abs(steps),maxsteps)
+    outsteps *= signs
+    return outsteps
+
+@njit(cache=True)
+def steps(pars,dx=0.5):
+    """ Return step sizes to use when fitting the stellar parameters."""
+    npars = len(pars)
+    fsteps = np.zeros(npars,float)
+    fsteps[0:-1:3] = np.maximum(np.abs(pars[0:-1:3])*0.25,1)
+    fsteps[1::3] = dx        
+    fsteps[2::3] = dx
+    fsteps[-1] = 10
+    return fsteps
+
+@njit(cache=True)
+def newpars(pars,steps,bounds,maxsteps):
+    """ Get new parameters given initial parameters, steps and constraints."""
+    # Limit the steps to maxsteps
+    limited_steps = limsteps(steps,maxsteps)
+    # Make sure that these don't cross the boundaries
+    lbounds,ubounds = bounds
+    check = checkbounds(pars+limited_steps,bounds)
+    # Reduce step size for any parameters to go beyond the boundaries
+    badpars = (check!=0)
+    # reduce the step sizes until they are within bounds
+    newsteps = limited_steps.copy()
+    count = 0
+    maxiter = 2
+    while (np.sum(badpars)>0 and count<=maxiter):
+        newsteps[badpars] /= 2
+        newcheck = checkbounds(pars+newsteps,bounds)
+        badpars = (newcheck!=0)
+        count += 1
+            
+    # Final parameters
+    newpars = pars + newsteps
+            
+    # Make sure to limit them to the boundaries
+    check = checkbounds(newpars,bounds)
+    badpars = (check!=0)
+    if np.sum(badpars)>0:
+        # add a tiny offset so it doesn't fit right on the boundary
+        newpars = np.minimum(np.maximum(newpars,lbounds+1e-30),ubounds-1e-30)
+    return newpars
