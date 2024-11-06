@@ -374,9 +374,6 @@ def model(psfdata,freezedata,flatdata,pars,trim=False,allparams=False,verbose=Fa
         xdata1 = (xind1,yind1)
         # we need the inverse index to the unique fitted pixels
         im1 = psf(xdata1,pars1,psfdata)
-        #im1,_ = mnb.psf(xind1,yind1,pars1,psftype,psfparams,psflookup,
-        #                imshape,deriv=False,verbose=False)
-        #im1 = psf(xind1,yind1,pars1)
         allim[invind1] += im1
         #usepix[invind1] = True
         
@@ -448,10 +445,9 @@ def jac(psfdata,freezedata,flatdata,pars,trim=False,allparams=False):
         invind1 = starflat_index[i,:n1]
         xind1 = xflat[invind1]
         yind1 = yflat[invind1]
+        xdata1 = (xind1,yind1)
         # we need the inverse index to the unique fitted pixels
-        im1,jac1 = mnb.psf(xind1,yind1,pars1,psftype,psfparams,psflookup,
-                           imshape,deriv=True,verbose=False)
-        #im1,jac1 = psfjac(xind1,yind1,pars1)
+        im1,jac1 = psfjac(xdata1,pars1,psfdata)
         jac[invind1,i*3] = jac1[:,0]
         jac[invind1,i*3+1] = jac1[:,1]
         jac[invind1,i*3+2] = jac1[:,2]
@@ -1007,8 +1003,8 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         ravelind1 = starravelindex[i]
         xind1 = xx[ravelind1]
         yind1 = yy[ravelind1]
-        m,_ = mnb.psf(xind1,yind1,pars1,psftype,psfparams,psflookup,
-                      imshape,deriv=False,verbose=False)
+        xdata1 = (xind1,yind1)
+        m = psf(xdata1,pars1,psfdata)
         resid[ravelind1] -= m
         modelim[ravelind1] += m
 
@@ -1278,8 +1274,10 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         pars1[0] = outtab[i,1]  # amp
         pars1[1] = outtab[i,3]  # x
         pars1[2] = outtab[i,5]  # y
-        model1,_ = mnb.psf(xind1,yind1,pars1,psftype,psfparams,psflookup,
-                           imshape,deriv=False,verbose=False)
+        xdata1 = (xind1,yind1)
+        model1 = psf(xdata1,pars1,psfdata)
+        #model1,_ = mnb.psf(xind1,yind1,pars1,psftype,psfparams,psflookup,
+        #                   imshape,deriv=False,verbose=False)
         sky1 = outtab[i,7]
         chisq1 = np.sum((flux1-sky1-model1)**2/err1**2)/n1
         outtab[i,13] = chisq1
