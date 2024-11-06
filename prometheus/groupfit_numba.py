@@ -429,10 +429,13 @@ def jac(psfdata,freezedata,flatdata,pars,trim=False,allparams=False):
     else:
         allpars = pars
 
+    print('jac len(allpars):',len(allpars))
+    print('jac len(pars):',len(pars))
+        
     im = np.zeros(ntotpix,np.float64)
     jac = np.zeros((ntotpix,len(pars)),np.float64)    # image covered by star
     usepix = np.zeros(ntotpix,np.bool_)
-
+    
     # Loop over the stars and generate the model image        
     # ONLY LOOP OVER UNFROZEN STARS
     if allparams==False:
@@ -466,28 +469,28 @@ def jac(psfdata,freezedata,flatdata,pars,trim=False,allparams=False):
     # Sky gradient
     jac[:,-1] = 1
             
-    # Remove frozen columns
-    if nfreezepars>0 and allparams==False:
-        #jac = np.delete(jac,np.arange(len(pars))[freezepars],axis=1)
-        origjac = jac
-        jac = np.zeros((ntotpix,nfreepars),np.float64)
-        freeparind, = np.where(freezepars==False)
-        for count,i in enumerate(freeparind):
-            jac[:,count] = origjac[:,i]
+    # # Remove frozen columns
+    # if nfreezepars>0 and allparams==False:
+    #     #jac = np.delete(jac,np.arange(len(pars))[freezepars],axis=1)
+    #     origjac = jac
+    #     jac = np.zeros((ntotpix,nfreepars),np.float64)
+    #     freeparind, = np.where(freezepars==False)
+    #     for count,i in enumerate(freeparind):
+    #         jac[:,count] = origjac[:,i]
 
-    usepix = usepix
-    nusepix = np.sum(usepix)
+    # usepix = usepix
+    # nusepix = np.sum(usepix)
 
-    # Trim out unused pixels
-    if trim and nusepix<ntotpix:
-        unused = np.arange(ntotpix)[~usepix]
-        origjac = jac
-        jac = np.zeros((nusepix,nfreepars),np.float64)
-        usepixind, = np.where(usepix==True)
-        im = im[usepixind]
-        for count,i in enumerate(usepixind):
-            for j in range(nfreepars):
-                jac[count,j] = origjac[i,j]
+    # # Trim out unused pixels
+    # if trim and nusepix<ntotpix:
+    #     unused = np.arange(ntotpix)[~usepix]
+    #     origjac = jac
+    #     jac = np.zeros((nusepix,nfreepars),np.float64)
+    #     usepixind, = np.where(usepix==True)
+    #     im = im[usepixind]
+    #     for count,i in enumerate(usepixind):
+    #         for j in range(nfreepars):
+    #             jac[count,j] = origjac[i,j]
 
     if np.sum(~np.isfinite(im))>0:
         print('model has some nans')
@@ -805,8 +808,8 @@ def dofreeze(freezepars,freezestars,oldpars,newpars,nofreeze=False,minpercdiff=0
     # return freezepars,freezestars,newfreezestars
 
     
-@njit(cache=True)
-#@njit
+#@njit(cache=True)
+@njit
 def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
              image,error,mask,tab,fitradius,maxiter=10,
              minpercdiff=0.5,reskyiter=2,verbose=False,
@@ -1044,27 +1047,31 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     # While loop
     while (niter<maxiter and maxpercdiff>minpercdiff and nfreepars>0):
         start0 = clock()
-
+        print(' ')
+        print('--- START OF NEW ITERATION',niter,'---')
+        print(' ')
+        
         # bestpar: current best values for the free parameters
         # pars: current best values for ALL parameters
         
         # Jacobian solvers
         # Get the Jacobian and model
         #  only for pixels that are affected by the "free" parameters
-        #model0,j = jac(psftype,psfparams,psflookup,imshape,freezepars,freezestars,
-        #               starflat_ndata,starflat_index,xflat,yflat,ntotpix,
-        #               bestpar,True,False)    # trim, allparams
         freezedata = (freezepars,freezestars)
         flatdata = (starflat_ndata,starflat_index,xflat,yflat,ntotpix)
-        model0,j = jac(psfdata,freezedata,flatdata,bestpar,True,False)  # trim, allparams
-        #               freezepars,freezestars,
-        #               starflat_ndata,starflat_index,xflat,yflat,ntotpix,
-        #               bestpar,True,False)    # trim, allparams
-        
-        #m,jac = jac(bestpar,True,False)   # trim,allparams
+        print('bestpar:',bestpar)
+        print('len(bestpar):',len(bestpar))
+        print('nfreezepars:',np.sum(freezepars==True))
+        print('nfreezestars:',np.sum(freezestars==True))
+        model0,j = jac(psfdata,freezedata,flatdata,bestpar,False,False)  # trim, allparams
+        print('I got to here!')
         # Residuals
+        print('len(skyim):',len(skyim))
+        print('len(indflat):',len(indflat))
         skyflat = skyim[indflat]
+        print('len(skyflat):',len(skyflat))
         dy = resflat-skyflat-model0
+        print('len(dy):',len(dy))
         # Weights
         wt = 1/errflat**2
         # Solve Jacobian
@@ -1073,37 +1080,44 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         print(np.sum(~np.isfinite(j)))
         print(np.sum(~np.isfinite(dy)))
         print(model0)
+        print('j.shape:',j.shape)
+        print('dy.shape:',dy.shape)
+        print('wt.shape:',wt.shape)
+        print('nfreezepars:',np.sum(freezepars==True))
         dbeta_free = utils.qr_jac_solve(j,dy,weight=wt)
         dbeta_free[~np.isfinite(dbeta_free)] = 0.0  # deal with NaNs, shouldn't happen
+        print('dbeta_free:',dbeta_free)
         dbeta = np.zeros(len(pars),np.float64)
         dbeta[np.where(freezepars==False)] = dbeta_free
+        print('dbeta:',dbeta)
         
         # Perform line search
         # Models
         freezedata = (freezepars,freezestars)
         flatdata = (starflat_ndata,starflat_index,xflat,yflat,ntotpix)
-        model1 = model(psfdata,freezedata,flatdata,pars+0.5*dbeta,True,False)   # trim, allparams
-        model2 = model(psfdata,freezedata,flatdata,pars+dbeta,True,False)       # trim, allparams        
-        #model1 = model(psftype,psfparams,psflookup,imshape,freezepars,freezestars,
-        #               starflat_ndata,starflat_index,xflat,yflat,ntotpix,
-        #               pars+0.5*dbeta,True,False)    # trim, allparams
-        #model2 = model(psftype,psfparams,psflookup,imshape,freezepars,freezestars,
-        #               starflat_ndata,starflat_index,xflat,yflat,ntotpix,
-        #               pars+dbeta,True,False)    # trim, allparams
+        model1 = model(psfdata,freezedata,flatdata,bestpar+0.5*dbeta_free,False,False)   # trim, allparams
+        print('linesearch model1')
+        model2 = model(psfdata,freezedata,flatdata,bestpar+dbeta_free,False,False)       # trim, allparams
+        print('linesearch model2')
+        print('len(resflat):',len(resflat))
+        print('len(model0):',len(model0))
         chisq0 = np.sum((resflat-model0)**2/errflat**2)
         chisq1 = np.sum((resflat-model1)**2/errflat**2)
         chisq2 = np.sum((resflat-model2)**2/errflat**2)
         #if verbose:
-        #    print('linesearch:',chisq0,chisq1,chisq2)
+        print('linesearch:',chisq0,chisq1,chisq2)
         alpha = utils.quadratic_bisector(np.array([0.0,0.5,1.0]),
                                          np.array([chisq0,chisq1,chisq2]))
         alpha = np.minimum(np.maximum(alpha,0.0),1.0)  # 0<alpha<1
         if np.isfinite(alpha)==False:
             alpha = 1.0
         pars_new = pars + alpha * dbeta
-        new_dbeta_free = alpha * dbeta
+        new_dbeta_free = alpha * dbeta_free
         new_dbeta = np.zeros(len(pars),float)
+        print('nfreepars:',np.sum(freezepars==False))
+        print('len(new_dbeta_free):',len(new_dbeta_free))
         new_dbeta[np.where(freezepars==False)] = new_dbeta_free
+        print('new_dbeta:',new_dbeta)
         
         # Update parameters
         oldpar = bestpar.copy()
@@ -1126,45 +1140,53 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
 
         print('percdiff:',percdiff)
         
-        # # Freeze parameters/stars that converged
-        # #  also subtract models of fixed stars
-        # #  also return new free parameters
-        # if nofreeze==False:
-        #     frzpars = percdiff<=minpercdiff
-        #     freeparsind, = np.where(freezepars==False)
-        #     # Update freeze values for "free" parameters
-        #     freezepars[np.where(freezepars==False)] = frzpars   # stick in updated values for "free" parameters
-        #     # Only freeze stars, not individual parameters
-        #     oldfreezestars = freezestars.copy()
-        #     freezestars = np.sum(freezepars[0:3*nstars].copy().reshape(nstars,3),axis=1)==3
-        #     # Subtract model for newly frozen stars
-        #     newfreezestars, = np.where((oldfreezestars==False) & (freezestars==True))
+        # Freeze parameters/stars that converged
+        #  also subtract models of fixed stars
+        #  also return new free parameters
+        if nofreeze==False:
+            frzpars = percdiff<=minpercdiff
+            freeparsind, = np.where(freezepars==False)
+            # Update freeze values for "free" parameters
+            tempfreezepars = freezepars.copy()
+            tempfreezepars[np.where(freezepars==False)] = frzpars   # stick in updated values for "free" parameters
+            # Only freeze stars, not individual parameters
+            oldfreezestars = freezestars.copy()
+            freezestars = np.sum(tempfreezepars[0:3*nstars].copy().reshape(nstars,3),axis=1)==3
+            # Subtract model for newly frozen stars
+            newfreezestars, = np.where((oldfreezestars==False) & (freezestars==True))
             
-        #     print('frzpars:',frzpars)
-        #     print('freeparsind:',freeparsind)
-        #     print('newfreezestars:',newfreezestars)
+            print('frzpars:',frzpars)
+            print('freeparsind:',freeparsind)
+            print('newfreezestars:',newfreezestars)
             
-        #     # Freezing more stars
-        #     if len(newfreezestars)>0:
-        #         print('Freezing ',len(newfreezestars),' stars')
-        #         for i in range(len(newfreezestars)):
-        #             istar = newfreezestars[i]
-        #             print(istar)
-        #             freezestars[istar] = True
-        #             freezepars[3*istar:3*istar+3] = True
-        #             # Subtract model of frozen star from residuals
-        #             pars1 = pars[3*istar:3*istar+3]
-        #             n1 = starflat_ndata[istar]
-        #             invind1 = starflat_index[istar,:n1]
-        #             xind1 = xflat[invind1]
-        #             yind1 = yflat[invind1]                    
-        #             im1,_ = mnb.psf(xind1,yind1,pars1,psftype,psfparams,psflookup,
-        #                             imshape,deriv=False,verbose=False)
-        #             resflat[ravelindex1] -= im1
+            # Freezing more stars
+            if len(newfreezestars)>0:
+                print('Freezing ',len(newfreezestars),' stars')
+                for i in range(len(newfreezestars)):
+                    istar = newfreezestars[i]
+                    print(istar)
+                    freezestars[istar] = True
+                    freezepars[3*istar:3*istar+3] = True
+                    # Subtract model of frozen star from residuals
+                    pars1 = pars[3*istar:3*istar+3]
+                    n1 = starflat_ndata[istar]
+                    invind1 = starflat_index[istar,:n1]
+                    xind1 = xflat[invind1]
+                    yind1 = yflat[invind1]
+                    xdata1 = (xind1,yind1)
+                    im1 = psf(xdata1,pars1,psfdata)
+                    #im1,_ = mnb.psf(xind1,yind1,pars1,psftype,psfparams,psflookup,
+                    #                imshape,deriv=False,verbose=False)
+                    resflat[ravelindex1] -= im1
                     
-        #         # Get the new array of free parameters
-        #         freeparsind, = np.where(freezepars==False)
-        #         bestpar = bestpar[freeparsind]
+                # Get the new array of free parameters
+                freeparsind, = np.where(freezepars==False)
+                print('len(freezepars):',len(freezepars))
+                print('len(bestpar):',len(bestpar))
+                print('len(freeparsind):',len(freeparsind))
+                print('freeparsind:',freeparsind)
+                bestpar = pars[freeparsind]
+                print('new bestpar:',bestpar)
                     
             # bestpar = freeze(bestpar,frzpars)
             # # If the only free parameter is the sky offset,
@@ -1181,7 +1203,7 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         #    pars[:len(bestpar)] = bestpar      # also works if skyfit=False
         
         
-
+        nfreepars = np.sum(freezepars==False)
         
         # out = dofreeze(freezepars,freezestars,oldpar,
         #                bestpar,nofreeze,minpercdiff)
@@ -1193,11 +1215,7 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         # Get model and chisq
         freezedata = (freezepars,freezestars)
         flatdata = (starflat_ndata,starflat_index,xflat,yflat,ntotpix)
-        bestmodel = model(psfdata,freezedata,flatdata,bestpar,False,True)   # trim, allparams
-        #bestmodel = model(psftype,psfparams,psflookup,imshape,freezepars,freezestars,
-        #                  starflat_ndata,starflat_index,xflat,yflat,ntotpix,
-        #                  bestpar,False,True)
-        #bestmodel = model(pars,False,True)  # trim,allparams
+        bestmodel = model(psfdata,freezedata,flatdata,pars,False,True)   # trim, allparams
         resid = imflat-bestmodel-skyflat
         chisq = np.sum(resid**2/errflat**2)
 
@@ -1276,8 +1294,6 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         pars1[2] = outtab[i,5]  # y
         xdata1 = (xind1,yind1)
         model1 = psf(xdata1,pars1,psfdata)
-        #model1,_ = mnb.psf(xind1,yind1,pars1,psftype,psfparams,psflookup,
-        #                   imshape,deriv=False,verbose=False)
         sky1 = outtab[i,7]
         chisq1 = np.sum((flux1-sky1-model1)**2/err1**2)/n1
         outtab[i,13] = chisq1
