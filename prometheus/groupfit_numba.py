@@ -915,7 +915,7 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     
     # Package up the PSF information into a tuple to pass to the functions
     psfdata = (psftype,psfparams,psflookup,psforder,imshape)
-    
+
     # Get information for all the stars
     xcen = pars[1::3]
     ycen = pars[2::3]
@@ -1003,7 +1003,7 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     # Package up the star information
     stardata = (starravelindex,starndata,xx,yy)
     flatdata = (starflat_ndata,starflat_index,xflat,yflat,ntotpix)
-    
+
     # Create initial sky image
     skyim = utils.sky(im).flatten()
     skyflat = skyim[indflat]
@@ -1208,8 +1208,8 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         freezedata = (freezepars,freezestars)
         flatdata = (starflat_ndata,starflat_index,xflat,yflat,ntotpix)
         bestmodel = model(psfdata,freezedata,flatdata,pars,False,True)   # trim, allparams
-        resid = imflat-bestmodel-skyflat
-        chisq = np.sum(resid**2/errflat**2)
+        resflat = imflat-bestmodel-skyflat
+        chisq = np.sum(resflat**2/errflat**2)
 
         if verbose:
             print('Iter = ',niter)
@@ -1221,15 +1221,22 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
             print('Re-estimating the sky')
             prevsky = skyim.copy()            
             # Get model of full footprints
-            #bestfullmodel = fullmodel(psfdata,stardata,pars)
-            #print('re-estimate sky len(bestfullmodel):',len(bestfullmodel))
+            bestfullmodel = fullmodel(psfdata,stardata,pars)
+            print('re-estimate sky len(bestfullmodel):',len(bestfullmodel))
             # Remove the current best-fit model and re-estimate the sky
-            #tresid = im-bestfullmodel.copy().reshape(imshape[0],imshape[1])
-            # skyim = utils.sky(tresid).flatten()
-            # # Update resid
-            # resid[:] += prevsky[indflat]
-            # resid[:] -= skyim[indflat]
-            # skyflat = skyim[indflat]
+            tresid = im-bestfullmodel.copy().reshape(imshape[0],imshape[1])
+            skyim = utils.sky(tresid).flatten()
+            # Update resid
+            #  add previous sky back in
+            print('len(resid):',len(resid))
+            print('len(skyim):',len(skyim))
+
+            # Remake the resid array using the new smooth sky
+            #resid[:] = im.copy().astype(np.float64).flatten()   # flatten makes it easier to modify
+            resid[:] += prevsky
+            resid[:] -= skyim   # subtract smooth sky
+            skyflat = skyim[indflat]
+            
             
         if verbose:
             print('iter dt =',(clock()-start0)/1e9,'sec.')
