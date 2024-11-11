@@ -2245,18 +2245,22 @@ def mkbounds(pars,imshape,xoff=10):
     """ Make bounds for a set of input parameters."""
     # is [amp1,xcen1,ycen1,amp2,xcen2,ycen2, ...]
     npars = len(pars)
+    nstars = npars // 3
+    skyfit = (npars % 3 != 0)
     ny,nx = imshape
     # Make bounds
     lbounds = np.zeros(npars,float)
     ubounds = np.zeros(npars,float)
-    lbounds[0:-1:3] = 0
-    lbounds[1::3] = np.maximum(pars[1::3]-xoff,0)
-    lbounds[2::3] = np.maximum(pars[2::3]-xoff,0)
-    lbounds[-1] = -np.inf
-    ubounds[0:-1:3] = np.inf
-    ubounds[1::3] = np.minimum(pars[1::3]+xoff,nx-1)
-    ubounds[2::3] = np.minimum(pars[2::3]+xoff,ny-1)
-    ubounds[-1] = np.inf
+    lbounds[0:3*nstars:3] = 0
+    lbounds[1:3*nstars:3] = np.maximum(pars[1:3*nstars:3]-xoff,0)
+    lbounds[2:3*nstars:3] = np.maximum(pars[2:3*nstars:3]-xoff,0)
+    if skyfit:
+        lbounds[-1] = -np.inf
+    ubounds[0:3*nstars:3] = np.inf
+    ubounds[1:3*nstars:3] = np.minimum(pars[1:3*nstars:3]+xoff,nx-1)
+    ubounds[2:3*nstars:3] = np.minimum(pars[2:3*nstars:3]+xoff,ny-1)
+    if skyfit:
+        ubounds[-1] = np.inf
     bounds = (lbounds,ubounds)
     return bounds
 
@@ -2296,11 +2300,14 @@ def limsteps(steps,maxsteps):
 def steps(pars,dx=0.5):
     """ Return step sizes to use when fitting the stellar parameters."""
     npars = len(pars)
+    nstars = npars // 3
+    skyfit = (npars % 3 != 0)
     fsteps = np.zeros(npars,float)
-    fsteps[0:-1:3] = np.maximum(np.abs(pars[0:-1:3])*0.25,1)
-    fsteps[1::3] = dx        
-    fsteps[2::3] = dx
-    fsteps[-1] = 10
+    fsteps[0:3*nstars:3] = np.maximum(np.abs(pars[0:3*nstars:3])*0.5,1)
+    fsteps[1:3*nstars:3] = dx        
+    fsteps[2:3*nstars:3] = dx
+    if skyfit:
+        fsteps[-1] = 10
     return fsteps
 
 @njit(cache=True)

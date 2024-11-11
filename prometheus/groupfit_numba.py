@@ -339,7 +339,8 @@ def model(psfdata,freezedata,flatdata,pars,trim=False,allparams=False,verbose=Fa
     nfreezestars = np.sum(freezestars)
     nfreezepars = np.sum(freezepars)
     nfreepars = npars-nfreezepars
-        
+    skyfit = (npars % 3 != 0)
+    
     # Figure out the parameters of ALL the stars
     #  some stars and parameters are FROZEN
     # if nfreezepars>0 and allparams==False:
@@ -364,8 +365,9 @@ def model(psfdata,freezedata,flatdata,pars,trim=False,allparams=False,verbose=Fa
         # we need the inverse index to the unique fitted pixels
         im1 = psf(xdata1,pars1,psfdata)
         allim[invind1] += im1
-        
-    allim += allpars[-1]  # add sky offset
+
+    if skyfit:
+        allim += allpars[-1]  # add sky offset
         
     # if trim and nusepix<self.ntotpix:            
     #     unused = np.arange(self.ntotpix)[~usepix]
@@ -426,7 +428,8 @@ def jac(psfdata,freezedata,flatdata,pars,trim=False,allparams=False):
     nfreezestars = np.sum(freezestars)
     nfreezepars = np.sum(freezepars)
     nfreepars = npars-nfreezepars
-    
+    skyfit = (npars % 3 != 0)
+
     # Figure out the parameters of ALL the stars
     #  some stars and parameters are FROZEN
     # if nfreezepars>0 and allparams==False:
@@ -478,7 +481,8 @@ def jac(psfdata,freezedata,flatdata,pars,trim=False,allparams=False):
             print(jac1)
         
     # Sky gradient
-    jac[:,-1] = 1
+    if skyfit:
+        jac[:,-1] = 1
             
     # Remove frozen columns
     #if nfreezepars>0 and allparams==False:
@@ -768,14 +772,18 @@ def cov(psfdata,freezedata,flatdata,pars):
 @njit
 def dofreeze(freezepars,freezestars,oldpars,newpars,nofreeze=False,minpercdiff=0.5):
     """ Check if we need to freeze pars or stars."""
-    
+
+    npars = len(newpars)
+    nstars = len(freezestars)
+    skyfit = (npars % 3 != 0)
     # Check differences and changes
     diff_all = np.abs(newpars_all-oldpars_all)
     percdiff_all = diff_all.copy()*0
-    percdiff_all[0:-1:3] = diff_all[0:-1:3]/np.maximum(oldpar_all[0:-1:3],0.0001)*100  # amp
-    percdiff_all[1::3] = diff_all[1::3]*100               # x
-    percdiff_all[2::3] = diff_all[2::3]*100               # y
-    percdiff_all[-1] = diff_all[-1]/np.maximum(np.abs(oldpar_all[-1]),1)*100
+    percdiff_all[0:3*nstars:3] = diff_all[0:3*nstars:3]/np.maximum(oldpar_all[0:3*nstars:3],0.0001)*100  # amp
+    percdiff_all[1:3*nstars:3] = diff_all[1:3*nstars:3]*100               # x
+    percdiff_all[2:3*nstars:3] = diff_all[2:3*nstars:3]*100               # y
+    if skyfit:
+        percdiff_all[-1] = diff_all[-1]/np.maximum(np.abs(oldpar_all[-1]),1)*100
     diff = diff_all[np.where(freezepars==False)]
     percdiff = percdiff_all[np.where(freezepars==False)]
     print('percdiff:',percdiff)
@@ -820,8 +828,8 @@ def dofreeze(freezepars,freezestars,oldpars,newpars,nofreeze=False,minpercdiff=0
 @njit
 def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
              image,error,mask,tab,fitradius,maxiter=10,
-             minpercdiff=0.5,reskyiter=2,verbose=False,
-             nofreeze=False):
+             minpercdiff=0.5,reskyiter=2,nofreeze=False,
+             skyfit=False,verbose=False):
     """
     Fit PSF to a group of stars simultaneously.
 
@@ -857,6 +865,8 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
        After how many iterations to re-calculate the sky background. Default is 2.
     nofreeze : boolean, optional
        Do not freeze any parameters even if they have converged.  Default is False.
+    skyfit : boolean, optional
+       Fit a constant sky offset with the stellar parameters.  Default is False.
     verbose : boolean, optional
        Verbose output.
 
@@ -873,7 +883,7 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     Examples
     --------
 
-    out,model,sky = allfit(psf,image,error,mask,tab)
+    out,model,sky = groupfit(psf,image,error,mask,tab)
     
     """
     start = clock()
@@ -905,20 +915,23 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     nfitpix = int(np.ceil(fitradius))     # +/- nfitpix
     skyradius = psfnpix//2 + 10
     # Initialize the parameter array
-    initpars = startab[:,1:4] 
-    pars = np.zeros(nstars*3+1,float) # amp, xcen, ycen
-    pars[0:-1:3] = initpars[:,0]
-    pars[1:-1:3] = initpars[:,1]
-    pars[2:-1:3] = initpars[:,2]
-    pars[-1] = 0.0  # sky offset
-    npars = len(pars)
+    initpars = startab[:,1:4]
+    npars = nstars*3
+    if skyfit:
+        npars += 1
+    pars = np.zeros(npars,float) # amp, xcen, ycen
+    pars[0:3*nstars:3] = initpars[:,0]
+    pars[1:3*nstars:3] = initpars[:,1]
+    pars[2:3*nstars:3] = initpars[:,2]
+    #pars[-1] = 0.0  # sky offset
+    #npars = len(pars)
     
     # Package up the PSF information into a tuple to pass to the functions
     psfdata = (psftype,psfparams,psflookup,psforder,imshape)
 
     # Get information for all the stars
-    xcen = pars[1::3]
-    ycen = pars[2::3]
+    xcen = pars[1:3*nstars:3]
+    ycen = pars[2:3*nstars:3]
     hpsfnpix = psfnpix//2
     out = collatestars(imshape,msk,xcen,ycen,hpsfnpix,fitradius,skyradius)
     starravelindex,starndata,starfitravelindex,starfitndata,skyravelindex,skyndata = out
@@ -969,7 +982,7 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     errflat = np.zeros(len(uind1),np.float64)
     errflat[:] = error.ravel()[uind1]
     resflat = imflat.copy()
-    usepix = np.ones(ntotpix,np.bool_)
+    #usepix = np.ones(ntotpix,np.bool_)
     
     # Add inverse index for the fitted pixels
     #  to be used with imflat/resflat/errflat/xflat/yflat/indflat
@@ -1005,14 +1018,9 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     flatdata = (starflat_ndata,starflat_index,xflat,yflat,ntotpix)
 
     # Create initial sky image
-    skyim = utils.sky(im).flatten()
-    skyflat = skyim[indflat]
-    
-    # Subtract the initial models from the residual array
-    resid = np.zeros(imshape[0]*imshape[1],np.float64)
-    resid[:] = im.copy().astype(np.float64).flatten()   # flatten makes it easier to modify
-    resid[:] -= skyim   # subtract smooth sky
-    modelim = np.zeros(imshape[0]*imshape[1],np.float64)
+    #  improve initial sky estimate by removing initial models
+    tresid = np.zeros(imshape[0]*imshape[1],np.float64)
+    tresid[:] = im.copy().astype(np.float64).flatten()
     for i in range(nstars):
         pars1 = pars[3*i:3*i+3]
         n1 = starndata[i]
@@ -1021,8 +1029,15 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         yind1 = yy[ravelind1]
         xdata1 = (xind1,yind1)
         m = psf(xdata1,pars1,psfdata)
-        resid[ravelind1] -= m
-        modelim[ravelind1] += m
+        tresid[ravelind1] -= m
+    skyim = utils.sky(tresid.copy().reshape(imshape[0],imshape[1])).flatten()
+    skyflat = skyim[indflat]
+
+    # Initialize RESID and subtract initial smooth sky
+    resid = np.zeros(imshape[0]*imshape[1],np.float64)
+    resid[:] = im.copy().astype(np.float64).flatten()   # flatten makes it easier to modify
+    resid[:] -= skyim          # subtract smooth sky
+    resflat = resid[indflat]   # initialize resflat
 
     # Sky and Niter arrays for the stars
     starsky = np.zeros(nstars,np.float64)
@@ -1031,7 +1046,7 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     starrms = np.zeros(nstars,np.float64)
     freezestars = np.zeros(nstars,np.bool_)
     freezepars = np.zeros(len(pars),np.bool_)
-
+    
     # Perform the fitting
     #--------------------
     
@@ -1108,8 +1123,10 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         freezedata = (freezepars,freezestars)
         model1 = model(psfdata,freezedata,flatdata,pars+0.5*dbeta,False,True)   # trim, allparams
         print('linesearch model1')
+        print('linesearch model1 pars:',pars+0.5*dbeta)
         model2 = model(psfdata,freezedata,flatdata,pars+dbeta,False,True)       # trim, allparams
         print('linesearch model2')
+        print('linesearch model2 pars:',pars+dbeta)
         print('len(resflat):',len(resflat))
         print('len(model0):',len(model0))
         chisq0 = np.sum((resflat-model0)**2/errflat**2)
@@ -1119,9 +1136,13 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         print('linesearch:',chisq0,chisq1,chisq2)
         alpha = utils.quadratic_bisector(np.array([0.0,0.5,1.0]),
                                          np.array([chisq0,chisq1,chisq2]))
+        if alpha <= 0 and np.min(np.array([chisq0,chisq1,chisq2]))==chisq2:
+            # the bisector can be negative if the chisq shape is concave
+            alpha = 1.0
         alpha = np.minimum(np.maximum(alpha,0.0),1.0)  # 0<alpha<1
         if np.isfinite(alpha)==False:
             alpha = 1.0
+        print('final alpha:',alpha)
         pars_new = pars + alpha * dbeta
         new_dbeta_free = alpha * dbeta_free
         new_dbeta = np.zeros(len(pars),float)
@@ -1131,19 +1152,29 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         print('new_dbeta:',new_dbeta)
         
         # Update parameters
+        maxsteps = utils.steps(pars)  # maximum steps, requires all 3*Nstars parameters
+        bounds = utils.mkbounds(pars,imshape,2)   
+        print('bounds:',bounds)
+        print('maxsteps:',maxsteps)
         oldpar = bestpar.copy()
         oldpar_all = pars.copy()  #bestpar_all.copy()
         bestpar_all = utils.newpars(pars,new_dbeta,bounds,maxsteps)            
         bestpar = bestpar_all[np.where(freezepars==False)]
         pars[np.where(freezepars==False)] = bestpar
+        print('updated bestpar:',bestpar)
+        print('updated pars:',pars)
+
+        m = model(psfdata,freezedata,flatdata,pars,False,True)  
+        print('chisq with updated pars:',np.sum((resflat-m)**2/errflat**2))
         
         # Check differences and changes
         diff_all = np.abs(bestpar_all-oldpar_all)
         percdiff_all = diff_all.copy()*0
-        percdiff_all[0:-1:3] = diff_all[0:-1:3]/np.maximum(oldpar_all[0:-1:3],0.0001)*100  # amp
-        percdiff_all[1::3] = diff_all[1::3]*100               # x
-        percdiff_all[2::3] = diff_all[2::3]*100               # y
-        percdiff_all[-1] = diff_all[-1]/np.maximum(np.abs(oldpar_all[-1]),1)*100
+        percdiff_all[0:3*nstars:3] = diff_all[0:3*nstars:3]/np.maximum(oldpar_all[0:3*nstars:3],0.0001)*100  # amp
+        percdiff_all[1:3*nstars:3] = diff_all[1:3*nstars:3]*100               # x
+        percdiff_all[2:3*nstars:3] = diff_all[2:3*nstars:3]*100               # y
+        if skyfit:
+            percdiff_all[-1] = diff_all[-1]/np.maximum(np.abs(oldpar_all[-1]),1)*100
         diff = diff_all[np.where(freezepars==False)]
         percdiff = percdiff_all[np.where(freezepars==False)]
 
@@ -1185,6 +1216,7 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
                     xdata1 = (xind1,yind1)
                     im1 = psf(xdata1,pars1,psfdata)
                     resflat[ravelindex1] -= im1
+                    resid[indflat[ravelindex1]] -= im1
                     
                 # Get the new array of free parameters
                 freeparsind, = np.where(freezepars==False)
@@ -1203,13 +1235,21 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
                 print('Nfree pars = '+str(npars))
 
         nfreestars = np.sum(freezestars==False)
+
+
+        # RESID and RESFLAT are messed up
+        # at the beginning the first model is subtracted from RESID but *not* RESFLAT
+        # later, frozen stars get removed from RESFLAT but not RESID
+        # when the smooth sky is re-estimated, it gets subtracted from RESID but *not* RESFLAT
+        # Actually, why do we even use RESID, it's never really used for anything???
+        # we just need RESFLAT
         
         # Get model and chisq
         freezedata = (freezepars,freezestars)
         flatdata = (starflat_ndata,starflat_index,xflat,yflat,ntotpix)
         bestmodel = model(psfdata,freezedata,flatdata,pars,False,True)   # trim, allparams
-        resflat = imflat-bestmodel-skyflat
-        chisq = np.sum(resflat**2/errflat**2)
+        res = imflat-bestmodel-skyflat
+        chisq = np.sum(res**2/errflat**2)
 
         if verbose:
             print('Iter = ',niter)
@@ -1235,6 +1275,7 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
             #resid[:] = im.copy().astype(np.float64).flatten()   # flatten makes it easier to modify
             resid[:] += prevsky
             resid[:] -= skyim   # subtract smooth sky
+            resflat = resid[indflat]
             skyflat = skyim[indflat]
             
             
@@ -1266,17 +1307,28 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     # if verbose:
     print('Best-fitting parameters: ',pars)
     print('Errors: ',perror)
+
+    # # Calculate smooth sky value for each star
+    # #  use center position
+    # for i in range(nstars):
+    #     x1 = int(np.round(starxcen[i]))
+    #     y1 = int(np.round(starycen[i]))
+    #     sind1 = utils.ravel_multi_index((y1,x1),imshape)
+    #     starsky[i] = skyim[sind1]
     
     # Put in catalog
     outtab = np.zeros((nstars,15),np.float64)
     outtab[:,0] = np.arange(nstars)+1                # id
-    outtab[:,1] = pars[0:-1:3]                       # amp
-    outtab[:,2] = perror[0:-1:3]                     # amp_error
-    outtab[:,3] = pars[1::3]                         # x
-    outtab[:,4] = perror[1::3]                       # x_error
-    outtab[:,5] = pars[2::3]                         # y
-    outtab[:,6] = perror[2::3]                       # y_error
-    outtab[:,7] = starsky + pars[-1]                 # sky
+    outtab[:,1] = pars[0:3*nstars:3]                 # amp
+    outtab[:,2] = perror[0:3*nstars:3]               # amp_error
+    outtab[:,3] = pars[1:3*nstars:3]                 # x
+    outtab[:,4] = perror[1:3*nstars:3]               # x_error
+    outtab[:,5] = pars[2:3*nstars:3]                 # y
+    outtab[:,6] = perror[2:3*nstars:3]               # y_error
+    if skyfit:
+        outtab[:,7] = starsky + pars[-1]             # sky
+    else:
+        outtab[:,7] = starsky                        # sky
     outtab[:,8] = outtab[:,1]*psfflux                # flux
     outtab[:,9] = outtab[:,2]*psfflux                # flux_error
     outtab[:,10] = -2.5*np.log10(np.maximum(outtab[:,8],1e-10))+25.0   # mag

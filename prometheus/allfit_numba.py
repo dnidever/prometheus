@@ -188,6 +188,9 @@ def starfit(psftype,psfparams,psflookup,imshape,
     #    print('linesearch:',chisq0,chisq1,chisq2)
     alpha = utils.quadratic_bisector(np.array([0.0,0.5,1.0]),
                                      np.array([chisq0,chisq1,chisq2]))
+    if alpha <= 0 and np.min(np.array([chisq0,chisq1,chisq2]))==chisq2:
+        # the bisector can be negative if the chisq shape is concave
+        alpha = 1.0
     alpha = np.minimum(np.maximum(alpha,0.0),1.0)  # 0<alpha<1
     if np.isfinite(alpha)==False:
         alpha = 1.0
