@@ -608,15 +608,14 @@ def jac(psfdata,freezedata,flatdata,pars,trim=False,allparams=False):
         
     return im,jac
 
-# @njit
-# def chisq(pars):
-#     """ Return chi-squared """
-#     flux = resflat[usepix]-skyflat[usepix]
-#     wt = 1/errflat[usepix]**2
-#     bestmodel = model(pars,False,True)   # allparams,Trim
-#     resid = flux-bestmodel[usepix]
-#     chisq1 = np.sum(resid**2/errflat[usepix]**2)
-#     return chisq1
+@njit
+def chisqflat(freezedata,flatdata,psfdata,resflat,errflat,pars):
+    """ Return chi-squared of the flat data"""
+    # Note this ignores any frozen stars
+    bestmodel = model(psfdata,freezedata,flatdata,pars,False,True)   # trim, allparams
+    chisq = np.sum(resflat**2/errflat**2)
+    return chisq
+
 
 @njit
 def cov(psfdata,freezedata,covflatdata,pars):
@@ -955,7 +954,7 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         bestpar = bestpar_all[np.where(freezepars==False)]
         pars[np.where(freezepars==False)] = bestpar
 
-        m = model(psfdata,freezedata,flatdata,pars,False,True)  
+        #m = model(psfdata,freezedata,flatdata,pars,False,True)  
         
         # Check differences and changes
         diff_all = np.abs(bestpar_all-oldpar_all)
@@ -981,9 +980,9 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         freezedata = (freezepars,freezestars)
         flatdata = (starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix)
         bestmodel = model(psfdata,freezedata,flatdata,pars,False,True)   # trim, allparams
-        res = imflat-bestmodel-skyflat
-        chisq = np.sum(res**2/errflat**2)
+        chisq = np.sum(resflat**2/errflat**2)
 
+        
         if verbose:
             print('Iter = ',niter)
             print('Pars = ',pars)
