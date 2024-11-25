@@ -8,29 +8,7 @@ __authors__ = 'David Nidever <dnidever@montana.edu?'
 __version__ = '20210826'  # yyyymmdd
 
 
-import os
-import sys
 import numpy as np
-import time
-import scipy
-import warnings
-#from astropy.io import fits
-#from astropy.table import Table
-#import astropy.units as u
-#from scipy.optimize import curve_fit, least_squares, line_search
-#from scipy.interpolate import interp1d
-#from scipy import sparse
-##from astropy.nddata import CCDData,StdDevUncertainty
-#from dlnpyutils import utils as dln, bindata
-import copy
-#import logging
-#import time
-#import matplotlib
-#import sep
-#from photutils.aperture import CircularAnnulus
-#from astropy.stats import sigma_clipped_stats
-#from . import leastsquares as lsq,utils
-#from .ccddata import CCDData,BoundingBox
 from numba import njit,types,from_dtype
 from numba.experimental import jitclass
 from numba_kdtree import KDTree
@@ -38,9 +16,6 @@ from . import models_numba as mnb, utils_numba as utils, getpsf_numba as gnb
 from .clock_numba import clock
 
 # Fit a PSF model to multiple stars in an image
-
-
-# For each star's footprint, save the indices into the whole image
 
 
 #@njit(cache=True)
@@ -133,6 +108,29 @@ def collatestars(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius):
 def initstararrays(image,error,mask,tab,psfnpix,fitradius,skyradius,skyfit):
     """ Initialize all of the star arrays."""
 
+    # Star arrays
+    #------------
+    #  -full footprint: pixels of a star within the psf radius and not masked
+    #  -fitting pixels: pixels of a star within its fitting radius and not masked
+    #  -sky pixels: pixels in an annulus around a star and not masked
+    #  -flat pixels: all fitting pixels of all stars combined (unique),
+    #                  these are the pixels that we are actually fitting
+    # Full footprint information
+    #   starravelindex -
+    #   starndata - number of pixels for star each star
+    # Fitting pixel information
+    #   starfitravelindex - fitting pixel index into the raveled 1D full image/resid array
+    #   starfitndata - number of fitting pixels for each star
+    # Sky pixel information
+    #   skyravelindex - sky pixel index into the raveled 1D full image/resid array
+    #   skyndata - number of star pixels for each star
+    # Flat information
+    #   xflat/yflat - x/y values of the flat pixels
+    #   indflat - index of the flat pixels into the full 1D raveled arrays
+    #   starflat_index - index of all flat pixels that are within a star's full footprint
+    #                         index into the flat 1D array
+    #   starflat_ndata - number of flat pixels for each star
+    
     nstars = len(tab)
     ny,nx = image.shape                             # save image dimensions, python images are (Y,X)
     imshape = np.array([ny,nx])
@@ -257,15 +255,7 @@ def sky(image,modelim,method='sep',rin=None,rout=None):
                            int(np.round(starxcen[i]))]
     return starsky
         
-    #     # SEP smoothly varying background
-    #     if method=='sep':
-    #         bw = np.maximum(int(self.nx/10),64)
-    #         bh = np.maximum(int(self.ny/10),64)
-    #         bkg = sep.Background(resid, mask=None, bw=bw, bh=bh, fw=3, fh=3)
-    #         self.skyim = bkg.back()
-    #         # Calculate sky value for each star
-    #         #  use center position
-    #         self.starsky[:] = self.skyim[np.round(self.starycen).astype(int),np.round(self.starxcen).astype(int)]
+
     #     # Annulus aperture
     #     elif method=='annulus':
     #         if rin is None:
@@ -489,9 +479,6 @@ def chisqflat(freezedata,flatdata,psfdata,resflat,errflat,pars):
 
 @njit
 def cov(psfdata,freezedata,covflatdata,pars):
-#        freezepars,freezestars,
-#        starflat_ndata,starflat_index,xflat,yflat,ntotpix,
-#        imflat,errflat,skyflat,pars):
     """ Determine the covariance matrix."""
     
     # Unpack the PSF data
@@ -796,7 +783,7 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         alpha = utils.quadratic_bisector(np.array([0.0,0.5,1.0]),
                                          np.array([chisq0,chisq1,chisq2]))
         if alpha <= 0 and np.min(np.array([chisq0,chisq1,chisq2]))==chisq2:
-            # the bisector can be negative if the chisq shape is concave
+            # the bisector can be negative (outside of acceptable range) if the chisq shape is concave
             alpha = 1.0
         alpha = np.minimum(np.maximum(alpha,0.0),1.0)  # 0<alpha<1
         if np.isfinite(alpha)==False:
@@ -806,11 +793,11 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         new_dbeta = np.zeros(len(pars),float)
         new_dbeta[np.where(freezepars==False)] = new_dbeta_free
         
-        # Update parameters
+        # Update the free parameters and impose step limits and bounds
         maxsteps = utils.steps(pars)  # maximum steps, requires all 3*Nstars parameters
         bounds = utils.mkbounds(pars,imshape,2)   
         oldpar = bestpar.copy()
-        oldpar_all = pars.copy()  #bestpar_all.copy()
+        oldpar_all = pars.copy()
         bestpar_all = utils.newpars(pars,new_dbeta,bounds,maxsteps)            
         bestpar = bestpar_all[np.where(freezepars==False)]
         pars[np.where(freezepars==False)] = bestpar
