@@ -20,7 +20,7 @@ from .clock_numba import clock
 
 #@njit(cache=True)
 @njit
-def getstar(imshape,mask,xcen,ycen,hpsfnpix,fitradius,skyradius):
+def getstarinfo(imshape,mask,xcen,ycen,hpsfnpix,fitradius,skyradius):
     """ Return a star's full footprint, fitted pixels, and sky pixels data."""
     # always return the same size
     # a distance of 6.2 pixels spans 6 full pixels but you could have
@@ -70,7 +70,7 @@ def getstar(imshape,mask,xcen,ycen,hpsfnpix,fitradius,skyradius):
 
 #@njit(cache=True)
 @njit
-def collatestars(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius):
+def collatestarsinfo(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius):
     """ Get full footprint, fitted pixels, and sky pixels data for all stars."""
     nstars = len(starx)
     nfpix = 2*hpsfnpix+1
@@ -84,7 +84,7 @@ def collatestars(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius):
     skyravelindex = np.zeros((nstars,int(3.14*skyradius**2)),np.int64)
     skyndata = np.zeros(nstars,np.int32)
     for i in range(nstars):
-        out = getstar(imshape,mask,starx[i],stary[i],hpsfnpix,fitradius,skyradius)
+        out = getstarinfo(imshape,mask,starx[i],stary[i],hpsfnpix,fitradius,skyradius)
         # full footprint information
         fravelindex1,fn1,ravelindex1,n1,skyravelindex1,skyn1 = out
         fravelindex[i,:] = fravelindex1
@@ -158,7 +158,7 @@ def initstararrays(image,error,mask,tab,psfnpix,fitradius,skyradius,skyfit):
     xcen = pars[1:3*nstars:3]
     ycen = pars[2:3*nstars:3]
     hpsfnpix = psfnpix//2
-    out = collatestars(imshape,msk,xcen,ycen,hpsfnpix,fitradius,skyradius)
+    out = collatestarsinfo(imshape,msk,xcen,ycen,hpsfnpix,fitradius,skyradius)
     starravelindex,starndata,starfitravelindex,starfitndata,skyravelindex,skyndata = out
 
     # Put indices of all the unique fitted pixels into one array
@@ -718,7 +718,7 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     # Perform the fitting
     #--------------------
 
-    # Initialize arrays for the stars and freezing
+    # Initialize arrays for the stars and freezing parameters
     starsky = np.zeros(nstars,np.float64)
     starniter = np.zeros(nstars,np.int64)
     starchisq = np.zeros(nstars,np.float64)
@@ -748,6 +748,8 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     nfreepars = len(pars)
     nfreestars = nstars
     # While loop
+    #   keep looping until: (a) reached max iterations, (b) changes are tiny
+    #                      or (c) there are no free stars left
     while (niter<maxiter and maxpercdiff>minpercdiff and nfreestars>0):
         start0 = clock()
 
@@ -771,7 +773,8 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         dbeta[np.where(freezepars==False)] = dbeta_free
         
         # --- Perform line search ---
-        #  get models
+        #  move the solution along the dbeta vector to find the lowest chisq
+        #  get models: pars + 0*dbeta, pars + 0.5*dbeta, pars + 1.0*dbeta
         freezedata = (freezepars,freezestars)
         model1 = model(psfdata,freezedata,flatdata,pars+0.5*dbeta,False,True)   # trim, allparams
         model2 = model(psfdata,freezedata,flatdata,pars+dbeta,False,True)       # trim, allparams
@@ -780,12 +783,14 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         chisq2 = np.sum((resflat-model2)**2/errflat**2)
         if verbose:
             print('linesearch:',chisq0,chisq1,chisq2)
+        # Use quadratic bisector on the three points to find the lowest chisq 
         alpha = utils.quadratic_bisector(np.array([0.0,0.5,1.0]),
                                          np.array([chisq0,chisq1,chisq2]))
+        # The bisector can be negative (outside of the acceptable range) if the chisq shape is concave
         if alpha <= 0 and np.min(np.array([chisq0,chisq1,chisq2]))==chisq2:
-            # the bisector can be negative (outside of acceptable range) if the chisq shape is concave
             alpha = 1.0
-        alpha = np.minimum(np.maximum(alpha,0.0),1.0)  # 0<alpha<1
+        #alpha = np.minimum(np.maximum(alpha,0.0),1.0)  # 0<alpha<1
+        alpha = utils.clip(alpha,0.0,1.0)  # 0<alpha<1
         if np.isfinite(alpha)==False:
             alpha = 1.0
         pars_new = pars + alpha * dbeta
@@ -802,7 +807,7 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         bestpar = bestpar_all[np.where(freezepars==False)]
         pars[np.where(freezepars==False)] = bestpar
         
-        # Check differences and changes
+        # Check differences and percent changes
         diff_all = np.abs(bestpar_all-oldpar_all)
         percdiff_all = diff_all.copy()*0
         percdiff_all[0:3*nstars:3] = diff_all[0:3*nstars:3]/np.maximum(oldpar_all[0:3*nstars:3],0.0001)*100  # amp
@@ -814,7 +819,7 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         percdiff = percdiff_all[np.where(freezepars==False)]
         
         # Freeze parameters/stars that converged
-        #  this will subtract the model of converted stars from RESID and RESFLAT
+        #  this will subtract the model of converged stars from RESID and RESFLAT
         if nofreeze==False:
            frzpars = percdiff<=minpercdiff
            freezedata = (freezepars,freezestars)

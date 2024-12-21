@@ -2340,3 +2340,9 @@ def newpars(pars,steps,bounds,maxsteps):
         # add a tiny offset so it doesn't fit right on the boundary
         newpars = np.minimum(np.maximum(newpars,lbounds+1e-30),ubounds-1e-30)
     return newpars
+
+@njit(cache=True)
+def clip(a, a_min, a_max):
+    """ Clip (limit) the values in an array. """
+    return np.minimum(np.maximum(a,a_min),a_max) 
+    
