@@ -2491,6 +2491,235 @@ def steps(pars,dx=0.5):
 #         newpars = np.minimum(np.maximum(newpars,lbounds+1e-30),ubounds-1e-30)
 #     return newpars
 
+@njit
+@cc.export('doPolygonsOverlapf', '(f8[:],f8[:],f8[:],f8[:])')
+@cc.export('doPolygonsOverlapi', '(i8[:],i8[:],i8[:],i8[:])')
+def doPolygonsOverlap(xPolygon1, yPolygon1, xPolygon2, yPolygon2):
+    """Returns True if two polygons are overlapping."""
+
+    # How to determine if two polygons overlap.
+    # If a vertex of one of the polygons is inside the other polygon
+    # then they overlap.
+    
+    n1 = len(xPolygon1)
+    n2 = len(xPolygon2)
+    isin = False
+
+    # If ranges don't overlap, then polygons don't overlap
+    if rangeoverlap(xPolygon1,xPolygon2)==False or rangeoverlap(yPolygon1,yPolygon2)==False:
+        return False
+    
+    # Loop through all vertices of second polygon
+    for i in range(n2):
+        # perform iterative boolean OR
+        # if any point is inside the polygon then they overlap   
+        isin = isin or isPointInPolygon(xPolygon1, yPolygon1, xPolygon2[i], yPolygon2[i])
+
+    # Need to do the reverse as well, not the same
+    for i in range(n1):
+        isin = isin or isPointInPolygon(xPolygon2, yPolygon2, xPolygon1[i], yPolygon1[i])
+
+    # Two polygons can overlap even if there are no vertices inside each other.
+    # Need to check if the line segments overlap
+    if isin==False:
+        intersect = False
+        # Add first vertex to the end
+        xp1 = np.append( xPolygon1, xPolygon1[0] )
+        yp1 = np.append( yPolygon1, yPolygon1[0] )
+        xp2 = np.append( xPolygon2, xPolygon2[0] )
+        yp2 = np.append( yPolygon2, yPolygon2[0] )
+        for i in range(4):
+            for j in range(4):
+                intersect = intersect or doLineSegmentsIntersect(xp1[i:i+2],yp1[i:i+2],xp2[j:j+2],yp2[j:j+2])
+                if intersect==True:
+                    return True
+        isin = isin or intersect
+        
+    return isin
+
+@njit
+@cc.export('isPointinPolygonf', '(f8[:],f8[:],f8,f8)')
+@cc.export('isPointinPolygoni', '(i8[:],i8[:],i8,i8)')
+def isPointInPolygon(xPolygon, yPolygon, xPt, yPt):
+    """Returns boolean if a point is inside a polygon of vertices."""
+    
+    # How to tell if a point is inside a polygon:
+    # Determine the change in angle made by the point and the vertices
+    # of the polygon.  Add up the delta(angle)'s from the first (include
+    # the first point again at the end).  If the point is inside the
+    # polygon, then the total angle will be +/-360 deg.  If the point is
+    # outside, then the total angle will be 0 deg.  Points on the edge will
+    # outside.
+    # This is called the Winding Algorithm
+    # http://geomalgorithms.com/a03-_inclusion.html
+
+    n = len(xPolygon)
+    # Array for the angles
+    angle = np.zeros(n)
+
+    # add first vertex to the end
+    xPolygon1 = np.append( xPolygon, xPolygon[0] )
+    yPolygon1 = np.append( yPolygon, yPolygon[0] )
+
+    wn = 0   # winding number counter
+
+    # Loop through the edges of the polygon
+    for i in range(n):
+        # if edge crosses upward (includes its starting endpoint, and excludes its final endpoint)
+        if yPolygon1[i] <= yPt and yPolygon1[i+1] > yPt:
+            # if (P is  strictly left of E[i])    // Rule #4
+            if isLeft(xPolygon1[i], yPolygon1[i], xPolygon1[i+1], yPolygon1[i+1], xPt, yPt) > 0: 
+                 wn += 1   # a valid up intersect right of P.x
+
+        # if edge crosses downward (excludes its starting endpoint, and includes its final endpoint)
+        if yPolygon1[i] > yPt and yPolygon1[i+1] <= yPt:
+            # if (P is  strictly right of E[i])    // Rule #4
+            if isLeft(xPolygon1[i], yPolygon1[i], xPolygon1[i+1], yPolygon1[i+1], xPt, yPt) < 0: 
+                 wn -= 1   # a valid up intersect right of P.x
+
+    # wn = 0 only when P is outside the polygon
+    if wn == 0:
+        return False
+    else:
+        return True
+
+@njit
+@cc.export('isLeftf', '(f8,f8,f8,f8,f8,f8)')
+@cc.export('isLefti', '(i8,i8,i8,i8,i8,i8)')
+def isLeft(x1, y1, x2, y2, x3, y3):
+    # isLeft(): test if a point is Left|On|Right of an infinite 2D line.
+    #   From http://geomalgorithms.com/a01-_area.html
+    # Input:  three points P1, P2, and P3
+    # Return: >0 for P3 left of the line through P1 to P2
+    # =0 for P3 on the line
+    # <0 for P3 right of the line
+    return ( (x2 - x1) * (y3 - y1) - (x3 - x1) * (y2 - y1) )
+
+@njit
+@cc.export('rangeoverlapf', '(f8[:],f8[:])')
+@cc.export('rangeoverlapi', '(i8[:],i8[:])')
+def rangeoverlap(a,b):
+    """does the range (start1, end1) overlap with (start2, end2)"""
+    return max(a) >= min(b) and min(a) <= max(b)
+
+@njit
+@cc.export('doLineSegmentsIntersectf', '(f8[:],f8[:],f8[:],f8[:])')
+@cc.export('doLineSegmentsIntersecti', '(i8[:],i8[:],i8[:],i8[:])')
+def doLineSegmentsIntersect(x1, y1, x2, y2):
+    """ Do two line segments intersect."""
+
+    # Check vertical lines
+
+    # Vertical lines, but NOT same X-values
+    if x1[0]==x1[1] and x2[0]==x2[1] and x1[0]!=x2[0]:
+        return False  # No overlap
+    
+    # Vertical lines with same X values
+    if x1[0]==x1[1] and x2[0]==x2[1] and x1[0]==x2[0]:
+        # Check intersection of Y ranges
+        I1 = [np.min(y1), np.max(y1)]
+        I2 = [np.min(y2), np.max(y2)]
+    
+        # And we could say that Xa is included into :
+        Ia = [max( np.min(y1), np.min(y2) ),
+              min( np.max(y1), np.max(y2) )]
+    
+        # Now, we need to check that this interval Ia exists :
+        if rangeoverlap(y1,y2)==False:
+            return False  # There is no mutual abcisses        
+        else:
+            return True   # There is overlap
+
+    # The equation of a line is:
+    #
+    # f(x) = A*x + b = y
+    # For a segment, it is exactly the same, except that x is included on an interval I.
+    # 
+    # If you have two segments, defined as follow:
+    #
+    # Segment1 = {(X1, Y1), (X2, Y2)}
+    # Segment2 = {(X3, Y3), (X4, Y4)}
+    # The abcisse Xa of the potential point of intersection (Xa,Ya) must be contained in both interval I1 and I2, defined as follow:
+    I1 = [np.min(x1), np.max(x1)]
+    I2 = [np.min(x2), np.max(x2)]
+    
+    # And we could say that Xa is included into :
+    Ia = [max( np.min(x1), np.min(x2) ),
+          min( np.max(x1), np.max(x2) )]
+    
+    # Now, we need to check that this interval Ia exists :
+    if rangeoverlap(x1,x2)==False:        
+        return False  # There is no mutual abcisses
+
+    # Check that the Y-ranges overlap as well
+    if rangeoverlap(y1,y2)==False:        
+        return False  # There is no mutual y-value overlap
+    
+    # So, we have two line formula, and a mutual interval. Your line formulas are:
+    # f1(x) = m1*x + b1 = y
+    # f2(x) = m2*x + b2 = y
+    
+    # As we got two points by segment, we are able to determine A1, A2, b1 and b2:
+    dx1 = x1[1]-x1[0]
+    if dx1==0:
+        m1 = np.inf
+        b1 = 0
+    else:
+        m1 = (y1[1]-y1[0])/(x1[1]-x1[0])  # Pay attention to not dividing by zero
+        b1 = y1[0]-m1*x1[0]        
+    dx2 = x2[1]-x2[0]
+    if dx2==0:
+        m2 = np.inf
+        b2 = 0
+    else:
+        m2 = (y2[1]-y2[0])/(x2[1]-x2[0])  # Pay attention to not dividing by zero
+        b2 = y2[0]-m2*x2[0]
+
+    # If the segments are parallel, then m1 == m2:
+    if (m1 == m2) and (b1 != b2):
+        return False  # Parallel segments
+    
+    # If the segments are parallel and on top of each other, the m1==m2 and b1==b2
+    # we've already required that the x-ranges (abcissas) overlap
+    if (m1 == m2) and (b1 == b2):
+        return True   # parallel segments on top of each other
+    
+    # A point (Xa,Ya) standing on both lines must satisfy both formulas f1 and f2:
+    # Ya = m1 * Xa + b1
+    # Ya = m2 * Xa + b2
+    # A1 * Xa + b1 = m2 * Xa + b2
+
+    # Line segment 1 is vertical line 
+    if x1[0]==x1[1]:
+        Xa = x1[0]
+        Ya = m2*Xa+b2
+        if rangeoverlap(x1,[Xa]) and rangeoverlap(x2,[Xa]) and \
+           rangeoverlap(y1,[Ya]) and rangeoverlap(y2,[Ya]):
+            return True
+        else:
+            return False
+    # Line semgent 2 is vertical line
+    elif x2[0]==x2[1]:
+        Xa = x2[0]
+        Ya = m1*Xa+b1
+        if rangeoverlap(x1,[Xa]) and rangeoverlap(x2,[Xa]) and \
+           rangeoverlap(y1,[Ya]) and rangeoverlap(y2,[Ya]):        
+            return True
+        else:
+            return False
+    # Neither are vertical lines
+    else:
+        Xa = (b2 - b1) / (m1 - m2)
+        
+    # The last thing to do is check that Xa is included into Ia:
+    if ( (Xa < max( np.min(x1), np.min(x2) )) or
+         (Xa > min( np.max(x1), np.max(x2) )) ):
+        return False  # intersection is out of bound
+    else:
+        return True
+
+
+
 
 if __name__ == "__main__":
     cc.compile()
