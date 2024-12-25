@@ -17,7 +17,7 @@ from .clock_numba import clock
 
 #@njit(cache=True)
 @njit
-def getstar(imshape,mask,xcen,ycen,hpsfnpix,fitradius,skyradius):
+def getstarinfo(imshape,mask,xcen,ycen,hpsfnpix,fitradius,skyradius):
     """ Return a star's full footprint and fitted pixels data."""
     # always return the same size
     # a distance of 6.2 pixels spans 6 full pixels but you could have
@@ -67,7 +67,7 @@ def getstar(imshape,mask,xcen,ycen,hpsfnpix,fitradius,skyradius):
 
 #@njit(cache=True)
 @njit
-def collatestars(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius):
+def collatestarsinfo(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius):
     """ Get full footprint and fitted pixels data for all stars."""
     nstars = len(starx)
     nfpix = 2*hpsfnpix+1
@@ -81,7 +81,7 @@ def collatestars(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius):
     skyravelindex = np.zeros((nstars,int(3.14*skyradius**2)),np.int64)
     skyndata = np.zeros(nstars,np.int32)
     for i in range(nstars):
-        out = getstar(imshape,mask,starx[i],stary[i],hpsfnpix,fitradius,skyradius)
+        out = getstarinfo(imshape,mask,starx[i],stary[i],hpsfnpix,fitradius,skyradius)
         # full footprint information
         fravelindex1,fn1,ravelindex1,n1,skyravelindex1,skyn1 = out
         fravelindex[i,:] = fravelindex1
@@ -100,6 +100,166 @@ def collatestars(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius):
     maxskyn = np.max(skyndata)
     skyravelindex = skyravelindex[:,:maxskyn]
     return (fravelindex,fndata,ravelindex,ndata,skyravelindex,skyndata)
+
+
+@njit
+def initstararrays(image,error,mask,tab,psfnpix,fitradius,skyradius):
+    """ Initialize all of the star arrays."""
+
+    # Star arrays
+    #------------
+    #  -full footprint: pixels of a star within the psf radius and not masked
+    #  -fitting pixels: pixels of a star within its fitting radius and not masked
+    #  -sky pixels: pixels in an annulus around a star and not masked
+    #  -flat pixels: all fitting pixels of all stars combined (unique),
+    #                  these are the pixels that we are actually fitting
+    # Full footprint information
+    #   starravelindex -
+    #   starndata - number of pixels for star each star
+    # Fitting pixel information
+    #   starfitravelindex - fitting pixel index into the raveled 1D full image/resid array
+    #   starfitndata - number of fitting pixels for each star
+    # Sky pixel information
+    #   skyravelindex - sky pixel index into the raveled 1D full image/resid array
+    #   skyndata - number of star pixels for each star
+    # Flat information
+    #   xflat/yflat - x/y values of the flat pixels
+    #   indflat - index of the flat pixels into the full 1D raveled arrays
+    #   starflat_index - index of all flat pixels that are within a star's full footprint
+    #                         index into the flat 1D array
+    #   starflat_ndata - number of flat pixels for each star
+    
+    nstars = len(tab)
+    ny,nx = image.shape                             # save image dimensions, python images are (Y,X)
+    imshape = np.array([ny,nx])
+    im = image.copy().astype(np.float64)
+    err = error.copy().astype(np.float64)
+    msk = mask.copy().astype(np.bool_)
+    xx,yy = utils.meshgrid(np.arange(nx),np.arange(ny))
+    xx = xx.flatten()
+    yy = yy.flatten()
+    # Order stars by flux, brightest first
+    si = np.argsort(tab[:,1])[::-1]       # largest amp first
+    startab = tab[si]                     # ID, amp, xcen, ycen
+    initpars = startab[:,1:4]             # amp, xcen, ycen
+    # Initialize the parameter array
+    initpars = startab[:,1:4]
+    npars = nstars*3
+    #if skyfit:
+    #    npars += 1
+    pars = np.zeros(npars,float) # amp, xcen, ycen
+    pars[0:3*nstars:3] = initpars[:,0]
+    pars[1:3*nstars:3] = initpars[:,1]
+    pars[2:3*nstars:3] = initpars[:,2]
+
+    # Get information for all the stars
+    xcen = pars[1:3*nstars:3]
+    ycen = pars[2:3*nstars:3]
+    hpsfnpix = psfnpix//2
+    out = collatestarsinfo(imshape,msk,xcen,ycen,hpsfnpix,fitradius,skyradius)
+    starravelindex,starndata,starfitravelindex,starfitndata,skyravelindex,skyndata = out
+
+    # Put indices of all the unique fitted pixels into one array
+    ntotpix = np.sum(starfitndata)
+    allravelindex = np.zeros(ntotpix,np.int64)
+    count = 0
+    for i in range(nstars):
+        n1 = starfitndata[i]
+        ravelind1 = starfitravelindex[i,:n1]
+        allravelindex[count:count+n1] = ravelind1
+        count += n1
+    allravelindex = np.unique(allravelindex)
+    ravelindex = allravelindex
+    ntotpix = len(allravelindex)
+
+    # Combine all of the X and Y values (of the pixels we are fitting) into one array
+    ntotpix = np.sum(starfitndata)
+    xall = np.zeros(ntotpix,np.int32)
+    yall = np.zeros(ntotpix,np.int32)
+    count = 0
+    for i in range(nstars):
+        n1 = starfitndata[i]
+        ravelindex1 = starfitravelindex[i,:n1]
+        xdata1 = xx[ravelindex1]
+        ydata1 = yy[ravelindex1]
+        xall[count:count+n1] = xdata1
+        yall[count:count+n1] = ydata1
+        count += n1
+    
+    # Create 1D unraveled indices, python images are (Y,X)
+    ind1 = utils.ravel_multi_index((yall,xall),imshape)
+    # Get unique indices and inverse indices
+    #   the inverse index list takes you from the full/duplicated pixels
+    #   to the unique ones
+    uind1,uindex1,invindex = utils.unique_index(ind1)
+    ntotpix = len(uind1)
+    ucoords = utils.unravel_index(uind1,image.shape)
+    yflat = ucoords[:,0]
+    xflat = ucoords[:,1]
+    # x/y coordinates of the unique fitted pixels
+    indflat = uind1
+    
+    # Save information on the "flattened" and unique fitted pixel arrays
+    imflat = np.zeros(len(uind1),np.float64)
+    imflat[:] = image.ravel()[uind1]
+    errflat = np.zeros(len(uind1),np.float64)
+    errflat[:] = error.ravel()[uind1]
+    resflat = imflat.copy()
+    
+    # Add inverse index for the fitted pixels
+    #  to be used with imflat/resflat/errflat/xflat/yflat/indflat
+    maxfitpix = np.max(starfitndata)
+    starfitinvindex = np.zeros((nstars,maxfitpix),np.int64)-1
+    for i in range(nstars):
+        n1 = starfitndata[i]
+        if i==0:
+            invlo = 0
+        else:
+            invlo = np.sum(starfitndata[:i])
+        invindex1 = invindex[invlo:invlo+n1]
+        starfitinvindex[i,:n1] = invindex1
+    
+    # For all of the fitting pixels, find the ones that
+    # a given star contributes to (basically within its PSF radius)
+    starflat_index = np.zeros((nstars,ntotpix),np.int64)-1
+    starflat_ndata = np.zeros(nstars,np.int64)
+    for i in range(ntotpix):
+        x1 = xflat[i]
+        y1 = yflat[i]
+        for j in range(nstars):
+            pars1 = pars[3*i:3*i+3]
+            r = np.sqrt((xflat[i]-pars[1])**2 + (yflat[i]-pars[2])**2)
+            if r <= psfnpix:
+                starflat_index[j,starflat_ndata[j]] = i
+                starflat_ndata[j] += 1
+    maxndata = np.max(starflat_ndata)
+    starflat_index = starflat_index[:,:maxndata]
+
+    return (im,err,msk,xx,yy,pars,npars,
+            starravelindex,starndata,starfitravelindex,starfitndata,skyravelindex,skyndata,
+            xflat,yflat,indflat,imflat,errflat,resflat,ntotpix,
+            starfitinvindex,starflat_index,starflat_ndata)
+
+@njit
+def psf(xdata,pars,psfdata):
+    """ Thin wrapper for getting a PSF model for a single star."""
+    xind,yind = xdata
+    psftype,psfparams,psflookup,psforder,imshape = psfdata
+    im1,_ = mnb.psf(xind,yind,pars,psftype,psfparams,psflookup,
+                    imshape,deriv=False,verbose=False)
+    return im1
+        
+@njit
+def psfjac(xdata,pars,psfdata):
+    """ Thin wrapper for getting the PSF model and Jacobian for a single star."""
+    xind,yind = xdata
+    psftype,psfparams,psflookup,psforder,imshape = psfdata
+    im1,jac1 = mnb.psf(xind,yind,pars,psftype,psfparams,psflookup,
+                       imshape,deriv=True,verbose=False)
+    return im1,jac1
+
+### ----- functions above were copied from groupfit_numba.py ---------
+
 
 #@njit(cache=True)
 @njit
@@ -172,7 +332,10 @@ def starfit(psftype,psfparams,psflookup,imshape,
     # Solve Jacobian
     dbeta = utils.qr_jac_solve(j,res,weight=wt)
     dbeta[~np.isfinite(dbeta)] = 0.0  # deal with NaNs, shouldn't happen
-    # Perform line search
+    
+    # --- Perform line search ---
+    #  move the solution along the dbeta vector to find the lowest chisq
+    #  get models: pars + 0*dbeta, pars + 0.5*dbeta, pars + 1.0*dbeta
     # This has the previous best-fit model subtracted
     #  add it back in
     data = res + model0
@@ -186,20 +349,22 @@ def starfit(psftype,psfparams,psflookup,imshape,
     chisq2 = np.sum((data-model2)**2/err**2)
     #if verbose:
     #    print('linesearch:',chisq0,chisq1,chisq2)
+
+    # Use quadratic bisector on the three points to find the lowest chisq 
     alpha = utils.quadratic_bisector(np.array([0.0,0.5,1.0]),
                                      np.array([chisq0,chisq1,chisq2]))
+    # The bisector can be negative (outside of the acceptable range) if the chisq shape is concave
     if alpha <= 0 and np.min(np.array([chisq0,chisq1,chisq2]))==chisq2:
-        # the bisector can be negative if the chisq shape is concave
         alpha = 1.0
-    alpha = np.minimum(np.maximum(alpha,0.0),1.0)  # 0<alpha<1
+    alpha = utils.clip(alpha,0.0,1.0)  # 0<alpha<1
     if np.isfinite(alpha)==False:
         alpha = 1.0
     pars_new = pars + alpha * dbeta
     new_dbeta = alpha * dbeta
-    
-    # Update parameters
-    bounds = utils.mkbounds(pars,imshape)
+
+    # Update the parameters and impose step limits and bounds
     maxsteps = utils.steps(pars)
+    bounds = utils.mkbounds(pars,imshape)
     bestpars = utils.newpars(pars,new_dbeta,bounds,maxsteps)
 
     # Calculate chisq with updated resid array
@@ -278,7 +443,7 @@ def allfit(psftype,psfparams,psfnpix,psflookup,psfflux,
        Do not freeze any parameters even if they have converged.  Default is False.
     verbose : boolean, optional
        Verbose output.
-
+    
     Returns
     -------
     out : table
@@ -295,8 +460,18 @@ def allfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     out,model,sky = allfit(psf,image,error,mask,tab)
     
     """
+
+    # ----- START copied from groupfit_numba.py ---------
+
+    start = clock()
     
     nstars = len(tab)
+    skyradius = psfnpix//2 + 10
+    ny,nx = image.shape                             # save image dimensions, python images are (Y,X)
+    imshape = np.array([ny,nx])
+    
+    # PSF information
+    #----------------
     _,_,npsforder = psflookup.shape
     psforder = 0
     if npsforder==4:
@@ -306,73 +481,185 @@ def allfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     psforder = psflookup.shape[2]
     if psforder>1:
         psforder = 1
-    ny,nx = image.shape                             # save image dimensions, python images are (Y,X)
-    nx = nx
-    ny = ny
-    imshape = np.array([ny,nx])
-    im = image.copy().astype(np.float64)
-    err = error.copy().astype(np.float64)
-    msk = mask.copy().astype(np.bool_)
-    xx,yy = utils.meshgrid(np.arange(nx),np.arange(ny))
-    xx = xx.flatten()
-    yy = yy.flatten()
-    # Order stars by flux, brightest first
-    si = np.argsort(tab[:,1])[::-1]       # largest amp first
-    startab = tab[si]                     # ID, amp, xcen, ycen
-    initpars = startab[:,1:4]             # amp, xcen, ycen
-    nfitpix = int(np.ceil(fitradius))     # +/- nfitpix
-    skyradius = psfnpix//2 + 10
-    # Initialize the parameter array
-    initpars = startab[:,1:4] 
-    pars = np.zeros(nstars*3,float) # amp, xcen, ycen
-    pars[0::3] = initpars[:,0]
-    pars[1::3] = initpars[:,1]
-    pars[2::3] = initpars[:,2]
+    # Package up the PSF information into a tuple to pass to the functions
+    psfdata = (psftype,psfparams,psflookup,psforder,imshape)
     
-    # Get information for all the stars
-    xcen = pars[1::3]
-    ycen = pars[2::3]
-    hpsfnpix = psfnpix//2
-    out = collatestars(imshape,msk,xcen,ycen,hpsfnpix,fitradius,skyradius)
-    starravelindex,starndata,starfitravelindex,starfitndata,skyravelindex,skyndata = out
+    # Star arrays
+    #------------
+    #  -full footprint: pixels of a star within the psf radius and not masked
+    #  -fitting pixels: pixels of a star within its fitting radius and not masked
+    #  -sky pixels: pixels in an annulus around a star and not masked
+    #  -flat pixels: all fitting pixels of all stars combined (unique),
+    #                  these are the pixels that we are actually fitting
+    # Full footprint information
+    #   starravelindex -
+    #   starndata - number of pixels for star each star
+    # Fitting pixel information
+    #   starfitravelindex - fitting pixel index into the raveled 1D full image/resid array
+    #   starfitndata - number of fitting pixels for each star
+    # Sky pixel information
+    #   skyravelindex - sky pixel index into the raveled 1D full image/resid array
+    #   skyndata - number of star pixels for each star
+    # Flat information
+    #   xflat/yflat - x/y values of the flat pixels
+    #   indflat - index of the flat pixels into the full 1D raveled arrays
+    #   starflat_index - index of all flat pixels that are within a star's full footprint
+    #                         index into the flat 1D array
+    #   starflat_ndata - number of flat pixels for each star
     
-    # Put indices of all the unique fitted pixels into one array
-    ntotpix = np.sum(starfitndata)
-    allravelindex = np.zeros(ntotpix,np.int64)
-    count = 0
-    for i in range(nstars):
-        n1 = starfitndata[i]
-        ravelind1 = starfitravelindex[i,:n1]
-        allravelindex[count:count+n1] = ravelind1
-        count += n1
-    allravelindex = np.unique(allravelindex)
-    ravelindex = allravelindex
-    ntotpix = len(allravelindex)
+    # Initialize the star arrays
+    initdata = initstararrays(image,error,mask,tab,psfnpix,fitradius,skyradius)
+    im,err,msk,xx,yy,pars,npars = initdata[:7]
+    starravelindex,starndata,starfitravelindex,starfitndata,skyravelindex,skyndata = initdata[7:13]
+    xflat,yflat,indflat,imflat,errflat,resflat,ntotpix = initdata[13:20]
+    starfitinvindex,starflat_index,starflat_ndata = initdata[20:]
     
-    # Create initial smooth sky image
-    skyim = utils.sky(im).flatten()
-    # Subtract the initial models from the residual array
-    resid = np.zeros(imshape[0]*imshape[1],np.float64)
-    resid[:] = im.copy().astype(np.float64).flatten()   # flatten makes it easier to modify
-    resid[:] -= skyim   # subtract smooth sky
-    modelim = np.zeros(imshape[0]*imshape[1],np.float64)
+    # Package up the star information into tuples for easy transport
+    stardata = (starravelindex,starndata,xx,yy)
+    flatdata = (starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix)
+    
+    # Image arrays
+    #-------------
+    # Full arrays:
+    #   im/err/mask - full 1D raveled image, error and mask arrays
+    #   resid - full 1D raveled residual image with the smooth sky subtracted
+    #             AND any frozen stars subtracted
+    # Flat arrays:
+    #   indflat - index of the flat pixels into the full 1D raveled arrays
+    #   imflat/errflat - 1D raveled image and error arrays for the flat/fitting pixels
+    #   skyflat - smooth sky values for the flat pixels
+    #   resflat - flat pixel values of "resid"
+    
+    # Create initial sky image
+    #  improve initial sky estimate by removing initial models
+    tresid = np.zeros(imshape[0]*imshape[1],np.float64)
+    tresid[:] = im.copy().astype(np.float64).flatten()
     for i in range(nstars):
         pars1 = pars[3*i:3*i+3]
         n1 = starndata[i]
         ravelind1 = starravelindex[i]
         xind1 = xx[ravelind1]
         yind1 = yy[ravelind1]
-        m,_ = mnb.psf(xind1,yind1,pars1,psftype,psfparams,psflookup,
-                      imshape,deriv=False,verbose=False)
-        resid[ravelind1] -= m
-        modelim[ravelind1] += m
-        
-    # Sky and Niter arrays for the stars
+        xdata1 = (xind1,yind1)
+        m = psf(xdata1,pars1,psfdata)
+        tresid[ravelind1] -= m
+    skyim = utils.sky(tresid.copy().reshape(imshape[0],imshape[1])).flatten()
+    skyflat = skyim[indflat]
+
+    # Initialize RESID and subtract initial smooth sky
+    resid = np.zeros(imshape[0]*imshape[1],np.float64)
+    resid[:] = im.copy().astype(np.float64).flatten()   # flatten makes it easier to modify
+    resid[:] -= skyim          # subtract smooth sky
+    resflat = resid[indflat]   # initialize resflat
+
+    # Perform the fitting
+    #--------------------
+
+    # Initialize arrays for the stars and freezing parameters
     starsky = np.zeros(nstars,np.float64)
     starniter = np.zeros(nstars,np.int64)
     starchisq = np.zeros(nstars,np.float64)
     starrms = np.zeros(nstars,np.float64)
     freezestars = np.zeros(nstars,np.bool_)
+    freezepars = np.zeros(len(pars),np.bool_)
+    
+    # Initial estimates
+    initpar = pars.copy()
+    # Make bounds
+    #  this requires all 3*Nstars parameters to be input
+    bounds = utils.mkbounds(initpar,imshape,2)    
+    
+    # Iterate
+    bestpar_all = initpar.copy()
+    allpars = initpar.copy()
+    bestpar = initpar.copy()
+    
+
+    
+    # ----- END copied from groupfit_numba.py ---------
+
+
+    return
+
+
+    
+    # nstars = len(tab)
+    # _,_,npsforder = psflookup.shape
+    # psforder = 0
+    # if npsforder==4:
+    #     psforder = 1
+    # if psflookup.ndim != 3:
+    #     raise Exception('psflookup must have 3 dimensions')
+    # psforder = psflookup.shape[2]
+    # if psforder>1:
+    #     psforder = 1
+    # ny,nx = image.shape                             # save image dimensions, python images are (Y,X)
+    # nx = nx
+    # ny = ny
+    # imshape = np.array([ny,nx])
+    # im = image.copy().astype(np.float64)
+    # err = error.copy().astype(np.float64)
+    # msk = mask.copy().astype(np.bool_)
+    # xx,yy = utils.meshgrid(np.arange(nx),np.arange(ny))
+    # xx = xx.flatten()
+    # yy = yy.flatten()
+    # # Order stars by flux, brightest first
+    # si = np.argsort(tab[:,1])[::-1]       # largest amp first
+    # startab = tab[si]                     # ID, amp, xcen, ycen
+    # initpars = startab[:,1:4]             # amp, xcen, ycen
+    # nfitpix = int(np.ceil(fitradius))     # +/- nfitpix
+    # skyradius = psfnpix//2 + 10
+    # # Initialize the parameter array
+    # initpars = startab[:,1:4] 
+    # pars = np.zeros(nstars*3,float) # amp, xcen, ycen
+    # pars[0::3] = initpars[:,0]
+    # pars[1::3] = initpars[:,1]
+    # pars[2::3] = initpars[:,2]
+    
+    # # Get information for all the stars
+    # xcen = pars[1::3]
+    # ycen = pars[2::3]
+    # hpsfnpix = psfnpix//2
+    # out = collatestarsinfo(imshape,msk,xcen,ycen,hpsfnpix,fitradius,skyradius)
+    # starravelindex,starndata,starfitravelindex,starfitndata,skyravelindex,skyndata = out
+    
+    # # Put indices of all the unique fitted pixels into one array
+    # ntotpix = np.sum(starfitndata)
+    # allravelindex = np.zeros(ntotpix,np.int64)
+    # count = 0
+    # for i in range(nstars):
+    #     n1 = starfitndata[i]
+    #     ravelind1 = starfitravelindex[i,:n1]
+    #     allravelindex[count:count+n1] = ravelind1
+    #     count += n1
+    # allravelindex = np.unique(allravelindex)
+    # ravelindex = allravelindex
+    # ntotpix = len(allravelindex)
+    
+    # # Create initial smooth sky image
+    # skyim = utils.sky(im).flatten()
+    # # Subtract the initial models from the residual array
+    # resid = np.zeros(imshape[0]*imshape[1],np.float64)
+    # resid[:] = im.copy().astype(np.float64).flatten()   # flatten makes it easier to modify
+    # resid[:] -= skyim   # subtract smooth sky
+    # modelim = np.zeros(imshape[0]*imshape[1],np.float64)
+    # for i in range(nstars):
+    #     pars1 = pars[3*i:3*i+3]
+    #     n1 = starndata[i]
+    #     ravelind1 = starravelindex[i]
+    #     xind1 = xx[ravelind1]
+    #     yind1 = yy[ravelind1]
+    #     m,_ = mnb.psf(xind1,yind1,pars1,psftype,psfparams,psflookup,
+    #                   imshape,deriv=False,verbose=False)
+    #     resid[ravelind1] -= m
+    #     modelim[ravelind1] += m
+        
+    # # Sky and Niter arrays for the stars
+    # starsky = np.zeros(nstars,np.float64)
+    # starniter = np.zeros(nstars,np.int64)
+    # starchisq = np.zeros(nstars,np.float64)
+    # starrms = np.zeros(nstars,np.float64)
+    # freezestars = np.zeros(nstars,np.bool_)
     
     # While loop
     niter = 1
@@ -448,6 +735,8 @@ def allfit(psftype,psfparams,psfnpix,psflookup,psfflux,
             # Update resid
             resid[:] += prevsky
             resid[:] -= skyim
+            # CHECK THAT WE ARE DOING THIS CORRECTLY!!
+            # resflat, skyflat???
             
         if verbose:
             print('iter dt =',(clock()-start0)/1e9,'sec.')
@@ -457,8 +746,6 @@ def allfit(psftype,psfparams,psfnpix,psflookup,psfflux,
             
         niter += 1     # increment counter
 
-        if verbose:
-            print('niter=',niter)
             
     # Check that all starniter are set properly
     #  if we stopped "prematurely" then not all stars were frozen
@@ -499,6 +786,8 @@ def allfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     outtab[:,12] = starrms
     outtab[:,13] = starchisq
     outtab[:,14] = starniter                      # niter, what iteration it converged on
+
+    # DO WE NEED TO RECALCULATE chi-squared and RMS for each star ????
     
     return outtab,modelim,skyim
     

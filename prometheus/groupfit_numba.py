@@ -18,8 +18,8 @@ from .clock_numba import clock
 # Fit a PSF model to multiple stars in an image
 
 
-#@njit(cache=True)
-@njit
+@njit(cache=True)
+#@njit
 def getstarinfo(imshape,mask,xcen,ycen,hpsfnpix,fitradius,skyradius):
     """ Return a star's full footprint, fitted pixels, and sky pixels data."""
     # always return the same size
@@ -68,8 +68,8 @@ def getstarinfo(imshape,mask,xcen,ycen,hpsfnpix,fitradius,skyradius):
                     count += 1
     return (fravelindex,fcount,ravelindex,count,skyravelindex,skycount)
 
-#@njit(cache=True)
-@njit
+@njit(cache=True)
+#@njit
 def collatestarsinfo(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius):
     """ Get full footprint, fitted pixels, and sky pixels data for all stars."""
     nstars = len(starx)
@@ -104,7 +104,8 @@ def collatestarsinfo(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius):
     skyravelindex = skyravelindex[:,:maxskyn]
     return (fravelindex,fndata,ravelindex,ndata,skyravelindex,skyndata)
 
-@njit
+@njit(cache=True)
+#@njit
 def initstararrays(image,error,mask,tab,psfnpix,fitradius,skyradius,skyfit):
     """ Initialize all of the star arrays."""
 
@@ -242,7 +243,8 @@ def initstararrays(image,error,mask,tab,psfnpix,fitradius,skyradius,skyfit):
             xflat,yflat,indflat,imflat,errflat,resflat,ntotpix,
             starfitinvindex,starflat_index,starflat_ndata)
 
-@njit
+@njit(cache=True)
+#@njit
 def sky(image,modelim,method='sep',rin=None,rout=None):
     """ (Re)calculate the sky."""
     # Remove the current best-fit model
@@ -278,8 +280,8 @@ def sky(image,modelim,method='sep',rin=None,rout=None):
     #     else:
     #         raise ValueError("Sky method "+method+" not supported")
 
-
-@njit
+@njit(cache=True)
+#@njit
 def psf(xdata,pars,psfdata):
     """ Thin wrapper for getting a PSF model for a single star."""
     xind,yind = xdata
@@ -288,8 +290,8 @@ def psf(xdata,pars,psfdata):
                     imshape,deriv=False,verbose=False)
     return im1
         
-        
-@njit
+@njit(cache=True)
+#@njit
 def psfjac(xdata,pars,psfdata):
     """ Thin wrapper for getting the PSF model and Jacobian for a single star."""
     xind,yind = xdata
@@ -298,8 +300,8 @@ def psfjac(xdata,pars,psfdata):
                        imshape,deriv=True,verbose=False)
     return im1,jac1
     
-
-@njit
+@njit(cache=True)
+#@njit
 def model(psfdata,freezedata,flatdata,pars,trim=False,allparams=False,verbose=False):
     """ Calculate the model for the stars and pixels we are fitting."""
 
@@ -357,7 +359,8 @@ def model(psfdata,freezedata,flatdata,pars,trim=False,allparams=False,verbose=Fa
         
     return allim
 
-@njit
+@njit(cache=True)
+#@njit
 def fullmodel(psfdata,stardata,pars):
     """ Calculate the model for all the stars and the full footprint."""
     
@@ -384,7 +387,8 @@ def fullmodel(psfdata,stardata,pars):
         
     return im
 
-@njit  
+@njit(cache=True)
+#@njit  
 def jac(psfdata,freezedata,flatdata,pars,trim=False,allparams=False):
     """ Calculate the jacobian for the pixels and parameters we are fitting"""
 
@@ -468,7 +472,8 @@ def jac(psfdata,freezedata,flatdata,pars,trim=False,allparams=False):
         
     return im,jac
 
-@njit
+@njit(cache=True)
+#@njit
 def chisqflat(freezedata,flatdata,psfdata,resflat,errflat,pars):
     """ Return chi-squared of the flat data"""
     # Note this ignores any frozen stars
@@ -476,8 +481,8 @@ def chisqflat(freezedata,flatdata,psfdata,resflat,errflat,pars):
     chisq = np.sum(resflat**2/errflat**2)
     return chisq
 
-
-@njit
+@njit(cache=True)
+#@njit
 def cov(psfdata,freezedata,covflatdata,pars):
     """ Determine the covariance matrix."""
     
@@ -515,7 +520,8 @@ def cov(psfdata,freezedata,covflatdata,pars):
         
     return cov
 
-@njit
+@njit(cache=True)
+#@njit
 def dofreeze(frzpars,pars,freezedata,flatdata,psfdata,resid,resflat):
     """ Freeze par/stars."""
 
@@ -563,8 +569,8 @@ def dofreeze(frzpars,pars,freezedata,flatdata,psfdata,resid,resflat):
     return freezepars,freezestars,resid,resflat
 
     
-#@njit(cache=True)
-@njit
+@njit(cache=True)
+#@njit
 def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
              image,error,mask,tab,fitradius,maxiter=10,
              minpercdiff=0.5,reskyiter=2,nofreeze=False,

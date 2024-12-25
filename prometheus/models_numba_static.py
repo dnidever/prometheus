@@ -5,16 +5,17 @@ import numpy as np
 import scipy.special as sc
 from scipy.optimize import root_scalar
 #import numba_special  # The import generates Numba overloads for special
-from skimage import measure
+#from skimage import measure
 from dlnpyutils import utils as dln
 import numba
 from numba import jit,njit,types
 from numba.experimental import jitclass
 #from . import leastsquares as lsq, utils_numba as utils
 import utils_numba_static as utils
+import ladfit_numba_static as ladfit
 
 from numba.pycc import CC
-cc = CC('utils_numba_static')
+cc = CC('_models_numba_static')
 
 @njit
 @cc.export('gaussfwhmf', '(f8[:,:],)')
@@ -55,7 +56,7 @@ def hfluxrad(im):
 
     """
     ny,nx = im.shape
-    xx,yy = np.meshgrid(np.arange(nx)-nx//2,np.arange(ny)-ny//2)
+    xx,yy = utils.meshgrid(np.arange(nx)-nx//2,np.arange(ny)-ny//2)
     rr = np.sqrt(xx**2+yy**2)
     si = np.argsort(rr.ravel())
     rsi = rr.ravel()[si]
@@ -65,215 +66,231 @@ def hfluxrad(im):
     hfluxrad = rsi[np.argmin(np.abs(cumf-0.5))]
     return hfluxrad
 
-@njit
-@cc.export('contourfwhmf', '(f8[:,:],)')
-@cc.export('contourfwhmi', '(i8[:,:],)')
-def contourfwhm(im):
-    """                                                                                         
-    Measure the FWHM of a PSF or star image using contours.                                     
-                                                                                                
-    Parameters                                                                                  
-    ----------                                                                                  
-    im : numpy array                                                                            
-     The 2D image of a star.                                                                    
-                                                                                                
-    Returns                                                                                     
-    -------                                                                                     
-    fwhm : float                                                                                
-       The full-width at half maximum.                                                          
-                                                                                                
-    Example                                                                                     
-    -------                                                                                     
-                                                                                                
-    fwhm = contourfwhm(im)                                                                      
-                                                                                                
-    """
-    # get contour at half max and then get average radius                                       
-    ny,nx = im.shape
-    xcen = nx//2
-    ycen = ny//2
-    xx,yy = utils.meshgrid(np.arange(nx)-nx//2,np.arange(ny)-ny//2)
-    rr = np.sqrt(xx**2+yy**2)
-
-    # Get half-flux radius                                                                      
-    hfrad = hfluxrad(im)
-    # mask the image to only 2*half-flux radius                                                 
-    mask = (rr<2*hfrad)
-
-    # Find contours at a constant value of 0.5                                                  
-    contours = measure.find_contours(im*mask, 0.5*np.max(im))
-    # If there are multiple contours, find the one that                                         
-    #   encloses the center                                                                     
-    if len(contours)>1:
-        for i in range(len(contours)):
-            x1 = contours[i][:,0]
-            y1 = contours[i][:,1]
-            inside = utils.isPointInPolygon(x1,y1,xcen,ycen)
-            if inside:
-                contours = contours[i]
-                break
-    else:
-        contours = contours[0]   # first level                                                  
-    xc = contours[:,0]
-    yc = contours[:,1]
-    r = np.sqrt((xc-nx//2)**2+(yc-ny//2)**2)
-    fwhm = np.mean(r)*2
-    return fwhm
-
-# #@njit
-# def imfwhm(im):
+# @njit
+# @cc.export('contourfwhmf', '(f8[:,:],)')
+# @cc.export('contourfwhmi', '(i8[:,:],)')
+# def contourfwhm(im):
 #     """                                                                                         
-#     Measure the FWHM of a PSF or star image.                                                    
+#     Measure the FWHM of a PSF or star image using contours.                                     
                                                                                                 
 #     Parameters                                                                                  
 #     ----------                                                                                  
 #     im : numpy array                                                                            
-#       The image of a star.                                                                      
+#      The 2D image of a star.                                                                    
                                                                                                 
 #     Returns                                                                                     
 #     -------                                                                                     
 #     fwhm : float                                                                                
-#       The full-width at half maximum of the star.                                               
+#        The full-width at half maximum.                                                          
                                                                                                 
 #     Example                                                                                     
 #     -------                                                                                     
                                                                                                 
-#     fwhm = imfwhm(im)                                                                           
+#     fwhm = contourfwhm(im)                                                                      
                                                                                                 
 #     """
+#     # get contour at half max and then get average radius                                       
 #     ny,nx = im.shape
-#     xx,yy = utils.meshgrid(np.arange(nx)-nx//2,np.arange(ny)-ny//2)
+#     xcen = nx//2
+#     ycen = ny//2
+#     x = np.arange(nx)-nx//2
+#     y = np.arange(ny)-ny//2
+#     #xx,yy = utils.meshgridi(np.arange(nx)-nx//2,np.arange(ny)-ny//2)
+#     xx,yy = utils.meshgrid(x,y)
 #     rr = np.sqrt(xx**2+yy**2)
-#     centerf = im[ny//2,nx//2]
-#     si = np.argsort(rr.ravel())
-#     rsi = rr.ravel()[si]
-#     fsi = im.ravel()[si]
-#     ind, = np.where(fsi<0.5*centerf)
-#     bestr = np.min(rsi[ind])
-#     bestind = ind[np.argmin(rsi[ind])]
-#     # fit a robust line to the neighboring points                                               
-#     gd, = np.where(np.abs(rsi-bestr) < 1.0)
-#     coef,absdev = ladfit.ladfit(rsi[gd],fsi[gd])
-#     # where does the line cross y=0.5                                                           
-#     bestr2 = (0.5-coef[0])/coef[1]
-#     fwhm = 2*bestr2
+
+#     # Get half-flux radius                                                                      
+#     hfrad = hfluxrad(im)
+#     # mask the image to only 2*half-flux radius                                                 
+#     mask = (rr<2*hfrad)
+
+#     # Find contours at a constant value of 0.5                                                  
+#     contours = measure.find_contours(im*mask, 0.5*np.max(im))
+#     # If there are multiple contours, find the one that                                         
+#     #   encloses the center                                                                     
+#     if len(contours)>1:
+#         for i in range(len(contours)):
+#             x1 = contours[i][:,0]
+#             y1 = contours[i][:,1]
+#             inside = utils.isPointInPolygon(x1,y1,xcen,ycen)
+#             if inside:
+#                 contours = contours[i]
+#                 break
+#     else:
+#         contours = contours[0]   # first level                                                  
+#     xc = contours[:,0]
+#     yc = contours[:,1]
+#     r = np.sqrt((xc-nx//2)**2+(yc-ny//2)**2)
+#     fwhm = np.mean(r)*2
 #     return fwhm
 
+@njit
+@cc.export('imfwhmf', '(f8[:,:],)')
+@cc.export('imfwhmi', '(i8[:,:],)')
+def imfwhm(im):
+    """                                                                                         
+    Measure the FWHM of a PSF or star image.                                                    
+                                                                                                
+    Parameters                                                                                  
+    ----------                                                                                  
+    im : numpy array                                                                            
+      The image of a star.                                                                      
+                                                                                                
+    Returns                                                                                     
+    -------                                                                                     
+    fwhm : float                                                                                
+      The full-width at half maximum of the star.                                               
+                                                                                                
+    Example                                                                                     
+    -------                                                                                     
+                                                                                                
+    fwhm = imfwhm(im)                                                                           
+                                                                                                
+    """
+    ny,nx = im.shape
+    xx,yy = utils.meshgrid(np.arange(nx)-nx//2,np.arange(ny)-ny//2)
+    rr = np.sqrt(xx**2+yy**2)
+    centerf = im[ny//2,nx//2]
+    si = np.argsort(rr.ravel())
+    rsi = rr.ravel()[si]
+    fsi = im.ravel()[si]
+    ind, = np.where(fsi<0.5*centerf)
+    bestr = np.min(rsi[ind])
+    bestind = ind[np.argmin(rsi[ind])]
+    # fit a robust line to the neighboring points                                               
+    gd, = np.where(np.abs(rsi-bestr) < 1.0)
+    coef,absdev = ladfit.ladfit(rsi[gd],fsi[gd])
+    # where does the line cross y=0.5                                                           
+    bestr2 = (0.5-coef[0])/coef[1]
+    fwhm = 2*bestr2
+    return fwhm
 
-# @njit(cache=True)
-# def numba_linearinterp(binim,fullim,binsize):
-#     """ linear interpolation"""
-#     ny,nx = fullim.shape
-#     ny2 = ny // binsize
-#     nx2 = nx // binsize
-#     hbinsize = int(0.5*binsize)
 
-#     # Calculate midpoint positions
-#     xx = np.arange(nx2)*binsize+hbinsize
-#     yy = np.arange(ny2)*binsize+hbinsize
+@njit
+@cc.export('numba_linearinterpf', '(f8[:,:],f8[:,:],i4)')
+@cc.export('numba_linearinterpi', '(i8[:,:],i8[:,:],i4)')
+def numba_linearinterp(binim,fullim,binsize):
+    """ linear interpolation"""
+    ny,nx = fullim.shape
+    ny2 = ny // binsize
+    nx2 = nx // binsize
+    hbinsize = int(0.5*binsize)
+
+    # Calculate midpoint positions
+    xx = np.arange(nx2)*binsize+hbinsize
+    yy = np.arange(ny2)*binsize+hbinsize
     
-#     for i in range(ny2-1):
-#         for j in range(nx2-1):
-#             y1 = i*binsize+hbinsize
-#             y2 = y1+binsize
-#             x1 = j*binsize+hbinsize
-#             x2 = x1+binsize
-#             f11 = binim[i,j]
-#             f12 = binim[i+1,j]
-#             f21 = binim[i,j+1]
-#             f22 = binim[i+1,j+1]
-#             denom = binsize*binsize
-#             for k in range(binsize):
-#                 for l in range(binsize):
-#                     x = x1+k
-#                     y = y1+l
-#                     # weighted mean
-#                     #denom = (x2-x1)*(y2-y1)
-#                     w11 = (x2-x)*(y2-y)/denom
-#                     w12 = (x2-x)*(y-y1)/denom
-#                     w21 = (x-x1)*(y2-y)/denom
-#                     w22 = (x-x1)*(y-y1)/denom
-#                     f = w11*f11+w12*f12+w21*f21+w22*f22
-#                     fullim[y,x] = f
+    for i in range(ny2-1):
+        for j in range(nx2-1):
+            y1 = i*binsize+hbinsize
+            y2 = y1+binsize
+            x1 = j*binsize+hbinsize
+            x2 = x1+binsize
+            f11 = binim[i,j]
+            f12 = binim[i+1,j]
+            f21 = binim[i,j+1]
+            f22 = binim[i+1,j+1]
+            denom = binsize*binsize
+            for k in range(binsize):
+                for l in range(binsize):
+                    x = x1+k
+                    y = y1+l
+                    # weighted mean
+                    #denom = (x2-x1)*(y2-y1)
+                    w11 = (x2-x)*(y2-y)/denom
+                    w12 = (x2-x)*(y-y1)/denom
+                    w21 = (x-x1)*(y2-y)/denom
+                    w22 = (x-x1)*(y-y1)/denom
+                    f = w11*f11+w12*f12+w21*f21+w22*f22
+                    fullim[y,x] = f
                     
-#     # do the edges
-#     #for i in range(binsize):
-#     #    fullim[i,:] = fullim[binsize,:]
-#     #    fullim[:,i] = fullim[:,binsize]
-#     #    fullim[-i,:] = fullim[-binsize,:]
-#     #    fullim[:,-i] = fullim[:,-binsize]
-#     # do the corners
-#     #fullim[:binsize,:binsize] = binsize[0,0]
-#     #fullim[-binsize:,:binsize] = binsize[-1,0]
-#     #fullim[:binsize,-binsize:] = binsize[0,-1]
-#     #fullim[-binsize:,-binsize:] = binsize[-1,-1]
+    # do the edges
+    #for i in range(binsize):
+    #    fullim[i,:] = fullim[binsize,:]
+    #    fullim[:,i] = fullim[:,binsize]
+    #    fullim[-i,:] = fullim[-binsize,:]
+    #    fullim[:,-i] = fullim[:,-binsize]
+    # do the corners
+    #fullim[:binsize,:binsize] = binsize[0,0]
+    #fullim[-binsize:,:binsize] = binsize[-1,0]
+    #fullim[:binsize,-binsize:] = binsize[0,-1]
+    #fullim[-binsize:,-binsize:] = binsize[-1,-1]
 
-#     return fullim
+    return fullim
 
-# @njit(cache=True)
-# def checkbounds(pars,bounds):
-#     """ Check the parameters against the bounds."""
-#     # 0 means it's fine
-#     # 1 means it's beyond the lower bound
-#     # 2 means it's beyond the upper bound
-#     npars = len(pars)
-#     lbounds = bounds[:,0]
-#     ubounds = bounds[:,1]
-#     check = np.zeros(npars,np.int32)
-#     check[pars<=lbounds] = 1
-#     check[pars>=ubounds] = 2
-#     return check
+@njit
+@cc.export('checkboundsf', 'i4[:](f8[:],f8[:,:])')
+@cc.export('checkboundsi', 'i4[:](i8[:],i8[:,:])')
+def checkbounds(pars,bounds):
+    """ Check the parameters against the bounds."""
+    # 0 means it's fine
+    # 1 means it's beyond the lower bound
+    # 2 means it's beyond the upper bound
+    npars = len(pars)
+    lbounds = bounds[:,0]
+    ubounds = bounds[:,1]
+    check = np.zeros(npars,np.int32)
+    check[np.where(pars<=lbounds)] = 1
+    check[np.where(pars>=ubounds)] = 2
+    return check
 
-# @njit(cache=True)
-# def limbounds(pars,bounds):
-#     """ Limit the parameters to the boundaries."""
-#     lbounds = bounds[:,0]
-#     ubounds = bounds[:,1]
-#     outpars = np.minimum(np.maximum(pars,lbounds),ubounds)
-#     return outpars
+@njit
+@cc.export('limboundsf', '(f8[:],f8[:,:])')
+@cc.export('limboundsi', '(i8[:],i8[:,:])')
+def limbounds(pars,bounds):
+    """ Limit the parameters to the boundaries."""
+    lbounds = bounds[:,0]
+    ubounds = bounds[:,1]
+    outpars = np.minimum(np.maximum(pars,lbounds),ubounds)
+    return outpars
 
-# @njit(cache=True)
-# def limsteps(steps,maxsteps):
-#     """ Limit the parameter steps to maximum step sizes."""
-#     signs = np.sign(steps)
-#     outsteps = np.minimum(np.abs(steps),maxsteps)
-#     outsteps *= signs
-#     return outsteps
+@njit
+@cc.export('limstepsf', '(f8[:],f8[:])')
+@cc.export('limstepsi', '(i8[:],i8[:])')
+def limsteps(steps,maxsteps):
+    """ Limit the parameter steps to maximum step sizes."""
+    signs = np.sign(steps)
+    outsteps = np.minimum(np.abs(steps),maxsteps)
+    outsteps *= signs
+    return outsteps
 
-# @njit(cache=True)
-# def newlsqpars(pars,steps,bounds,maxsteps):
-#     """ Return new parameters that fit the constraints."""
-#     # Limit the steps to maxsteps
-#     limited_steps = limsteps(steps,maxsteps)
+@njit
+@cc.export('newlsqpars', '(f8[:],f8[:],f8[:,:],f8[:])')
+def newlsqpars(pars,steps,bounds,maxsteps):
+    """ Return new parameters that fit the constraints."""
+    # Limit the steps to maxsteps
+    limited_steps = limsteps(steps,maxsteps)
         
-#     # Make sure that these don't cross the boundaries
-#     lbounds = bounds[:,0]
-#     ubounds = bounds[:,1]
-#     check = checkbounds(pars+limited_steps,bounds)
-#     # Reduce step size for any parameters to go beyond the boundaries
-#     badpars = (check!=0)
-#     # reduce the step sizes until they are within bounds
-#     newsteps = limited_steps.copy()
-#     count = 0
-#     maxiter = 2
-#     while (np.sum(badpars)>0 and count<=maxiter):
-#         newsteps[badpars] /= 2
-#         newcheck = checkbounds(pars+newsteps,bounds)
-#         badpars = (newcheck!=0)
-#         count += 1
+    # Make sure that these don't cross the boundaries
+    lbounds = bounds[:,0]
+    ubounds = bounds[:,1]
+    check = checkbounds(pars+limited_steps,bounds)
+    # Reduce step size for any parameters to go beyond the boundaries
+    badpars, = np.where(check!=0)
+    # reduce the step sizes until they are within bounds
+    newsteps = limited_steps.copy()
+    count = 0
+    maxiter = 2
+    while (len(badpars)>0 and count<=maxiter):
+        newsteps[badpars] = newsteps[badpars] / 2
+        newcheck = checkbounds(pars+newsteps,bounds)
+        badpars, = np.where(newcheck!=0)
+        count += 1
             
-#     # Final parameters
-#     newparams = pars + newsteps
+    # Final parameters
+    newparams = pars + newsteps
             
-#     # Make sure to limit them to the boundaries
-#     check = checkbounds(newparams,bounds)
-#     badpars = (check!=0)
-#     if np.sum(badpars)>0:
-#         # add a tiny offset so it doesn't fit right on the boundary
-#         newparams = np.minimum(np.maximum(newparams,lbounds+1e-30),ubounds-1e-30)
-#     return newparams
+    # Make sure to limit them to the boundaries
+    check = checkbounds(newparams,bounds)
+    badpars, = np.where(check!=0)
+    if len(badpars)>0:
+        # add a tiny offset so it doesn't fit right on the boundary
+        newparams = np.minimum(np.maximum(newparams,lbounds+1e-30),ubounds-1e-30)
+    return newparams
 
-# @njit(cache=True)
+# @njit
+# @cc.export('newbestparsf', '(f8[:],f8[:])')
+# @cc.export('newbestparsi', '(i8[:],i8[:])')
 # def newbestpars(bestpars,dbeta):
 #     """ Get new pars from offsets."""
 #     newpars = np.zeros(3,float)
@@ -296,7 +313,9 @@ def contourfwhm(im):
 #     newpars[2] = newy
 #     return newpars
 
-# @njit(cache=True)
+# @njit
+# @cc.export('starbboxf', '(UniTuple(f8,2),UniTuple(i8,2),f8)')
+# @cc.export('starbboxi', '(UniTuple(i8,2),UniTuple(i8,2),f8)')
 # def starbbox(coords,imshape,radius):
 #     """                                                                                         
 #     Return the boundary box for a star given radius and image size.                             
@@ -328,6 +347,9 @@ def contourfwhm(im):
 
 #     return BoundingBox(xlo,xhi,ylo,yhi)
 
+# @njit
+# @cc.export('bbox2xyf', '(f8[:,:],)')
+# @cc.export('bbox2xyi', '(i8[:,:],)')
 # def bbox2xy(bbox):
 #     """                                                                                         
 #     Convenience method to convert boundary box of X/Y limits to 2-D X and Y arrays.  The upper limits
@@ -370,7 +392,9 @@ def contourfwhm(im):
 # ###################################################################
 # # Numba analytical PSF models
 
-# @njit(cache=True)
+# @njit
+# @cc.export('hfluxradf', '(f8[:,:],)')
+# @cc.export('hfluxradi', '(i8[:,:],)')
 # def gauss_abt2cxy(asemi,bsemi,theta):
 #     """ Convert asemi/bsemi/theta to cxx/cyy/cxy. """
 #     # theta in radians
@@ -385,7 +409,9 @@ def contourfwhm(im):
 #     cxy = 2*costheta*sintheta*(1/asemi2-1/bsemi2)
 #     return cxx,cyy,cxy
 
-# @njit(cache=True)
+# @njit
+# @cc.export('hfluxradf', '(f8[:,:],)')
+# @cc.export('hfluxradi', '(i8[:,:],)')
 # def gauss_cxy2abt(cxx,cyy,cxy):
 #     """ Convert asemi/bsemi/theta to cxx/cyy/cxy. """
 
@@ -419,7 +445,9 @@ def contourfwhm(im):
 
 # ####### GAUSSIAN ########
 
-# @njit(cache=True)
+# @njit
+# @cc.export('hfluxradf', '(f8[:,:],)')
+# @cc.export('hfluxradi', '(i8[:,:],)')
 # def gaussian2d_flux(pars):
 #     """
 #     Return the total flux (or volume) of a 2D Gaussian.
@@ -447,7 +475,7 @@ def contourfwhm(im):
 #     volume = 2*np.pi*amp*xsig*ysig
 #     return volume
 
-# @njit(cache=True)
+# @njit
 # def gaussian2d_fwhm(pars):
 #     """
 #     Return the FWHM of a 2D Gaussian.
@@ -488,7 +516,9 @@ def contourfwhm(im):
 
 #     return fwhm
 
-# @njit(cache=True)
+# @njit
+# @cc.export('hfluxradf', '(f8[:,:],)')
+# @cc.export('hfluxradi', '(i8[:,:],)')
 # def agaussian2d(x,y,pars,nderiv):
 #     """
 #     Two dimensional Gaussian model function with x/y array inputs.
@@ -557,7 +587,9 @@ def contourfwhm(im):
 #             deriv[i,:] = deriv1
 #     return g,deriv
     
-# @njit(cache=True)
+# @njit
+# @cc.export('hfluxradf', '(f8[:,:],)')
+# @cc.export('hfluxradi', '(i8[:,:],)')
 # def gaussian2d(x,y,pars,nderiv):
 #     """
 #     Two dimensional Gaussian model function.
@@ -653,7 +685,9 @@ def contourfwhm(im):
 
 
 
-# #@njit(cache=True)
+# #@njit
+# @cc.export('hfluxradf', '(f8[:,:],)')
+# @cc.export('hfluxradi', '(i8[:,:],)')
 # def gaussian2dfit(im,err,ampc,xc,yc,verbose):
 #     """
 #     Fit a single Gaussian 2D model to data.
@@ -786,7 +820,9 @@ def contourfwhm(im):
 
 # ####### MOFFAT ########
 
-# @njit(cache=True)
+# @njit
+# @cc.export('hfluxradf', '(f8[:,:],)')
+# @cc.export('hfluxradi', '(i8[:,:],)')
 # def moffat2d_fwhm(pars):
 #     """
 #     Return the FWHM of a 2D Moffat function.
@@ -822,7 +858,7 @@ def contourfwhm(im):
     
 #     return 2.0 * np.abs(mnsig) * np.sqrt(2.0 ** (1.0/beta) - 1.0)
 
-# @njit(cache=True)
+# @njit
 # def moffat2d_flux(pars):
 #     """
 #     Return the total Flux of a 2D Moffat.
@@ -864,7 +900,7 @@ def contourfwhm(im):
 #     return volume
 
 
-# @njit(cache=True)
+# @njit
 # def amoffat2d(x,y,pars,nderiv):
 #     """
 #     Two dimensional Moffat model function with x/y array inputs.
@@ -932,7 +968,7 @@ def contourfwhm(im):
 #     return g,deriv
 
     
-# @njit(cache=True)
+# @njit
 # def moffat2d(x,y,pars,nderiv):
 #     """
 #     Two dimensional Moffat model function for a single point.
@@ -1032,7 +1068,7 @@ def contourfwhm(im):
                 
 #     return g,deriv
 
-# #@njit(cache=True)
+# #@njit
 # def moffat2dfit(im,err,ampc,xc,yc,verbose):
 #     """
 #     Fit a single Moffat 2D model to data.
@@ -1167,7 +1203,7 @@ def contourfwhm(im):
 
 # ####### PENNY ########
 
-# @njit(cache=True)
+# @njit
 # def penny2d_fwhm(pars):
 #     """
 #     Return the FWHM of a 2D Penny function.
@@ -1221,7 +1257,7 @@ def contourfwhm(im):
         
 #     return fwhm
 
-# @njit(cache=True)
+# @njit
 # def penny2d_flux(pars):
 #     """
 #     Return the total Flux of a 2D Penny function.
@@ -1268,7 +1304,7 @@ def contourfwhm(im):
     
 #     return volume
 
-# @njit(cache=True)
+# @njit
 # def apenny2d(x,y,pars,nderiv):
 #     """
 #     Two dimensional Penny model function with x/y array inputs.
@@ -1336,7 +1372,7 @@ def contourfwhm(im):
 #     return g,deriv
 
     
-# @njit(cache=True)
+# @njit
 # def penny2d(x,y,pars,nderiv):
 #     """
 #     Two dimensional Penny model function for a single point.
@@ -1451,7 +1487,7 @@ def contourfwhm(im):
             
 #     return f,deriv
 
-# #@njit(cache=True)
+# #@njit
 # def penny2dfit(im,err,ampc,xc,yc,verbose):
 #     """
 #     Fit a single Penny 2D model to data.
@@ -1587,7 +1623,7 @@ def contourfwhm(im):
 
 # ####### GAUSSPOW ########
 
-# @njit(cache=True)
+# @njit
 # def gausspow2d_fwhm(pars):
 #     """
 #     Return the FWHM of a 2D DoPHOT Gausspow function.
@@ -1648,7 +1684,7 @@ def contourfwhm(im):
     
 #     return fwhm
 
-# @njit(cache=True)
+# @njit
 # def gausspow2d_flux(pars):
 #     """
 #     Return the flux of a 2D DoPHOT Gausspow function.
@@ -1697,7 +1733,7 @@ def contourfwhm(im):
 #     return volume
 
 
-# @njit(cache=True)
+# @njit
 # def agausspow2d(x,y,pars,nderiv):
 #     """
 #     Two dimensional Gausspow model function with x/y array inputs.
@@ -1766,7 +1802,7 @@ def contourfwhm(im):
 #     return g,deriv
 
     
-# @njit(cache=True)
+# @njit
 # def gausspow2d(x,y,pars,nderiv):
 #     """
 #     DoPHOT PSF, sum of elliptical Gaussians.
@@ -1883,7 +1919,7 @@ def contourfwhm(im):
             
 #     return g,deriv
 
-# #@njit(cache=True)
+# #@njit
 # def gausspow2dfit(im,err,ampc,xc,yc,verbose):
 #     """
 #     Fit a single GaussPOW 2D model to data.
@@ -2020,7 +2056,7 @@ def contourfwhm(im):
 
 # ####### SERSIC ########
 
-# @njit(cache=True)
+# @njit
 # def asersic2d(x,y,pars,nderiv):
 #     """
 #     Sersic profile and can be elliptical and rotated.
@@ -2078,7 +2114,7 @@ def contourfwhm(im):
 #             deriv[i,:] = deriv1
 #     return g,deriv
 
-# @njit(cache=True)  
+# @njit  
 # def sersic2d(x, y, pars, nderiv):
 #     """
 #     Sersic profile and can be elliptical and rotated.
@@ -2208,7 +2244,7 @@ def contourfwhm(im):
 
 #     return g,deriv
 
-# @njit(cache=True)
+# @njit
 # def sersic2d_fwhm(pars):
 #     """
 #     Return the FWHM of a 2D Sersic function.
@@ -2263,7 +2299,7 @@ def contourfwhm(im):
     
 #     return fwhm
 
-# @njit(cache=True)
+# @njit
 # def sersic_b(n):
 #     # Normalisation constant
 #     # bn ~ 2n-1/3 for n>8
@@ -2272,7 +2308,7 @@ def contourfwhm(im):
 #     #return gammaincinv(2*n, 0.5)
 #     return utils.gammaincinv05(2*n)
 
-# #@njit(cache=True)
+# #@njit
 # def create_sersic_function(Ie, re, n):
 #     # Not required for integrals - provided for reference
 #     # This returns a "closure" function, which is fast to call repeatedly with different radii
@@ -2283,14 +2319,14 @@ def contourfwhm(im):
 #         return Ie * np.exp(f * r ** reciprocal_n - neg_bn)
 #     return sersic_wrapper
 
-# @njit(cache=True)
+# @njit
 # def sersic_lum(Ie, re, n):
 #     # total luminosity (integrated to infinity)
 #     bn = sersic_b(n)
 #     g2n = utils.gamma(2*n)
 #     return Ie * re**2 * 2*np.pi*n * np.exp(bn)/(bn**(2*n)) * g2n
 
-# @njit(cache=True)
+# @njit
 # def sersic_full2half(I0,kserc,alpha):
 #     # Convert Io and k to Ie and Re
 #     # Ie = Io * exp(-bn)
@@ -2301,7 +2337,7 @@ def contourfwhm(im):
 #     Re = (bn/kserc)**n
 #     return Ie,Re
 
-# @njit(cache=True)
+# @njit
 # def sersic_half2full(Ie,Re,alpha):
 #     # Convert Ie and Re to Io and k
 #     # Ie = Io * exp(-bn)
@@ -2312,7 +2348,7 @@ def contourfwhm(im):
 #     kserc = bn/Re**alpha
 #     return I0,kserc
 
-# @njit(cache=True)
+# @njit
 # def sersic2d_flux(pars):
 #     """
 #     Return the total Flux of a 2D Sersic function.
@@ -2364,7 +2400,7 @@ def contourfwhm(im):
     
 #     return volume
 
-# #@njit(cache=True)
+# #@njit
 # def sersic2d_estimates(pars):
 #     # calculate estimates for the Sersic parameters using
 #     # peak, x0, y0, flux, asemi, bsemi, theta
@@ -2439,7 +2475,7 @@ def contourfwhm(im):
 
 # # Generic model routines
 
-# @njit(cache=True)
+# @njit
 # def model2d(x,y,psftype,pars,nderiv):
 #     """
 #     Two dimensional model function.
@@ -2495,7 +2531,7 @@ def contourfwhm(im):
 #         print('psftype=',psftype,'not supported')
 #         return
 
-# @njit(cache=True)
+# @njit
 # def amodel2d(x,y,psftype,pars,nderiv):
 #     """
 #     Two dimensional model function with x/y array inputs.
@@ -2553,7 +2589,7 @@ def contourfwhm(im):
 #         print('psftype=',psftype,'not supported')
 #         return
 
-# @njit(cache=True)
+# @njit
 # def model2d_flux(psftype,pars):
 #     """
 #     Return the flux of a 2D model.
@@ -2600,7 +2636,7 @@ def contourfwhm(im):
 #         print('psftype=',psftype,'not supported')
 #         return
 
-# @njit(cache=True)
+# @njit
 # def model2d_fwhm(psftype,pars):
 #     """
 #     Return the fwhm of a 2D model.
@@ -2649,7 +2685,7 @@ def contourfwhm(im):
 #     return fwhm
 
 
-# @njit(cache=True)
+# @njit
 # def model2d_estimates(psftype,ampc,xc,yc):
 #     """
 #     Get initial estimates for parameters
@@ -2715,7 +2751,7 @@ def contourfwhm(im):
 #         print('psftype=',psftype,'not supported')
 #         return
 
-# @njit(cache=True)
+# @njit
 # def model2d_bounds(psftype):
 #     """
 #     Return upper and lower fitting bounds for the parameters.
@@ -2775,7 +2811,7 @@ def contourfwhm(im):
 #         print('psftype=',psftype,'not supported')
 #         return
     
-# @njit(cache=True)
+# @njit
 # def model2d_maxsteps(psftype,pars):
 #     """
 #     Get maximum steps for parameters.
@@ -2832,7 +2868,7 @@ def contourfwhm(im):
 #         print('psftype=',psftype,'not supported')
 #         return
 
-# @njit(cache=True)
+# @njit
 # def model2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
 #     """
 #     Fit all parameters of a single 2D model to data.
@@ -2955,7 +2991,7 @@ def contourfwhm(im):
 # #########################################################################
 # # Empirical PSF
 
-# @njit(cache=True)
+# @njit
 # def relcoord(x,y,shape):
 #     """
 #     Convert absolute X/Y coordinates to relative ones to use
@@ -2989,7 +3025,7 @@ def contourfwhm(im):
 #     rely = (y-midpt[0])/shape[0]*2
 #     return relx,rely
 
-# @njit(cache=True)
+# @njit
 # def empirical(x, y, pars, data, imshape=None, deriv=False):
 #     """
 #     Evaluate an empirical PSF.
@@ -3116,7 +3152,7 @@ def contourfwhm(im):
 # # Generic PSF
 
 
-# @njit(cache=True)
+# @njit
 # def unpackpsf(psf):
 #     """
 #     Unpack the PSF description that are in a 1D array.
@@ -3177,7 +3213,7 @@ def contourfwhm(im):
         
 #     return psftype,pars,lookup,imshape
 
-# @njit(cache=True)
+# @njit
 # def packpsf(psftype,pars,lookup=np.zeros((1,1,1),float),imshape=(0,0)):
 #     """ Put all of the PSF information into a 1D array."""
 #     # Figure out how many elements we need in the array
@@ -3214,7 +3250,7 @@ def contourfwhm(im):
 #         psf[count+5:] = lookup.ravel()
 #     return psf
 
-# @njit(cache=True)
+# @njit
 # def psfinfo(psf):
 #     """ Print out information about the PSF."""
 #     psftype,pars,lookup,imshape = unpackpsf(psf)
@@ -3235,7 +3271,7 @@ def contourfwhm(im):
 #         if psforder > 0:
 #             print('Image size = [',nimx,nimy,']')
 
-# @njit(cache=True)
+# @njit
 # def psf2d_fwhm(psf):
 #     """
 #     Return the FWHM of the PSF
@@ -3249,7 +3285,7 @@ def contourfwhm(im):
     
 #     return fwhm
 
-# @njit(cache=True)
+# @njit
 # def psf2d_flux(psf,amp,xc,yc):
 #     """
 #     Return the flux of the PSF
@@ -3263,9 +3299,9 @@ def contourfwhm(im):
     
 #     return flux
 
-# #@njit(cache=True)
+# #@njit
 # #@jit('Tuple((float64[:], float64[:]))(int32[:],int32[:],float64[:],int32,float64[:],float64[:,:,:],int32[:],boolean,boolean)',nopython=True)
-# @njit(cache=True)
+# @njit
 # def psf(x,y,pars,psftype,psfparams,lookup,imshape,deriv=False,verbose=False):
 #     """
 #     Return a PSF model.
@@ -3355,7 +3391,7 @@ def contourfwhm(im):
     
 #     return g,derivative
 
-# @njit(cache=True)
+# @njit
 # def psffit(im,err,x,y,pars,psftype,psfparams,lookup,imshape=None,verbose=False):
 #     """
 #     Fit a PSF model to data.
@@ -3483,7 +3519,7 @@ def contourfwhm(im):
     
 #     return bestpar,perror,cov,flux,fluxerr,chisq
 
-# @njit(cache=True)
+# @njit
 # def psf2d(x,y,psf,amp,xc,yc,deriv=False,verbose=False):
 #     """
 #     Return a PSF model.
@@ -3577,7 +3613,7 @@ def contourfwhm(im):
     
 #     return g,derivative
 
-# @njit(cache=True)
+# @njit
 # def psf2dfit(im,err,x,y,psf,ampc,xc,yc,verbose=False):
 #     """
 #     Fit a PSF model to data.

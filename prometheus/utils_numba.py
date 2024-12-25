@@ -5,7 +5,6 @@ from numba import njit,types,from_dtype,typed
 from numba.typed import Dict,List
 from numba.experimental import jitclass
 from numba_kdtree import KDTree
-from . import models_numba as mnb
 
 # Fit a PSF model to multiple stars in an image
 
