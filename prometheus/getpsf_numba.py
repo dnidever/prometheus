@@ -44,12 +44,15 @@ def starcube(tab,image,error,npix=51,fillvalue=np.nan):
     x = xx[0,:]
     y = yy[:,0]
     for i in range(nstars):
-        xcen = tab['x'][i]            
-        ycen = tab['y'][i]
+        #xcen = tab['x'][i]
+        #ycen = tab['y'][i]
+        xcen = tab[1][i]
+        ycen = tab[2][i]
         bbox = mnb.starbbox((xcen,ycen),image.shape,nhpix)
         flux = bbox.slice(image)
         err = bbox.slice(error)
-        amp = tab['peak'][i]
+        #amp = tab['peak'][i]
+        amp = tab[0][i]
         xim,yim = bbox.xy()
         xim = xim-xcen
         yim = yim-ycen
@@ -68,7 +71,7 @@ def starcube(tab,image,error,npix=51,fillvalue=np.nan):
         fny = ymax-ymin+1
         fxx = xx[ymin:ymax+1,xmin:xmax+1]-xim[0,0]   # relative to flux origin
         fyy = yy[ymin:ymax+1,xmin:xmax+1]-yim[0,0]
-        fim = mnb.alinearinterp(flux,fxx,fyy)
+        fim = utils.alinearinterp(flux,fxx,fyy)
         fim = fim.reshape((fny,fnx))
         im2[ymin:ymax+1,xmin:xmax+1] = fim
         # Stuff it into 3D array
