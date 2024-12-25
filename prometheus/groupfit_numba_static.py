@@ -110,148 +110,148 @@ def collatestarsinfo(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius):
     return (fravelindex,fndata,ravelindex,ndata,skyravelindex,skyndata)
 
 
+@njit
+@cc.export('initstararrays', '(f8[:,:],f8[:,:],b1[:,:],f8[:,:],i8,f8,f8,b1)')
+def initstararrays(image,error,mask,tab,psfnpix,fitradius,skyradius,skyfit):
+    """ Initialize all of the star arrays."""
+
+    # Star arrays
+    #------------
+    #  -full footprint: pixels of a star within the psf radius and not masked
+    #  -fitting pixels: pixels of a star within its fitting radius and not masked
+    #  -sky pixels: pixels in an annulus around a star and not masked
+    #  -flat pixels: all fitting pixels of all stars combined (unique),
+    #                  these are the pixels that we are actually fitting
+    # Full footprint information
+    #   starravelindex -
+    #   starndata - number of pixels for star each star
+    # Fitting pixel information
+    #   starfitravelindex - fitting pixel index into the raveled 1D full image/resid array
+    #   starfitndata - number of fitting pixels for each star
+    # Sky pixel information
+    #   skyravelindex - sky pixel index into the raveled 1D full image/resid array
+    #   skyndata - number of star pixels for each star
+    # Flat information
+    #   xflat/yflat - x/y values of the flat pixels
+    #   indflat - index of the flat pixels into the full 1D raveled arrays
+    #   starflat_index - index of all flat pixels that are within a star's full footprint
+    #                         index into the flat 1D array
+    #   starflat_ndata - number of flat pixels for each star
+    
+    nstars = len(tab)
+    ny,nx = image.shape                             # save image dimensions, python images are (Y,X)
+    imshape = np.array([ny,nx])
+    im = image.copy().astype(np.float64)
+    err = error.copy().astype(np.float64)
+    msk = mask.copy().astype(np.bool_)
+    xx,yy = utils.meshgrid(np.arange(nx),np.arange(ny))
+    xx = xx.flatten()
+    yy = yy.flatten()
+    # Order stars by flux, brightest first
+    si = np.argsort(tab[:,1])[::-1]       # largest amp first
+    startab = tab[si]                     # ID, amp, xcen, ycen
+    initpars = startab[:,1:4]             # amp, xcen, ycen
+    # Initialize the parameter array
+    initpars = startab[:,1:4]
+    npars = nstars*3
+    if skyfit:
+        npars += 1
+    pars = np.zeros(npars,float) # amp, xcen, ycen
+    pars[0:3*nstars:3] = initpars[:,0]
+    pars[1:3*nstars:3] = initpars[:,1]
+    pars[2:3*nstars:3] = initpars[:,2]
+
+    # Get information for all the stars
+    xcen = pars[1:3*nstars:3]
+    ycen = pars[2:3*nstars:3]
+    hpsfnpix = psfnpix//2
+    out = collatestarsinfo(imshape,msk,xcen,ycen,hpsfnpix,fitradius,skyradius)
+    starravelindex,starndata,starfitravelindex,starfitndata,skyravelindex,skyndata = out
+
+    # Put indices of all the unique fitted pixels into one array
+    ntotpix = np.sum(starfitndata)
+    allravelindex = np.zeros(ntotpix,np.int64)
+    count = 0
+    for i in range(nstars):
+        n1 = starfitndata[i]
+        ravelind1 = starfitravelindex[i,:n1]
+        allravelindex[count:count+n1] = ravelind1
+        count += n1
+    allravelindex = np.unique(allravelindex)
+    ravelindex = allravelindex
+    ntotpix = len(allravelindex)
+
+    # Combine all of the X and Y values (of the pixels we are fitting) into one array
+    ntotpix = np.sum(starfitndata)
+    xall = np.zeros(ntotpix,np.int32)
+    yall = np.zeros(ntotpix,np.int32)
+    count = 0
+    for i in range(nstars):
+        n1 = starfitndata[i]
+        ravelindex1 = starfitravelindex[i,:n1]
+        xdata1 = xx[ravelindex1]
+        ydata1 = yy[ravelindex1]
+        xall[count:count+n1] = xdata1
+        yall[count:count+n1] = ydata1
+        count += n1
+    
+    # Create 1D unraveled indices, python images are (Y,X)
+    ind1 = utils.ravel_multi_index((yall,xall),imshape)
+    # Get unique indices and inverse indices
+    #   the inverse index list takes you from the full/duplicated pixels
+    #   to the unique ones
+    uind1,uindex1,invindex = utils.unique_index(ind1)
+    ntotpix = len(uind1)
+    ucoords = utils.unravel_index(uind1,image.shape)
+    yflat = ucoords[:,0]
+    xflat = ucoords[:,1]
+    # x/y coordinates of the unique fitted pixels
+    indflat = uind1
+    
+    # Save information on the "flattened" and unique fitted pixel arrays
+    imflat = np.zeros(len(uind1),np.float64)
+    imflat[:] = image.ravel()[uind1]
+    errflat = np.zeros(len(uind1),np.float64)
+    errflat[:] = error.ravel()[uind1]
+    resflat = imflat.copy()
+    
+    # Add inverse index for the fitted pixels
+    #  to be used with imflat/resflat/errflat/xflat/yflat/indflat
+    maxfitpix = np.max(starfitndata)
+    starfitinvindex = np.zeros((nstars,maxfitpix),np.int64)-1
+    for i in range(nstars):
+        n1 = starfitndata[i]
+        if i==0:
+            invlo = 0
+        else:
+            invlo = np.sum(starfitndata[:i])
+        invindex1 = invindex[invlo:invlo+n1]
+        starfitinvindex[i,:n1] = invindex1
+    
+    # For all of the fitting pixels, find the ones that
+    # a given star contributes to (basically within its PSF radius)
+    starflat_index = np.zeros((nstars,ntotpix),np.int64)-1
+    starflat_ndata = np.zeros(nstars,np.int64)
+    for i in range(ntotpix):
+        x1 = xflat[i]
+        y1 = yflat[i]
+        for j in range(nstars):
+            pars1 = pars[3*i:3*i+3]
+            r = np.sqrt((xflat[i]-pars[1])**2 + (yflat[i]-pars[2])**2)
+            if r <= psfnpix:
+                starflat_index[j,starflat_ndata[j]] = i
+                starflat_ndata[j] += 1
+    maxndata = np.max(starflat_ndata)
+    starflat_index = starflat_index[:,:maxndata]
+
+    return (im,err,msk,xx,yy,pars,npars,
+            starravelindex,starndata,starfitravelindex,starfitndata,skyravelindex,skyndata,
+            xflat,yflat,indflat,imflat,errflat,resflat,ntotpix,
+            starfitinvindex,starflat_index,starflat_ndata)
+
+
 # @njit
-# @cc.export('initstararrays', '(f8[:],b1)')
-# def initstararrays(image,error,mask,tab,psfnpix,fitradius,skyradius,skyfit):
-#     """ Initialize all of the star arrays."""
-
-#     # Star arrays
-#     #------------
-#     #  -full footprint: pixels of a star within the psf radius and not masked
-#     #  -fitting pixels: pixels of a star within its fitting radius and not masked
-#     #  -sky pixels: pixels in an annulus around a star and not masked
-#     #  -flat pixels: all fitting pixels of all stars combined (unique),
-#     #                  these are the pixels that we are actually fitting
-#     # Full footprint information
-#     #   starravelindex -
-#     #   starndata - number of pixels for star each star
-#     # Fitting pixel information
-#     #   starfitravelindex - fitting pixel index into the raveled 1D full image/resid array
-#     #   starfitndata - number of fitting pixels for each star
-#     # Sky pixel information
-#     #   skyravelindex - sky pixel index into the raveled 1D full image/resid array
-#     #   skyndata - number of star pixels for each star
-#     # Flat information
-#     #   xflat/yflat - x/y values of the flat pixels
-#     #   indflat - index of the flat pixels into the full 1D raveled arrays
-#     #   starflat_index - index of all flat pixels that are within a star's full footprint
-#     #                         index into the flat 1D array
-#     #   starflat_ndata - number of flat pixels for each star
-    
-#     nstars = len(tab)
-#     ny,nx = image.shape                             # save image dimensions, python images are (Y,X)
-#     imshape = np.array([ny,nx])
-#     im = image.copy().astype(np.float64)
-#     err = error.copy().astype(np.float64)
-#     msk = mask.copy().astype(np.bool_)
-#     xx,yy = utils.meshgrid(np.arange(nx),np.arange(ny))
-#     xx = xx.flatten()
-#     yy = yy.flatten()
-#     # Order stars by flux, brightest first
-#     si = np.argsort(tab[:,1])[::-1]       # largest amp first
-#     startab = tab[si]                     # ID, amp, xcen, ycen
-#     initpars = startab[:,1:4]             # amp, xcen, ycen
-#     # Initialize the parameter array
-#     initpars = startab[:,1:4]
-#     npars = nstars*3
-#     if skyfit:
-#         npars += 1
-#     pars = np.zeros(npars,float) # amp, xcen, ycen
-#     pars[0:3*nstars:3] = initpars[:,0]
-#     pars[1:3*nstars:3] = initpars[:,1]
-#     pars[2:3*nstars:3] = initpars[:,2]
-
-#     # Get information for all the stars
-#     xcen = pars[1:3*nstars:3]
-#     ycen = pars[2:3*nstars:3]
-#     hpsfnpix = psfnpix//2
-#     out = collatestarsinfo(imshape,msk,xcen,ycen,hpsfnpix,fitradius,skyradius)
-#     starravelindex,starndata,starfitravelindex,starfitndata,skyravelindex,skyndata = out
-
-#     # Put indices of all the unique fitted pixels into one array
-#     ntotpix = np.sum(starfitndata)
-#     allravelindex = np.zeros(ntotpix,np.int64)
-#     count = 0
-#     for i in range(nstars):
-#         n1 = starfitndata[i]
-#         ravelind1 = starfitravelindex[i,:n1]
-#         allravelindex[count:count+n1] = ravelind1
-#         count += n1
-#     allravelindex = np.unique(allravelindex)
-#     ravelindex = allravelindex
-#     ntotpix = len(allravelindex)
-
-#     # Combine all of the X and Y values (of the pixels we are fitting) into one array
-#     ntotpix = np.sum(starfitndata)
-#     xall = np.zeros(ntotpix,np.int32)
-#     yall = np.zeros(ntotpix,np.int32)
-#     count = 0
-#     for i in range(nstars):
-#         n1 = starfitndata[i]
-#         ravelindex1 = starfitravelindex[i,:n1]
-#         xdata1 = xx[ravelindex1]
-#         ydata1 = yy[ravelindex1]
-#         xall[count:count+n1] = xdata1
-#         yall[count:count+n1] = ydata1
-#         count += n1
-    
-#     # Create 1D unraveled indices, python images are (Y,X)
-#     ind1 = utils.ravel_multi_index((yall,xall),imshape)
-#     # Get unique indices and inverse indices
-#     #   the inverse index list takes you from the full/duplicated pixels
-#     #   to the unique ones
-#     uind1,uindex1,invindex = utils.unique_index(ind1)
-#     ntotpix = len(uind1)
-#     ucoords = utils.unravel_index(uind1,image.shape)
-#     yflat = ucoords[:,0]
-#     xflat = ucoords[:,1]
-#     # x/y coordinates of the unique fitted pixels
-#     indflat = uind1
-    
-#     # Save information on the "flattened" and unique fitted pixel arrays
-#     imflat = np.zeros(len(uind1),np.float64)
-#     imflat[:] = image.ravel()[uind1]
-#     errflat = np.zeros(len(uind1),np.float64)
-#     errflat[:] = error.ravel()[uind1]
-#     resflat = imflat.copy()
-    
-#     # Add inverse index for the fitted pixels
-#     #  to be used with imflat/resflat/errflat/xflat/yflat/indflat
-#     maxfitpix = np.max(starfitndata)
-#     starfitinvindex = np.zeros((nstars,maxfitpix),np.int64)-1
-#     for i in range(nstars):
-#         n1 = starfitndata[i]
-#         if i==0:
-#             invlo = 0
-#         else:
-#             invlo = np.sum(starfitndata[:i])
-#         invindex1 = invindex[invlo:invlo+n1]
-#         starfitinvindex[i,:n1] = invindex1
-    
-#     # For all of the fitting pixels, find the ones that
-#     # a given star contributes to (basically within its PSF radius)
-#     starflat_index = np.zeros((nstars,ntotpix),np.int64)-1
-#     starflat_ndata = np.zeros(nstars,np.int64)
-#     for i in range(ntotpix):
-#         x1 = xflat[i]
-#         y1 = yflat[i]
-#         for j in range(nstars):
-#             pars1 = pars[3*i:3*i+3]
-#             r = np.sqrt((xflat[i]-pars[1])**2 + (yflat[i]-pars[2])**2)
-#             if r <= psfnpix:
-#                 starflat_index[j,starflat_ndata[j]] = i
-#                 starflat_ndata[j] += 1
-#     maxndata = np.max(starflat_ndata)
-#     starflat_index = starflat_index[:,:maxndata]
-
-#     return (im,err,msk,xx,yy,pars,npars,
-#             starravelindex,starndata,starfitravelindex,starfitndata,skyravelindex,skyndata,
-#             xflat,yflat,indflat,imflat,errflat,resflat,ntotpix,
-#             starfitinvindex,starflat_index,starflat_ndata)
-
-
-# @njit
-# @cc.export('sky', '(f8[:],b1)')
+# @cc.export('sky', '(f8[:,:],f8[:,:],unicode_type,f8,f8)')
 # def sky(image,modelim,method='sep',rin=None,rout=None):
 #     """ (Re)calculate the sky."""
 #     # Remove the current best-fit model
@@ -287,9 +287,19 @@ def collatestarsinfo(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius):
 #     #     else:
 #     #         raise ValueError("Sky method "+method+" not supported")
 
+# psfdata = (psftype,psfparams,psflookup,psforder,imshape)
+psfdatatype = 'Tuple(i8,f8[:],f8[:,:,:],i8,i8[:])'
+# freezedata = (freezepars,freezestars)
+freezedatatype = 'Tuple(b1[:],b1[:])'
+# flatdata = (starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix)
+flatdatatype = 'Tuple(i8[:],i8[:,:],f8[:],f8[:],i8[:],i8)'
+# stardata = (starravelindex,starndata,xx,yy)
+stardatatype = 'Tuple(i8[:,:],i8[:],f8[:,:],f8[:,:])'
+# covflatdata = (starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix,imflat,errflat,skyflat)
+covflatdatatype = 'Tuple(i8[:],i8[:,:],f8[:],f8[:],i8[:],i8,f8[:],f8[:],f8[:])'
 
 # @njit
-# @cc.export('psf', '(f8[:],b1)')
+# @cc.export('psf', '(UniTuple(f8[:],2),f8[:],Tuple(i8,f8[:],f8[:,:,:],i8,i8[:]))')
 # def psf(xdata,pars,psfdata):
 #     """ Thin wrapper for getting a PSF model for a single star."""
 #     xind,yind = xdata
@@ -300,7 +310,7 @@ def collatestarsinfo(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius):
         
 
 # @njit
-# @cc.export('psfjac', 'f8(f8[:],b1)')
+# @cc.export('psfjac', 'f8(UniTuple(f8[:],f8[:]),f8[:],Tuple(i8,f8[:],f8[:,:,:],i8,i8[:]))')
 # def psfjac(xdata,pars,psfdata):
 #     """ Thin wrapper for getting the PSF model and Jacobian for a single star."""
 #     xind,yind = xdata
@@ -311,7 +321,7 @@ def collatestarsinfo(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius):
     
 
 # @njit
-# @cc.export('model', '(f8[:],b1)')
+# @cc.export('model', '(Tuple(),Tuple(),Tuple(),f8[:],b1,b1,b1)')
 # def model(psfdata,freezedata,flatdata,pars,trim=False,allparams=False,verbose=False):
 #     """ Calculate the model for the stars and pixels we are fitting."""
 
@@ -371,7 +381,7 @@ def collatestarsinfo(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius):
 
 
 # @njit
-# @cc.export('fullmodel', '(f8[:],b1)')
+# @cc.export('fullmodel', '(Tuple(),Tuple(),f8[:])')
 # def fullmodel(psfdata,stardata,pars):
 #     """ Calculate the model for all the stars and the full footprint."""
     
@@ -400,7 +410,7 @@ def collatestarsinfo(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius):
 
 
 # @njit
-# @cc.export('jac', '(f8[:],b1)')
+# @cc.export('jac', '(Tuple(i8,f8[:],f8[:,:,:],i8,i8[:]),Tuple(),Tuple(),f8[:],b1,b1)')
 # def jac(psfdata,freezedata,flatdata,pars,trim=False,allparams=False):
 #     """ Calculate the jacobian for the pixels and parameters we are fitting"""
 
@@ -486,7 +496,7 @@ def collatestarsinfo(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius):
 
 
 # @njit
-# @cc.export('chisqflat', 'f8(f8[:],b1)')
+# @cc.export('chisqflat', '(Tuple(),Tuple(),Tuple(),f8[:],f8[:],f8[:])')
 # def chisqflat(freezedata,flatdata,psfdata,resflat,errflat,pars):
 #     """ Return chi-squared of the flat data"""
 #     # Note this ignores any frozen stars
@@ -496,7 +506,7 @@ def collatestarsinfo(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius):
 
 
 # @njit
-# @cc.export('cov', 'f8(f8[:],b1)')
+# @cc.export('cov', '(Tuple(),Tuple(),Tuple(),f8[:])')
 # def cov(psfdata,freezedata,covflatdata,pars):
 #     """ Determine the covariance matrix."""
     
@@ -536,7 +546,7 @@ def collatestarsinfo(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius):
 
 
 # @njit
-# @cc.export('dofreeze', 'f8(f8[:],b1)')
+# @cc.export('dofreeze', '(i8[:],f8[:],Tuple(),Tuple(),Tuple(),f8[:,:],f8[:])')
 # def dofreeze(frzpars,pars,freezedata,flatdata,psfdata,resid,resflat):
 #     """ Freeze par/stars."""
 
@@ -586,7 +596,7 @@ def collatestarsinfo(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius):
     
 
 # @njit
-# @cc.export('groupfit', 'f8(f8[:],b1)')
+# @cc.export('groupfit', '(i8,f8[:],i8,f8[:,:,:],f8,f8[:,:],f8[:,:],b1[:,:],f8[:,:],i8,f8,i8,b1,b1,b1)')
 # def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
 #              image,error,mask,tab,fitradius,maxiter=10,
 #              minpercdiff=0.5,reskyiter=2,nofreeze=False,
