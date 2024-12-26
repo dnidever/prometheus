@@ -13,31 +13,31 @@ PI = 3.141592653589793
 from numba.pycc import CC
 cc = CC('_utils_numba_static')
 
-@cc.export('sumf', 'f8(f8[:],b1)')
+@cc.export('sum', 'f8(f8[:],b1)')
 @cc.export('sumi', 'i8(i8[:],b1)')
 def sum(data,ignore_nan=False):
     """Get the sum."""
     if ignore_nan:
-        sm = nansum(data.ravel())
+        sm = nansum(data)
     else:
-        sm = np.sum(data.ravel())
+        sm = np.sum(data)
     return sm
 
 @njit
-@cc.export('nansumf', 'f8(f8[:])')
-@cc.export('nansumi', 'i8(i8[:])')
+@cc.export('nansum', 'f8(f8[:])')
+#@cc.export('nansumi', 'i8(i8[:])')
 def nansum(data):
     """ Get the sum ignoring nans """
-    data1d = data.ravel()
-    gd, = np.where(np.isfinite(data1d)==True)
+    data = data
+    gd, = np.where(np.isfinite(data)==True)
     if len(gd)==0:
         sm = np.nan
     else:
-        sm = np.sum(data1d[gd])
+        sm = np.sum(data[gd])
     return sm
 
 @njit
-@cc.export('sum2df', 'f8[:](f8[:,:],i4,b1)')
+@cc.export('sum2d', 'f8[:](f8[:,:],i4,b1)')
 @cc.export('sum2di', 'f8[:](i8[:,:],i4,b1)')
 def sum2d(data,axis=-1,ignore_nan=False):
     """Get the sum."""
@@ -64,8 +64,8 @@ def sum2d(data,axis=-1,ignore_nan=False):
     return sm
 
 @njit
-@cc.export('sum3df', 'f8[:](f8[:,:],i4,b1)')
-@cc.export('sum3di', 'f8[:](i8[:,:],i4,b1)')
+@cc.export('sum3d', 'f8[:,:](f8[:,:,:],i4,b1)')
+@cc.export('sum3di', 'f8[:,:](i8[:,:,:],i4,b1)')
 def sum3d(data,axis=-1,ignore_nan=False):
     """Get the sum."""
     if axis==-1:
@@ -97,31 +97,30 @@ def sum3d(data,axis=-1,ignore_nan=False):
     return sm
 
 @njit
-@cc.export('nanmeanf', 'f8(f8[:])')
+@cc.export('nanmean', 'f8(f8[:])')
 @cc.export('nanmeani', 'i8(i8[:])')
 def nanmean(data):
     """ Get the mean ignoring nans """
-    data1d = data.ravel()
-    gd, = np.where(np.isfinite(data1d)==True)
+    gd, = np.where(np.isfinite(data)==True)
     if len(gd)==0:
         mn = np.nan
     else:
-        mn = np.mean(data1d[gd])
+        mn = np.mean(data[gd])
     return mn
 
 @njit
-@cc.export('meanf', 'f8(f8[:],b1)')
+@cc.export('mean', 'f8(f8[:],b1)')
 @cc.export('meani', 'i8(i8[:],b1)')
 def mean(data,ignore_nan=False):
     """Get the mean."""
     if ignore_nan:
-        mn = nanmean(data.ravel())
+        mn = nanmean(data)
     else:
-        mn = np.mean(data.ravel())
+        mn = np.mean(data)
     return mn
 
 @njit
-@cc.export('mean2df', 'f8[:](f8[:,:],i4,b1)')
+@cc.export('mean2d', 'f8[:](f8[:,:],i4,b1)')
 @cc.export('mean2di', 'f8[:](i8[:,:],i4,b1)')
 def mean2d(data,axis=-1,ignore_nan=False):
     """Get the mean."""
@@ -148,7 +147,7 @@ def mean2d(data,axis=-1,ignore_nan=False):
     return mn
 
 @njit
-@cc.export('mean3df', 'f8[:,:](f8[:,:,:],i4,b1)')
+@cc.export('mean3d', 'f8[:,:](f8[:,:,:],i4,b1)')
 @cc.export('mean3di', 'f8[:,:](i8[:,:,:],i4,b1)')
 def mean3d(data,axis=-1,ignore_nan=False):
     """Get the mean."""
@@ -181,31 +180,30 @@ def mean3d(data,axis=-1,ignore_nan=False):
     return mn
 
 @njit
-@cc.export('nanmedianf', 'f8(f8[:])')
+@cc.export('nanmedian', 'f8(f8[:])')
 @cc.export('nanmediani', 'i8(i8[:])')
 def nanmedian(data):
     """ Get the median ignoring nans """
-    data1d = data.ravel()
-    gd, = np.where(np.isfinite(data1d)==True)
+    gd, = np.where(np.isfinite(data)==True)
     if len(gd)==0:
         med = np.nan
     else:
-        med = np.median(data1d[gd])
+        med = np.median(data[gd])
     return med
 
 @njit
-@cc.export('medianf', 'f8(f8[:],b1)')
+@cc.export('median', 'f8(f8[:],b1)')
 @cc.export('mediani', 'i8(i8[:],b1)')
 def median(data,ignore_nan=False):
     """Get the median."""
     if ignore_nan:
-        med = nanmedian(data.ravel())
+        med = nanmedian(data)
     else:
-        med = np.median(data.ravel())
+        med = np.median(data)
     return med
 
 @njit
-@cc.export('median2df', 'f8[:](f8[:,:],i4,b1)')
+@cc.export('median2d', 'f8[:](f8[:,:],i4,b1)')
 @cc.export('median2di', 'f8[:](i8[:,:],i4,b1)')
 def median2d(data,axis=-1,ignore_nan=False):
     """Get the median."""
@@ -232,7 +230,7 @@ def median2d(data,axis=-1,ignore_nan=False):
     return med
 
 @njit
-@cc.export('median3df', 'f8[:,:](f8[:,:,:],i4,b1)')
+@cc.export('median3d', 'f8[:,:](f8[:,:,:],i4,b1)')
 @cc.export('median3di', 'f8[:,:](i8[:,:,:],i4,b1)')
 def median3d(data,axis=-1,ignore_nan=False):
     """Get the median."""
@@ -265,11 +263,10 @@ def median3d(data,axis=-1,ignore_nan=False):
     return med
 
 @njit
-@cc.export('madf', 'f8(f8[:],b1,b1)')
+@cc.export('mad', 'f8(f8[:],b1,b1)')
 @cc.export('madi', 'i8(i8[:],b1,b1)')
 def mad(data, ignore_nan=True, zero=False):
     """ Calculate the median absolute deviation of an array."""
-    data1d = data.ravel()
     # With median reference point
     if zero==False:
         if ignore_nan:
@@ -288,7 +285,7 @@ def mad(data, ignore_nan=True, zero=False):
     return result * 1.482602218505602
 
 @njit
-@cc.export('mad2df', 'f8[:](f8[:,:],i4,b1,b1)')
+@cc.export('mad2d', 'f8[:](f8[:,:],i4,b1,b1)')
 @cc.export('mad2di', 'f8[:](i8[:,:],i4,b1,b1)')
 def mad2d(data, axis=-1, ignore_nan=True, zero=False):
     """ Calculate the median absolute deviation of an array."""
@@ -322,7 +319,7 @@ def mad2d(data, axis=-1, ignore_nan=True, zero=False):
     return result * 1.482602218505602
 
 @njit
-@cc.export('mad3df', 'f8[:,:](f8[:,:,:],i4,b1,b1)')
+@cc.export('mad3d', 'f8[:,:](f8[:,:,:],i4,b1,b1)')
 @cc.export('mad3di', 'f8[:,:](i8[:,:,:],i4,b1,b1)')
 def mad3d(data, axis=-1, ignore_nan=True, zero=False):
     """ Calculate the median absolute deviation of an array."""
@@ -355,7 +352,7 @@ def mad3d(data, axis=-1, ignore_nan=True, zero=False):
     return result * 1.482602218505602
 
 @njit
-@cc.export('quadratic_bisectorf', 'f8(f8[:],f8[:])')
+@cc.export('quadratic_bisector', 'f8(f8[:],f8[:])')
 @cc.export('quadratic_bisectori', 'f8(i8[:],i8[:])')
 def quadratic_bisector(x,y):
     """ Calculate the axis of symmetric or bisector of parabola"""
@@ -382,7 +379,7 @@ def quadratic_bisector(x,y):
     return -b/(2*a)
 
 @njit
-@cc.export('meshgridf', '(f8[:],f8[:])')
+@cc.export('meshgrid', '(f8[:],f8[:])')
 @cc.export('meshgridi', '(i8[:],i8[:])')
 def meshgrid(x,y):
     """ Implementation of numpy's meshgrid function."""
@@ -428,7 +425,7 @@ def aclip(val,minval,maxval):
     return newvals
 
 @njit
-@cc.export('clipf', 'f8(f8,f8,f8)')
+@cc.export('clip', 'f8(f8,f8,f8)')
 @cc.export('clipi', 'i8(i8,i8,i8)')
 def clip(val,minval,maxval):
     if val < minval:
@@ -518,7 +515,7 @@ def gammaincinv05(a):
 
     
 @njit
-@cc.export('linearinterpf', 'f8(f8[:,:],f8,f8)')
+@cc.export('linearinterp', 'f8(f8[:,:],f8,f8)')
 @cc.export('linearinterpi', 'f8(i8[:,:],i8,i8)')
 def linearinterp(data,x,y):
     """
@@ -577,7 +574,7 @@ def linearinterp(data,x,y):
     return f
 
 @njit
-@cc.export('alinearinterpf', '(f8[:,:],f8[:],f8[:])')
+@cc.export('alinearinterp', '(f8[:,:],f8[:],f8[:])')
 @cc.export('alinearinterpi', '(f8[:,:],i8[:],i8[:])')
 def alinearinterp(data,x,y):
     """
@@ -603,17 +600,10 @@ def alinearinterp(data,x,y):
     f = alinearinterp(data,x,y)
 
     """
-
-    if x.ndim==2:
-        x1d = x.ravel()
-        y1d = y.ravel()
-    else:
-        x1d = x
-        y1d = y
-    npix = len(x1d)
+    npix = len(x)
     f = np.zeros(npix,float)
     for i in range(npix):
-        f[i] = linearinterp(data,x1d[i],y1d[i])
+        f[i] = linearinterp(data,x[i],y[i])
     return f
 
 @njit
@@ -707,29 +697,47 @@ def jac_covariance(jac,resid,wt):
         
     return cov
 
+# @njit
+# @cc.export('checkbounds', '(f8[:],f8[:,:])')
+# def checkbounds(pars,bounds):
+#     """ Check the parameters against the bounds."""
+#     # 0 means it's fine
+#     # 1 means it's beyond the lower bound
+#     # 2 means it's beyond the upper bound
+#     npars = len(pars)
+#     lbounds,ubounds = bounds[:,0],bounds[:,1]
+#     check = np.zeros(npars,np.int32)
+#     badlow, = np.where(pars<=lbounds)
+#     if len(badlow)>0:
+#         check[badlow] = 1
+#     badhigh, = np.where(pars>=ubounds)
+#     if len(badhigh)>0:
+#         check[badhigh] = 2
+#     return check
+
 @njit
-@cc.export('checkbounds', '(f8[:],f8[:,:])')
+@cc.export('checkbounds', '(f8[:],UniTuple(f8[:],2))')
 def checkbounds(pars,bounds):
     """ Check the parameters against the bounds."""
     # 0 means it's fine
     # 1 means it's beyond the lower bound
     # 2 means it's beyond the upper bound
     npars = len(pars)
-    lbounds,ubounds = bounds[:,0],bounds[:,1]
+    lbounds,ubounds = bounds
     check = np.zeros(npars,np.int32)
-    badlow, = np.where(pars<=lbounds)
-    if len(badlow)>0:
-        check[badlow] = 1
-    badhigh, = np.where(pars>=ubounds)
-    if len(badhigh)>0:
-        check[badhigh] = 2
+    badlo, = np.where(pars<=lbounds)
+    if len(badlo)>0:
+        check[badlo] = 1
+    badhi, = np.where(pars>=ubounds)
+    if len(badhi):
+        check[badhi] = 2
     return check
 
 @njit
-@cc.export('limbounds', '(f8[:],f8[:,:])')
+@cc.export('limbounds', '(f8[:],UniTuple(f8[:],2))')
 def limbounds(pars,bounds):
     """ Limit the parameters to the boundaries."""
-    lbounds,ubounds = bounds[:,0],bounds[:,1]
+    lbounds,ubounds = bounds
     outpars = np.minimum(np.maximum(pars,lbounds),ubounds)
     return outpars
 
@@ -742,45 +750,45 @@ def limsteps(steps,maxsteps):
     outsteps *= signs
     return outsteps
 
-@njit
-@cc.export('newpars', '(f8[:],f8[:],f8[:,:],f8[:])')
-def newpars(pars,steps,bounds=None,maxsteps=None):
-    """ Return new parameters that fit the constraints."""
-    # Limit the steps to maxsteps
-    if maxsteps is not None:
-        limited_steps = limsteps(steps,maxsteps)
-    else:
-        limited_steps = steps
+# @njit
+# @cc.export('newpars', '(f8[:],f8[:],f8[:,:],f8[:])')
+# def newpars(pars,steps,bounds=None,maxsteps=None):
+#     """ Return new parameters that fit the constraints."""
+#     # Limit the steps to maxsteps
+#     if maxsteps is not None:
+#         limited_steps = limsteps(steps,maxsteps)
+#     else:
+#         limited_steps = steps
 
-    # No bounds input
-    if bounds is None:
-        return pars+limited_steps
+#     # No bounds input
+#     if bounds is None:
+#         return pars+limited_steps
         
-    # Make sure that these don't cross the boundaries
-    lbounds,ubounds = bounds[:,0],bounds[:,1]
-    check = checkbounds(pars+limited_steps,bounds)
-    # Reduce step size for any parameters to go beyond the boundaries
-    badpars = (check!=0)
-    # reduce the step sizes until they are within bounds
-    newsteps = limited_steps.copy()
-    count = 0
-    maxiter = 2
-    while (np.sum(badpars)>0 and count<=maxiter):
-        newsteps[badpars] /= 2
-        newcheck = checkbounds(pars+newsteps,bounds)
-        badpars = (newcheck!=0)
-        count += 1
+#     # Make sure that these don't cross the boundaries
+#     lbounds,ubounds = bounds[:,0],bounds[:,1]
+#     check = checkbounds(pars+limited_steps,bounds)
+#     # Reduce step size for any parameters to go beyond the boundaries
+#     badpars = (check!=0)
+#     # reduce the step sizes until they are within bounds
+#     newsteps = limited_steps.copy()
+#     count = 0
+#     maxiter = 2
+#     while (np.sum(badpars)>0 and count<=maxiter):
+#         newsteps[badpars] /= 2
+#         newcheck = checkbounds(pars+newsteps,bounds)
+#         badpars = (newcheck!=0)
+#         count += 1
             
-    # Final parameters
-    newpars = pars + newsteps
+#     # Final parameters
+#     newpars = pars + newsteps
                 
-    # Make sure to limit them to the boundaries
-    check = checkbounds(newpars,bounds)
-    badpars = (check!=0)
-    if np.sum(badpars)>0:
-        # add a tiny offset so it doesn't fit right on the boundary
-        newpars = np.minimum(np.maximum(newpars,lbounds+1e-30),ubounds-1e-30)
-    return newpars
+#     # Make sure to limit them to the boundaries
+#     check = checkbounds(newpars,bounds)
+#     badpars = (check!=0)
+#     if np.sum(badpars)>0:
+#         # add a tiny offset so it doesn't fit right on the boundary
+#         newpars = np.minimum(np.maximum(newpars,lbounds+1e-30),ubounds-1e-30)
+#     return newpars
 
 @njit
 @cc.export('poly2d', '(f8[:,:],f8[:])')
@@ -982,8 +990,7 @@ class Index(object):
         return self._invindex
 
 @njit
-@cc.export('ravel_multi_index1', '(UniTuple(i8[:],1),UniTuple(i8,1))')
-@cc.export('ravel_multi_index2', '(UniTuple(i8[:],2),UniTuple(i8,2))')
+@cc.export('ravel_multi_index', '(UniTuple(i8[:],2),UniTuple(i8,2))')
 @cc.export('ravel_multi_index3', '(UniTuple(i8[:],3),UniTuple(i8,3))')
 def ravel_multi_index(multi_index,imshape):
     """ ravel indices"""
@@ -1005,7 +1012,7 @@ def ravel_multi_index(multi_index,imshape):
     return index
 
 @njit
-@cc.export('unravel_index', '(i8[:],i8[:])')
+@cc.export('unravel_index', '(i8[:],UniTuple(i8,2))')
 def unravel_index(indices,imshape):
     """ return multi-dimensional index. """
 
@@ -1041,8 +1048,7 @@ def unravel_index(indices,imshape):
 #     return uvals,uindex,invindex
 
 @njit
-@cc.export('unique_indexf8', '(f8[:],)')
-@cc.export('unique_indexf4', '(f4[:],)')
+@cc.export('unique_index', '(f8[:],)')
 def unique_indexf(array):
     data = np.zeros(len(array),float)   # make sure they are float
     data[:] = array
@@ -1081,8 +1087,7 @@ def unique_indexf(array):
 
 
 @njit
-@cc.export('unique_indexi8', '(i8[:],)')
-@cc.export('unique_indexi4', '(i4[:],)')
+@cc.export('unique_indexi', '(i8[:],)')
 def unique_index(array):
     data = np.zeros(len(array),np.int64)   # make sure they are float
     data[:] = array
@@ -2174,7 +2179,7 @@ def collatefitstars(imshape,starx,stary,fitradius):
     return xdata,ydata,ravelindex,bbox,ndata,mask
 
 @njit
-@cc.export('skyvalf', 'f8(f8[:],f8[:])')
+@cc.export('skyval', 'f8(f8[:],f8[:])')
 @cc.export('skyvali', 'f8(i8[:],f8[:])')
 def skyval(array,sigma):
     """  Estimate sky value from sky pixels."""
@@ -2213,7 +2218,7 @@ def mkbounds(pars,imshape,xoff=10):
     return bounds
 
 @njit
-@cc.export('stepsf', 'f8[:](f8[:],f8)')
+@cc.export('steps', 'f8[:](f8[:],f8)')
 @cc.export('stepsi', 'f8[:](i8[:],f8)')
 def steps(pars,dx=0.5):
     """ Return step sizes to use when fitting the stellar parameters."""
@@ -2228,40 +2233,40 @@ def steps(pars,dx=0.5):
         fsteps[-1] = 10
     return fsteps
 
-# @njit
-# @cc.export('newpars', 'f8[:](f8[:],f8[:],UniTuple(f8[:],2),f8[:])')
-# def newpars(pars,steps,bounds,maxsteps):
-#     """ Get new parameters given initial parameters, steps and constraints."""
-#     # Limit the steps to maxsteps
-#     limited_steps = limsteps(steps,maxsteps)
-#     # Make sure that these don't cross the boundaries
-#     lbounds,ubounds = bounds
-#     check = checkbounds(pars+limited_steps,bounds)
-#     # Reduce step size for any parameters to go beyond the boundaries
-#     badpars = (check!=0)
-#     # reduce the step sizes until they are within bounds
-#     newsteps = limited_steps.copy()
-#     count = 0
-#     maxiter = 2
-#     while (np.sum(badpars)>0 and count<=maxiter):
-#         newsteps[badpars] /= 2
-#         newcheck = checkbounds(pars+newsteps,bounds)
-#         badpars = (newcheck!=0)
-#         count += 1
+@njit
+@cc.export('newpars', 'f8[:](f8[:],f8[:],UniTuple(f8[:],2),f8[:])')
+def newpars(pars,steps,bounds,maxsteps):
+    """ Get new parameters given initial parameters, steps and constraints."""
+    # Limit the steps to maxsteps
+    limited_steps = limsteps(steps,maxsteps)
+    # Make sure that these don't cross the boundaries
+    lbounds,ubounds = bounds
+    check = checkbounds(pars+limited_steps,bounds)
+    # Reduce step size for any parameters to go beyond the boundaries
+    badpars = (check!=0)
+    # reduce the step sizes until they are within bounds
+    newsteps = limited_steps.copy()
+    count = 0
+    maxiter = 2
+    while (np.sum(badpars)>0 and count<=maxiter):
+        newsteps[badpars] /= 2
+        newcheck = checkbounds(pars+newsteps,bounds)
+        badpars = (newcheck!=0)
+        count += 1
             
-#     # Final parameters
-#     newpars = pars + newsteps
+    # Final parameters
+    newpars = pars + newsteps
             
-#     # Make sure to limit them to the boundaries
-#     check = checkbounds(newpars,bounds)
-#     badpars = (check!=0)
-#     if np.sum(badpars)>0:
-#         # add a tiny offset so it doesn't fit right on the boundary
-#         newpars = np.minimum(np.maximum(newpars,lbounds+1e-30),ubounds-1e-30)
-#     return newpars
+    # Make sure to limit them to the boundaries
+    check = checkbounds(newpars,bounds)
+    badpars = (check!=0)
+    if np.sum(badpars)>0:
+        # add a tiny offset so it doesn't fit right on the boundary
+        newpars = np.minimum(np.maximum(newpars,lbounds+1e-30),ubounds-1e-30)
+    return newpars
 
 @njit
-@cc.export('doPolygonsOverlapf', '(f8[:],f8[:],f8[:],f8[:])')
+@cc.export('doPolygonsOverlap', '(f8[:],f8[:],f8[:],f8[:])')
 @cc.export('doPolygonsOverlapi', '(i8[:],i8[:],i8[:],i8[:])')
 def doPolygonsOverlap(xPolygon1, yPolygon1, xPolygon2, yPolygon2):
     """Returns True if two polygons are overlapping."""
@@ -2307,7 +2312,7 @@ def doPolygonsOverlap(xPolygon1, yPolygon1, xPolygon2, yPolygon2):
     return isin
 
 @njit
-@cc.export('isPointInPolygonf', '(f8[:],f8[:],f8,f8)')
+@cc.export('isPointInPolygon', '(f8[:],f8[:],f8,f8)')
 @cc.export('isPointInPolygoni', '(i8[:],i8[:],i8,i8)')
 def isPointInPolygon(xPolygon, yPolygon, xPt, yPt):
     """Returns boolean if a point is inside a polygon of vertices."""
@@ -2353,7 +2358,7 @@ def isPointInPolygon(xPolygon, yPolygon, xPt, yPt):
         return True
 
 @njit
-@cc.export('isLeftf', '(f8,f8,f8,f8,f8,f8)')
+@cc.export('isLeft', '(f8,f8,f8,f8,f8,f8)')
 @cc.export('isLefti', '(i8,i8,i8,i8,i8,i8)')
 def isLeft(x1, y1, x2, y2, x3, y3):
     # isLeft(): test if a point is Left|On|Right of an infinite 2D line.
@@ -2365,14 +2370,14 @@ def isLeft(x1, y1, x2, y2, x3, y3):
     return ( (x2 - x1) * (y3 - y1) - (x3 - x1) * (y2 - y1) )
 
 @njit
-@cc.export('rangeoverlapf', '(f8[:],f8[:])')
+@cc.export('rangeoverlap', '(f8[:],f8[:])')
 @cc.export('rangeoverlapi', '(i8[:],i8[:])')
 def rangeoverlap(a,b):
     """does the range (start1, end1) overlap with (start2, end2)"""
     return max(a) >= min(b) and min(a) <= max(b)
 
 @njit
-@cc.export('doLineSegmentsIntersectf', '(f8[:],f8[:],f8[:],f8[:])')
+@cc.export('doLineSegmentsIntersect', '(f8[:],f8[:],f8[:],f8[:])')
 @cc.export('doLineSegmentsIntersecti', '(i8[:],i8[:],i8[:],i8[:])')
 def doLineSegmentsIntersect(x1, y1, x2, y2):
     """ Do two line segments intersect."""

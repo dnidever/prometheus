@@ -18,7 +18,7 @@ from numba.pycc import CC
 cc = CC('_models_numba_static')
 
 @njit
-@cc.export('gaussfwhmf', '(f8[:,:],)')
+@cc.export('gaussfwhm', '(f8[:,:],)')
 @cc.export('gaussfwhmi', '(i8[:,:],)')
 def gaussfwhm(im):
     """
@@ -33,7 +33,7 @@ def gaussfwhm(im):
     return fwhm
 
 @njit
-@cc.export('hfluxradf', '(f8[:,:],)')
+@cc.export('hfluxrad', '(f8[:,:],)')
 @cc.export('hfluxradi', '(i8[:,:],)')
 def hfluxrad(im):
     """
@@ -67,7 +67,7 @@ def hfluxrad(im):
     return hfluxrad
 
 # @njit
-# @cc.export('contourfwhmf', '(f8[:,:],)')
+# @cc.export('contourfwhm', '(f8[:,:],)')
 # @cc.export('contourfwhmi', '(i8[:,:],)')
 # def contourfwhm(im):
 #     """                                                                                         
@@ -125,7 +125,7 @@ def hfluxrad(im):
 #     return fwhm
 
 @njit
-@cc.export('imfwhmf', '(f8[:,:],)')
+@cc.export('imfwhm', '(f8[:,:],)')
 @cc.export('imfwhmi', '(i8[:,:],)')
 def imfwhm(im):
     """                                                                                         
@@ -167,7 +167,7 @@ def imfwhm(im):
 
 
 @njit
-@cc.export('numba_linearinterpf', '(f8[:,:],f8[:,:],i4)')
+@cc.export('numba_linearinterp', '(f8[:,:],f8[:,:],i4)')
 @cc.export('numba_linearinterpi', '(i8[:,:],i8[:,:],i4)')
 def numba_linearinterp(binim,fullim,binsize):
     """ linear interpolation"""
@@ -219,7 +219,7 @@ def numba_linearinterp(binim,fullim,binsize):
     return fullim
 
 @njit
-@cc.export('checkboundsf', 'i4[:](f8[:],f8[:,:])')
+@cc.export('checkbounds', 'i4[:](f8[:],f8[:,:])')
 @cc.export('checkboundsi', 'i4[:](i8[:],i8[:,:])')
 def checkbounds(pars,bounds):
     """ Check the parameters against the bounds."""
@@ -235,7 +235,7 @@ def checkbounds(pars,bounds):
     return check
 
 @njit
-@cc.export('limboundsf', '(f8[:],f8[:,:])')
+@cc.export('limbounds', '(f8[:],f8[:,:])')
 @cc.export('limboundsi', '(i8[:],i8[:,:])')
 def limbounds(pars,bounds):
     """ Limit the parameters to the boundaries."""
@@ -245,7 +245,7 @@ def limbounds(pars,bounds):
     return outpars
 
 @njit
-@cc.export('limstepsf', '(f8[:],f8[:])')
+@cc.export('limsteps', '(f8[:],f8[:])')
 @cc.export('limstepsi', '(i8[:],i8[:])')
 def limsteps(steps,maxsteps):
     """ Limit the parameter steps to maximum step sizes."""
@@ -289,7 +289,7 @@ def newlsqpars(pars,steps,bounds,maxsteps):
     return newparams
 
 @njit
-@cc.export('newbestparsf', '(f8[:],f8[:])')
+@cc.export('newbestpars', '(f8[:],f8[:])')
 @cc.export('newbestparsi', '(i8[:],i8[:])')
 def newbestpars(bestpars,dbeta):
     """ Get new pars from offsets."""
@@ -314,7 +314,7 @@ def newbestpars(bestpars,dbeta):
     return newpars
 
 @njit
-@cc.export('starbboxf', '(UniTuple(f8,2),UniTuple(i8,2),f8)')
+@cc.export('starbbox', '(UniTuple(f8,2),UniTuple(i8,2),f8)')
 @cc.export('starbboxi', '(UniTuple(i8,2),UniTuple(i8,2),f8)')
 def starbbox(coords,imshape,radius):
     """                                                                                         
@@ -352,7 +352,7 @@ def starbbox(coords,imshape,radius):
     #return BoundingBox(xlo,xhi,ylo,yhi)
 
 @njit
-@cc.export('bbox2xyf', '(f8[:,:],)')
+@cc.export('bbox2xy', '(f8[:,:],)')
 @cc.export('bbox2xyi', '(i8[:,:],)')
 def bbox2xy(bbox):
     """                                                                                         
@@ -519,7 +519,7 @@ def gaussian2d_fwhm(pars):
     return fwhm
 
 @njit
-@cc.export('agaussian2df', '(f8[:],f8[:],f8[:],i4)')
+@cc.export('agaussian2d', '(f8[:],f8[:],f8[:],i4)')
 @cc.export('agaussian2di', '(i8[:],i8[:],f8[:],i4)')
 def agaussian2d(x,y,pars,nderiv):
     """
@@ -590,8 +590,8 @@ def agaussian2d(x,y,pars,nderiv):
     return g,deriv
     
 @njit
-@cc.export('gaussian2df', '(f8,f8,f8[:],i4)')
-@cc.export('gaussian2di', '(i8,i8,f8[:],i4)')
+@cc.export('gaussian2d', '(f8,f8,f8[:],i8)')
+@cc.export('gaussian2di', '(i8,i8,f8[:],i8)')
 def gaussian2d(x,y,pars,nderiv):
     """
     Two dimensional Gaussian model function.
@@ -900,7 +900,7 @@ def moffat2d_flux(pars):
 
 
 @njit
-@cc.export('amoffat2df', '(f8[:],f8[:],f8[:],i4)')
+@cc.export('amoffat2d', '(f8[:],f8[:],f8[:],i4)')
 @cc.export('amoffat2di', '(i8[:],i8[:],f8[:],i4)')
 def amoffat2d(x,y,pars,nderiv):
     """
@@ -970,7 +970,7 @@ def amoffat2d(x,y,pars,nderiv):
 
     
 @njit
-@cc.export('moffat2df', '(f8,f8,f8[:],i4)')
+@cc.export('moffat2d', '(f8,f8,f8[:],i4)')
 @cc.export('moffat2di', '(i8,i8,f8[:],i4)')
 def moffat2d(x,y,pars,nderiv):
     """
@@ -1311,8 +1311,8 @@ def penny2d_flux(pars):
     return volume
 
 @njit
-@cc.export('apenny2df', '(f8[:],f8[:],f8[:],i4)')
-@cc.export('apenny2df', '(i8[:],i8[:],f8[:],i4)')
+@cc.export('apenny2d', '(f8[:],f8[:],f8[:],i4)')
+@cc.export('apenny2di', '(i8[:],i8[:],f8[:],i4)')
 def apenny2d(x,y,pars,nderiv):
     """
     Two dimensional Penny model function with x/y array inputs.
@@ -1381,7 +1381,7 @@ def apenny2d(x,y,pars,nderiv):
 
     
 @njit
-@cc.export('penny2df', '(f8,f8,f8[:],i4)')
+@cc.export('penny2d', '(f8,f8,f8[:],i4)')
 @cc.export('penny2di', '(i8,i8,f8[:],i4)')
 def penny2d(x,y,pars,nderiv):
     """
@@ -1747,7 +1747,7 @@ def gausspow2d_flux(pars):
 
 
 @njit
-@cc.export('agausspow2df', '(f8[:],f8[:],f8[:],i4)')
+@cc.export('agausspow2d', '(f8[:],f8[:],f8[:],i4)')
 @cc.export('agausspow2di', '(i8[:],i8[:],f8[:],i4)')
 def agausspow2d(x,y,pars,nderiv):
     """
@@ -1818,7 +1818,7 @@ def agausspow2d(x,y,pars,nderiv):
 
     
 @njit
-@cc.export('gausspow2df', '(f8,f8,f8[:],i4)')
+@cc.export('gausspow2d', '(f8,f8,f8[:],i4)')
 @cc.export('gausspow2di', '(i8,i8,f8[:],i4)')
 def gausspow2d(x,y,pars,nderiv):
     """
@@ -2075,7 +2075,7 @@ def gausspow2dfit(im,err,ampc,xc,yc,verbose):
 # ####### SERSIC ########
 
 @njit
-@cc.export('asersic2df', '(f8[:],f8[:],f8[:],i4)')
+@cc.export('asersic2d', '(f8[:],f8[:],f8[:],i4)')
 @cc.export('asersic2di', '(i8[:],i8[:],f8[:],i4)')
 def asersic2d(x,y,pars,nderiv):
     """
@@ -2135,7 +2135,7 @@ def asersic2d(x,y,pars,nderiv):
     return g,deriv
 
 @njit
-@cc.export('sersic2df', '(f8,f8,f8[:],i4)')
+@cc.export('sersic2d', '(f8,f8,f8[:],i4)')
 @cc.export('sersic2di', '(i8,i8,f8[:],i4)')
 def sersic2d(x, y, pars, nderiv):
     """
@@ -2505,7 +2505,7 @@ def sersic2d_flux(pars):
 # Generic model routines
 
 @njit
-@cc.export('model2df', '(f8,f8,i4,f8[:],i4)')
+@cc.export('model2d', '(f8,f8,i4,f8[:],i4)')
 @cc.export('model2di', '(i8,i8,i4,f8[:],i4)')
 def model2d(x,y,psftype,pars,nderiv):
     """
@@ -2563,7 +2563,7 @@ def model2d(x,y,psftype,pars,nderiv):
         return
 
 @njit
-@cc.export('amodel2df', '(f8[:],f8[:],i4,f8[:],i4)')
+@cc.export('amodel2d', '(f8[:],f8[:],i4,f8[:],i4)')
 @cc.export('amodel2di', '(i8[:],i8[:],i4,f8[:],i4)')
 def amodel2d(x,y,psftype,pars,nderiv):
     """
@@ -2907,7 +2907,7 @@ def model2d_maxsteps(psftype,pars):
         return
 
 @njit
-@cc.export('model2dfit', '(f8[:,:],f8[:,:],f8[:],f8[:],i4,f8,f8,f8,b1)')
+@cc.export('model2dfit', '(f8[:],f8[:],f8[:],f8[:],i8,f8,f8,f8,b1)')
 def model2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
     """
     Fit all parameters of a single 2D model to data.
@@ -2915,13 +2915,13 @@ def model2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
     Parameters
     ----------
     im : numpy array
-       Flux array.  Can be 1D or 2D array.
+       Flux array.  Must be 1D array.
     err : numpy array
        Uncertainty array of im.  Same dimensions as im.
     x : numpy array
-       Array of X-values for im.
+       1D array of X-values for im.
     y : numpy array
-       Array of Y-values for im.
+       1D array of Y-values for im.
     psftype : int
        Type of PSF model: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic.
     ampc : float
@@ -2958,16 +2958,10 @@ def model2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
     maxiter = 10
     minpercdiff = 0.5
 
-    if im.ndim==2:
-        im1d = im.ravel()
-        err1d = err.ravel()
-        x1d = x.ravel()
-        y1d = y.ravel()
-    else:
-        im1d = im
-        err1d = err
-        x1d = x
-        y1d = y
+    im1d = im.ravel()
+    err1d = err.ravel()
+    x1d = x.ravel()
+    y1d = y.ravel()
     wt1d = 1/err1d**2
     npix = len(im1d)
     
@@ -3031,7 +3025,7 @@ def model2dfit(im,err,x,y,psftype,ampc,xc,yc,verbose=False):
 # # Empirical PSF
 
 @njit
-@cc.export('relcoordf', '(f8[:],f8[:],UniTuple(i8,2))')
+@cc.export('relcoord', '(f8[:],f8[:],UniTuple(i8,2))')
 @cc.export('relcoordi', '(i8[:],i8[:],UniTuple(i8,2))')
 def relcoord(x,y,shape):
     """
@@ -3067,7 +3061,7 @@ def relcoord(x,y,shape):
     return relx,rely
 
 @njit
-@cc.export('empiricalf', '(f8[:],f8[:],f8[:],f8[:,:,:],UniTuple(i8,2),b1)')
+@cc.export('empirical', '(f8[:],f8[:],f8[:],f8[:,:,:],UniTuple(i8,2),b1)')
 @cc.export('empiricali', '(i8[:],i8[:],f8[:],f8[:,:,:],UniTuple(i8,2),b1)')
 def empirical(x, y, pars, data, imshape=None, deriv=False):
     """
@@ -3440,7 +3434,7 @@ def psf(x,y,pars,psftype,psfparams,lookup,imshape,deriv=False,verbose=False):
     return g,derivative
 
 @njit
-@cc.export('psffit', '(f8[:,:],f8[:,:],f8[:],f8[:],f8[:],i4,f8[:],f8[:,:,:],UniTuple(i8,2),b1)')
+@cc.export('psffit', '(f8[:],f8[:],f8[:],f8[:],f8[:],i4,f8[:],f8[:,:,:],UniTuple(i8,2),b1)')
 def psffit(im,err,x,y,pars,psftype,psfparams,lookup,imshape=None,verbose=False):
     """
     Fit a PSF model to data.
@@ -3448,13 +3442,13 @@ def psffit(im,err,x,y,pars,psftype,psfparams,lookup,imshape=None,verbose=False):
     Parameters
     ----------
     im : numpy array
-       Flux array.  Can be 1D or 2D array.
+       Flux array.  Must be 1D array.
     err : numpy array
        Uncertainty array of im.  Same dimensions as im.
     x : numpy array
-       Array of X-values for im.
+       1D array of X-values for im.
     y : numpy array
-       Array of Y-values for im.
+       1D array of Y-values for im.
     pars : numpy array
        Initial guess of amplitude, xcen, ycen of the model.
     psftype : int
@@ -3493,16 +3487,10 @@ def psffit(im,err,x,y,pars,psftype,psfparams,lookup,imshape=None,verbose=False):
     maxiter = 10
     minpercdiff = 0.5
 
-    if im.ndim==2:
-        im1d = im.ravel()
-        err1d = err.ravel()
-        x1d = x.ravel()
-        y1d = y.ravel()
-    else:
-        im1d = im
-        err1d = err
-        x1d = x
-        y1d = y
+    im1d = im
+    err1d = err
+    x1d = x
+    y1d = y
     wt1d = 1/err1d**2
     npix = len(im1d)
     
@@ -3569,7 +3557,7 @@ def psffit(im,err,x,y,pars,psftype,psfparams,lookup,imshape=None,verbose=False):
     return bestpar,perror,cov,flux,fluxerr,chisq
 
 @njit
-@cc.export('psf2df', '(f8[:],f8[:],f8[:],f8,f8,f8,b1,b1)')
+@cc.export('psf2d', '(f8[:],f8[:],f8[:],f8,f8,f8,b1,b1)')
 @cc.export('psf2di', '(i8[:],i8[:],f8[:],f8,f8,f8,b1,b1)')
 def psf2d(x,y,psf,amp,xc,yc,deriv=False,verbose=False):
     """
@@ -3665,7 +3653,7 @@ def psf2d(x,y,psf,amp,xc,yc,deriv=False,verbose=False):
     return g,derivative
 
 @njit
-@cc.export('psf2dfit', '(f8[:,:],f8[:,:],f8[:],f8[:],f8[:],f8,f8,f8,b1)')
+@cc.export('psf2dfit', '(f8[:],f8[:],f8[:],f8[:],f8[:],f8,f8,f8,b1)')
 def psf2dfit(im,err,x,y,psf,ampc,xc,yc,verbose=False):
     """
     Fit a PSF model to data.
@@ -3673,13 +3661,13 @@ def psf2dfit(im,err,x,y,psf,ampc,xc,yc,verbose=False):
     Parameters
     ----------
     im : numpy array
-       Flux array.  Can be 1D or 2D array.
+       Flux array.  Must be 1D array.
     err : numpy array
        Uncertainty array of im.  Same dimensions as im.
     x : numpy array
-       Array of X-values for im.
+       1D array of X-values for im.
     y : numpy array
-       Array of Y-values for im.
+       1D array of Y-values for im.
     psf : numpy array
        The PSF model description in a single 1D array.
        If there is no lookup table, then
@@ -3714,7 +3702,7 @@ def psf2dfit(im,err,x,y,psf,ampc,xc,yc,verbose=False):
     Example
     -------
 
-    pars,perror,cov,flux,fluxerr = psffit(im,err,x,y,psf,100.0,5.5,6.5,False)
+    pars,perror,cov,flux,fluxerr = psf2dfit(im,err,x,y,psf,100.0,5.5,6.5,False)
 
     """
 
