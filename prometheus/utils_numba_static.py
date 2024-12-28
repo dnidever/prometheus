@@ -2193,7 +2193,7 @@ def skyval(array,sigma):
     return xmn
 
 @njit
-@cc.export('mkbounds', '(f8[:],f8[:,:],i8)')
+@cc.export('mkbounds', '(f8[:],UniTuple(i8,2),i8)')
 def mkbounds(pars,imshape,xoff=10):
     """ Make bounds for a set of input parameters."""
     # is [amp1,xcen1,ycen1,amp2,xcen2,ycen2, ...]

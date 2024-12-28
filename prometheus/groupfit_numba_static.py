@@ -27,7 +27,7 @@ cc = CC('_groupfit_numba_static')
 # xdata = xind,yind
 xdatatype = 'UniTuple(i8[:],2)'
 # psfdata = (psftype,psfparams,psflookup,psforder,imshape)
-psfdatatype = 'Tuple((i8,f8[:],f8[:,:,:],i8,i8[:]))'
+psfdatatype = 'Tuple((i8,f8[:],f8[:,:,:],i8,UniTuple(i8,2)))'
 # freezedata = (freezepars,freezestars)
 freezedatatype = 'Tuple((b1[:],b1[:]))'
 # flatdata = (starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix)
@@ -154,7 +154,8 @@ def initstararrays(image,error,mask,tab,psfnpix,fitradius,skyradius,skyfit):
     
     nstars = len(tab)
     ny,nx = image.shape                             # save image dimensions, python images are (Y,X)
-    imshape = np.array([ny,nx])
+    #imshape = np.array([ny,nx])
+    imshape = (ny,nx)
     im = image.copy().astype(np.float64)
     err = error.copy().astype(np.float64)
     msk = mask.copy().astype(np.bool_)
@@ -308,7 +309,7 @@ def psf(xdata,pars,psfdata):
     xind,yind = xdata
     psftype,psfparams,psflookup,psforder,imshape = psfdata
     im1,_ = mnb.psf(xind,yind,pars,psftype,psfparams,psflookup,
-                    imshape,deriv=False,verbose=False)
+                    imshape,False,False)
     return im1
         
 
@@ -319,7 +320,7 @@ def psfjac(xdata,pars,psfdata):
     xind,yind = xdata
     psftype,psfparams,psflookup,psforder,imshape = psfdata
     im1,jac1 = mnb.psf(xind,yind,pars,psftype,psfparams,psflookup,
-                       imshape,deriv=True,verbose=False)
+                       imshape,True,False)
     return im1,jac1
     
 
@@ -659,12 +660,16 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     out,model,sky = groupfit(psf,image,error,mask,tab)
     
     """
-    start = clock()
+
+    #start = clock()
     
     nstars = len(tab)
     skyradius = psfnpix//2 + 10
     ny,nx = image.shape                             # save image dimensions, python images are (Y,X)
-    imshape = np.array([ny,nx])
+    #imshape = np.array([ny,nx])
+    imshape = (ny,nx)
+    
+    print('groupfit() 1')
     
     # PSF information
     #----------------
@@ -680,6 +685,10 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     # Package up the PSF information into a tuple to pass to the functions
     psfdata = (psftype,psfparams,psflookup,psforder,imshape)
 
+    print('groupfit() 2')
+
+    #return psfdata
+    
     # Star arrays
     #------------
     #  -full footprint: pixels of a star within the psf radius and not masked
@@ -714,6 +723,8 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     stardata = (starravelindex,starndata,xx,yy)
     flatdata = (starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix)
 
+    print('groupfit() 3')
+    
     # Image arrays
     #-------------
     # Full arrays:
@@ -742,6 +753,8 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     skyim = utils.sky(tresid.copy().reshape(imshape[0],imshape[1])).flatten()
     skyflat = skyim[indflat]
 
+    print('groupfit() 4')
+    
     # Initialize RESID and subtract initial smooth sky
     resid = np.zeros(imshape[0]*imshape[1],np.float64)
     resid[:] = im.copy().astype(np.float64).flatten()   # flatten makes it easier to modify
@@ -759,6 +772,8 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     starrms = np.zeros(nstars,np.float64)
     freezestars = np.zeros(nstars,np.bool_)
     freezepars = np.zeros(len(pars),np.bool_)
+
+    print('groupfit() 5')
     
     # Initial estimates
     initpar = pars.copy()
@@ -785,7 +800,7 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     #   keep looping until: (a) reached max iterations, (b) changes are tiny
     #                      or (c) there are no free stars left
     while (niter<maxiter and maxpercdiff>minpercdiff and nfreestars>0):
-        start0 = clock()
+        #start0 = clock()
 
         # bestpar: current best values for the free parameters
         # pars: current best values for ALL parameters
@@ -805,6 +820,8 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         dbeta_free[~np.isfinite(dbeta_free)] = 0.0  # deal with NaNs, shouldn't happen
         dbeta = np.zeros(len(pars),np.float64)
         dbeta[np.where(freezepars==False)] = dbeta_free
+
+        print('groupfit() 6')
         
         # --- Perform line search ---
         #  move the solution along the dbeta vector to find the lowest chisq
@@ -831,6 +848,8 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         new_dbeta_free = alpha * dbeta_free
         new_dbeta = np.zeros(len(pars),float)
         new_dbeta[np.where(freezepars==False)] = new_dbeta_free
+
+        print('groupfit() 7')
         
         # Update the free parameters and impose step limits and bounds
         maxsteps = utils.steps(pars)  # maximum steps, requires all 3*Nstars parameters
@@ -860,6 +879,8 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
            out = dofreeze(frzpars,pars,freezedata,flatdata,psfdata,resid,resflat)
            freezepars,freezestars,resid,resflat = out
         nfreestars = np.sum(freezestars==False)
+
+        print('groupfit() 8')
         
         # Get model and chisq
         freezedata = (freezepars,freezestars)
@@ -890,8 +911,8 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
             resflat = resid[indflat]
             skyflat = skyim[indflat]
             
-        if verbose:
-            print('iter dt =',(clock()-start0)/1e9,'sec.')
+        #if verbose:
+        #    print('iter dt =',(clock()-start0)/1e9,'sec.')
                 
         niter += 1     # increment counter
         
@@ -899,6 +920,8 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     #  if we stopped "prematurely" then not all stars were frozen
     #  and didn't have starniter set
     starniter[np.where(starniter==0)] = niter
+
+    print('groupfit() 9')
     
     # Unfreeze everything
     freezepars[:] = False
@@ -967,8 +990,8 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         rms1 = np.sqrt(np.mean(((flux1-sky1-model1)/pars1[0])**2))
         outtab[i,12] = rms1
 
-    if verbose:
-        print('dt =',(clock()-start)/1e9,'sec.')
+    #if verbose:
+    #    print('dt =',(clock()-start)/1e9,'sec.')
  
     return outtab,finalmodel,skyim
 
