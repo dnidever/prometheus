@@ -31,11 +31,11 @@ psfdatatype = 'Tuple((i8,f8[:],f8[:,:,:],i8,UniTuple(i8,2)))'
 # freezedata = (freezepars,freezestars)
 freezedatatype = 'Tuple((b1[:],b1[:]))'
 # flatdata = (starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix)
-flatdatatype = 'Tuple((i8[:],i8[:,:],f8[:],f8[:],i8[:],i8))'
+flatdatatype = 'Tuple((i8[:],i8[:,:],i8[:],i8[:],i8[:],i8))'
 # stardata = (starravelindex,starndata,xx,yy)
-stardatatype = 'Tuple((i8[:,:],i8[:],f8[:,:],f8[:,:]))'
+stardatatype = 'Tuple((i8[:,:],i4[:],i8[:,:],i8[:,:]))'
 # covflatdata = (starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix,imflat,errflat,skyflat)
-covflatdatatype = 'Tuple((i8[:],i8[:,:],f8[:],f8[:],i8[:],i8,f8[:],f8[:],f8[:]))'
+covflatdatatype = 'Tuple((i8[:],i8[:,:],i8[:],i8[:],i8[:],i8,f8[:],f8[:],f8[:]))'
 
 @njit
 @cc.export('getstarinfo', '(UniTuple(i8,2),b1[:,:],f8,f8,i4,f8,f8)')
@@ -328,7 +328,7 @@ def psfjac(xdata,pars,psfdata):
 @cc.export('model', '('+psfdatatype+','+freezedatatype+','+flatdatatype+',f8[:],b1,b1,b1)')
 def model(psfdata,freezedata,flatdata,pars,trim=False,allparams=False,verbose=False):
     """ Calculate the model for the stars and pixels we are fitting."""
-
+    
     if verbose==True:
         print('model: ',pars)
 
@@ -338,7 +338,7 @@ def model(psfdata,freezedata,flatdata,pars,trim=False,allparams=False,verbose=Fa
     freezepars,freezestars = freezedata
     # Unpack flat information
     starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix = flatdata
-
+    
     # Args are [amp,xcen,ycen] for all Nstars + sky offset
     # so 3*Nstars+1 parameters
     
@@ -373,7 +373,7 @@ def model(psfdata,freezedata,flatdata,pars,trim=False,allparams=False,verbose=Fa
         # we need the inverse index to the unique fitted pixels
         im1 = psf(xdata1,pars1,psfdata)
         allim[invind1] += im1
-
+        
     if skyfit:
         allim += allpars[-1]  # add sky offset
         
@@ -550,27 +550,40 @@ def cov(psfdata,freezedata,covflatdata,pars):
 
 
 @njit
-@cc.export('dofreeze', '(i8[:],f8[:],'+freezedatatype+','+flatdatatype+','+psfdatatype+',f8[:,:],f8[:])')
+@cc.export('dofreeze', '(b1[:],f8[:],'+freezedatatype+','+flatdatatype+','+psfdatatype+',f8[:,:],f8[:])')
 def dofreeze(frzpars,pars,freezedata,flatdata,psfdata,resid,resflat):
     """ Freeze par/stars."""
-
+    # frzpars: boolean array for all FREE parameters specifying which ones should be frozen [Nfreepars]
+    # pars: all parameters  [Npars]
+    
     freezepars,freezestars = freezedata
     starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix = flatdata
+    npars = len(freezepars)
     nstars = len(freezestars)
+
+    # freezepars: boolean array for all parameters [3*nstars], True means frozen
+    # freezestars: boolean array for all stars [nstars], True means frozen
     
     # Freeze parameters/stars that converged
     #  also subtract models of fixed stars
     #  also return new free parameters
-    #frzpars = percdiff<=minpercdiff
-    freeparsind, = np.where(freezepars==False)
-    # Update freeze values for "free" parameters
-    tempfreezepars = freezepars.copy()
-    tempfreezepars[np.where(freezepars==False)] = frzpars   # stick in updated values for "free" parameters
-    # Only freeze stars, not individual parameters
-    oldfreezestars = freezestars.copy()
-    freezestars = np.sum(tempfreezepars[0:3*nstars].copy().reshape(nstars,3),axis=1)==3
+    freeparsind, = np.where(freezepars==False)      # parameters for free stars
+    frozenparsind, = np.where(freezepars==True)     # parameters for frozen stars
+    # Save the original freeze values
+    origfreezepars = freezepars.copy()
+    origfreezestars = freezestars.copy()
+    # Update freeze values for current "free" parameters
+    freezepars[freeparsind] = frzpars            # stick in updated frozen values for "free" parameters
+    # Only freeze full stars, not individual parameters (either all 3 or none)
+    #  reconstruct freezestars from the updated freezepars array
+    freezestars = np.sum(freezepars[0:3*nstars].copy().reshape(nstars,3),axis=1)==3
+    #  now make sure only parameters are frozen for frozen stars. again, all or nothing
+    if np.sum(freezestars)>0:
+        #allfrozenstarsind, = np.where(freezestars==True)
+        for i in np.where(freezestars==True)[0]:
+            freezepars[i*3:i*3+3] = True
     # Subtract model for newly frozen stars
-    newfreezestars, = np.where((oldfreezestars==False) & (freezestars==True))
+    newfreezestars, = np.where((origfreezestars==False) & (freezestars==True))
     
     # Freezing more stars
     if len(newfreezestars)>0:
@@ -588,13 +601,13 @@ def dofreeze(frzpars,pars,freezedata,flatdata,psfdata,resid,resflat):
             im1 = psf(xdata1,pars1,psfdata)
             resflat[invind1] -= im1
             resid[indflat[invind1]] -= im1
-                    
+            
         # Get the new array of free parameters
         freeparsind, = np.where(freezepars==False)
         bestpar = pars[freeparsind]
         nfreezepars = np.sum(freezepars)
         nfreezestars = np.sum(freezestars)
-
+        
     return freezepars,freezestars,resid,resflat
 
 
@@ -772,7 +785,9 @@ def groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     starrms = np.zeros(nstars,np.float64)
     freezestars = np.zeros(nstars,np.bool_)
     freezepars = np.zeros(len(pars),np.bool_)
-
+    # freezepars: boolean array for all parameters [3*nstars], True means frozen
+    # freezestars: boolean array for all stars [nstars], True means frozen
+    
     print('groupfit() 5')
     
     # Initial estimates

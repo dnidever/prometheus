@@ -887,177 +887,62 @@ def groupfit_tests():
     out = gfit.psfjac(xdata1,params,psfdata)
     print('groupfit_numba.psfjac() okay')
 
-    freezepars = np.zeros(len(params),bool)
+    nstars = len(objtab)
+    freezepars = np.zeros(3*nstars,bool)
     freezestars = np.zeros(len(objtab),bool)
     freezedata = (freezepars,freezestars)
     flatdata = (starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix)
-    out = gfit.model(psfdata,freezedata,flatdata,params,False,False,False)
+    allpars = np.zeros(3*len(objtab),float)
+    allpars[0::3] = objtab[:,1]
+    allpars[1::3] = objtab[:,2]
+    allpars[2::3] = objtab[:,3] 
+    out = gfit.model(psfdata,freezedata,flatdata,allpars,False,False,False)
     print('groupfit_numba.model() okay')
 
-    return
+    # xdata = xind,yind
+    #xdatatype = 'UniTuple(i8[:],2)'
+    # psfdata = (psftype,psfparams,psflookup,psforder,imshape)
+    #psfdatatype = 'Tuple((i8,f8[:],f8[:,:,:],i8,UniTuple(i8,2)))'
+    # freezedata = (freezepars,freezestars)
+    #freezedatatype = 'Tuple((b1[:],b1[:]))'
+    # flatdata = (starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix)
+    #flatdatatype = 'Tuple((i8[:],i8[:,:],i8[:],i8[:],i8[:],i8))'
+    # stardata = (starravelindex,starndata,xx,yy)
+    #stardatatype = 'Tuple((i8[:,:],i4[:],i8[:,:],i8[:,:]))'
+    # covflatdata = (starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix,imflat,errflat,skyflat)
+    #covflatdatatype = 'Tuple((i8[:],i8[:,:],i8[:],i8[:],i8[:],i8,f8[:],f8[:],f8[:]))'
     
     stardata = (starravelindex,starndata,xx,yy)
-    out = gfit.fullmodel(psfdata,stardata,params)
+    out = gfit.fullmodel(psfdata,stardata,allpars)
     print('groupfit_numba.fullmodel() okay')
     
-    out = gfit.jac(psfdata,freezedata,flatdata,params,False,False)
+    out = gfit.jac(psfdata,freezedata,flatdata,allpars,False,False)
     print('groupfit_numba.jac() okay')
-    
-    out = gfit.chisqflat(freezedata,flatdata,psfdata,resflat,errflat,params)
-    print('groupfit_numba.chisqflat() okay')
-    
-    out = gfit.cov(psfdata,freezedata,covflatdata,params)
-    print('groupfit_numba.cov() okay')
-    
-    out = gfit.dofreeze(frzpars,params,freezedata,flatdata,psfdata,resid,resflat)
-    print('groupfit_numba.dofreeze() okay')
 
+    out = gfit.chisqflat(freezedata,flatdata,psfdata,resflat,errflat,allpars)
+    print('groupfit_numba.chisqflat() okay')
+
+    skyflat = imflat.copy()*0
+    covflatdata = (starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix,imflat,errflat,skyflat)
+    out = gfit.cov(psfdata,freezedata,covflatdata,allpars)
+    print('groupfit_numba.cov() okay')
+
+    frzpars = np.zeros(len(allpars),bool)
+    frzpars[:3] = True
+    resid = image.copy()*0.0
+    resflat = resid.ravel()[indflat]
+    out = gfit.dofreeze(frzpars,allpars,freezedata,flatdata,psfdata,resid,resflat)
+    print('groupfit_numba.dofreeze() okay')
+    
     #groupfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     #          image,error,mask,tab,fitradius,maxiter=10,
     #          minpercdiff=0.5,reskyiter=2,nofreeze=False,
     #          skyfit=False,verbose=False)
 
-    out = gfit.groupfit(psftype,params,npix,psflookup,
+    out = gfit.groupfit(psftype,params,psfnpix,psflookup,
                         psfflux,image,error,mask,objtab,
                         fitradius,10,0.5,2,False,False,False)
-
-    
-    # gf = gfit.GroupFitter(psf.psftype,psf.params,im,err,objtab,3.0,
-    #                       np.zeros((1,1,1),np.float64),psf.npix,True)
-    # print('groupfit.GroupFitter.__init__() okay')
-
-    # #out = gf.ampfit()
-    # #print('groupfit.GroupFitter.ampfit() okay')
-
-    # #out = gf.centroid()
-    # #print('groupfit.GroupFitter.centroid() okay')
-
-    # pars = np.zeros(7,np.float64)
-    # pars[:] = [100.0,3.4,5.5, 200.0,4.6,7.5, 100.0]
-    # bounds = [np.zeros(7,np.float64)-np.inf,np.zeros(7,np.float64)+np.inf]
-    # out = gf.checkbounds(pars,bounds)
-    # print('groupfit.GroupFitter.checkbounds() okay')
-
-    # out = gf.chisq(gf.pars)
-    # print('groupfit.GroupFitter.chisq() okay')
-
-    # out = gf.cov()
-    # print('groupfit.GroupFitter.cov() okay')
-
-    # out = gf.getstar(0)
-    # print('groupfit.GroupFitter.getstar() okay')
-
-    # out = gf.getstarfit(0)
-    # print('groupfit.GroupFitter.getstarfit() okay')
-
-    # out = gf.jac(gf.pars)
-    # print('groupfit.GroupFitter.jac() okay')
-
-    # pars = np.zeros(7,np.float64)
-    # pars[:] = [100.0,3.4,5.5, 200.0,4.6,7.5, 100.0]
-    # bounds = [np.zeros(7,np.float64)-np.inf,np.zeros(7,np.float64)+np.inf]
-    # out = gf.limbounds(pars,bounds)
-    # print('groupfit.GroupFitter.limbounds() okay')
-
-    # steps = np.zeros(6,np.float64)+0.1
-    # maxsteps = np.zeros(6,np.float64)+0.5
-    # out = gf.limsteps(steps,maxsteps)
-    # print('groupfit.GroupFitter.limsteps() okay')
-
-    # m,j = gf.jac(gf.pars)
-    # dbeta = utils.qr_jac_solve(j,gf.resflat)
-    # out = gf.linesearch(gf.pars,dbeta,m,j)
-    # print('groupfit.GroupFitter.linesearch() okay')
-
-    # out = gf.mkbounds(gf.pars,gf.imshape)
-    # print('groupfit.GroupFitter.mkbounds() okay')
-
-    # out = gf.model(gf.pars)
-    # print('groupfit.GroupFitter.model() okay')
-
-    # out = gf.modelstar(0)
-    # print('groupfit.GroupFitter.modelstar() okay')
-
-    # out = gf.modelstarfit(0)
-    # print('groupfit.GroupFitter.modelstarfit() okay')
-
-    # bounds = [np.zeros(13,np.float64)-np.inf,np.zeros(13,np.float64)+np.inf]
-    # steps = np.zeros(13,np.float64)+0.1
-    # maxsteps = np.zeros(13,np.float64)+0.5
-    # out = gf.newpars(gf.pars,steps,bounds,maxsteps)
-    # print('groupfit.GroupFitter.newpars() okay')
-
-    # out = gf.psf(gf.starx(0),gf.stary(0),gf.pars[:3])
-    # print('groupfit.GroupFitter.psf() okay')
-
-    # out = gf.psfjac(gf.starx(0),gf.stary(0),gf.pars[:3])
-    # print('groupfit.GroupFitter.psfjac() okay')
-
-    # #out = gf.score(0)
-    # #print('groupfit.GroupFitter.score() okay')
-
-    # out = gf.sky()
-    # print('groupfit.GroupFitter.sky() okay')
-
-    # out = gf.starbbox(0)
-    # print('groupfit.GroupFitter.starbbox() okay')
-
-    # out = gf.starfitbbox(0)
-    # print('groupfit.GroupFitter.starfitbbox() okay')
-
-    # out = gf.starfitchisq(0)
-    # print('groupfit.GroupFitter.starfitchisq() okay')
-
-    # out = gf.starfitinvindex(0)
-    # print('groupfit.GroupFitter.starfitinvindex() okay')
-
-    # out = gf.starfitnpix(0)
-    # print('groupfit.GroupFitter.starfitnpix() okay')
-
-    # out = gf.starfitravelindex(0)
-    # print('groupfit.GroupFitter.starfitravelindex() okay')
-
-    # out = gf.starfitrms(0)
-    # print('groupfit.GroupFitter.starfitrms() okay')
-
-    # out = gf.starfitx(0)
-    # print('groupfit.GroupFitter.starfitx() okay')
-
-    # out = gf.starfity(0)
-    # print('groupfit.GroupFitter.starfity() okay')
-
-    # out = gf.starflatindex(0)
-    # print('groupfit.GroupFitter.starflatindex() okay')
-
-    # out = gf.starflatnpix(0)
-    # print('groupfit.GroupFitter.starflatnpix() okay')
-
-    # out = gf.starflatx(0)
-    # print('groupfit.GroupFitter.starflatx() okay')
-
-    # out = gf.starflaty(0)
-    # print('groupfit.GroupFitter.starflaty() okay')
-
-    # out = gf.starnpix(0)
-    # print('groupfit.GroupFitter.starnpix() okay')
-    
-    # out = gf.starravelindex(0)
-    # print('groupfit.GroupFitter.starravelindex() okay')
-
-    # out = gf.starx(0)
-    # print('groupfit.GroupFitter.starx() okay')
-
-    # out = gf.stary(0)
-    # print('groupfit.GroupFitter.stary() okay')
-
-    # out = gf.steps(gf.pars)
-    # print('groupfit.GroupFitter.steps() okay')
-
-    # out = gf.unfreeze()
-    # print('groupfit.GroupFitter.unfreeze() okay')
-    
-    # out = gfit.fit(psf,im,err,objtab,False)
-    # print('groupfit.fit() okay')
+    print('groupfit_numba.groupfit() okay')
 
     
 def allfit_tests():
