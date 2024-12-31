@@ -944,8 +944,181 @@ def groupfit_tests():
                         fitradius,10,0.5,2,False,False,False)
     print('groupfit_numba.groupfit() okay')
 
-    
+
+
 def allfit_tests():
+    """  Testing the allfit code."""
+
+    import _utils_numba_static as utils
+    import _models_numba_static as mnb
+    import _allfit_numba_static as afit
+    
+    psftab = np.zeros((4,4),np.float64)
+    psftab[:,0] = np.arange(4)+1
+    psftab[:,1] = [100,200,300,400]   # amp
+    psftab[:,2] = [10,11,19,18]       # xcen
+    psftab[:,3] = [20,30,31,21]       # ycen
+    mpars = np.array([3.1,3.0,0.1])
+    #psf = mnb.PSF(1,mpars,21)
+    psftype = 1
+    xx,yy = np.meshgrid(np.arange(51),np.arange(51))
+    xx1d = xx.ravel()
+    yy1d = yy.ravel()
+    model = np.zeros(51*51,float)
+    for i in range(4):
+        #model += psf.model(xx,yy,psftab[i,1:])
+        pars1 = np.zeros(6,float)
+        pars1[:3] = psftab[i,1:]
+        pars1[3:] = mpars
+        model1,_ = mnb.amodel2d(xx1d,yy1d,psftype,pars1,0)
+        model += model1
+    model = model.reshape(51,51)
+    
+    error = np.sqrt(model+10)
+    sky = 0.0 #10.0
+    image = model + sky + np.random.rand(51,51)*error
+
+    mask = np.zeros(image.shape,bool)
+    mask[40,40] = True
+    mask[40,45] = True
+    mask[45,45] = True
+    
+    #image = ccddata.CCDData(im,error=err,mask=mask)
+    
+    # initial estimates
+    objtab = np.zeros((4,4),np.float64)
+    objtab[:,0] = np.arange(4)+1
+    objtab[:,1] = [80,250,200,500]           # amp
+    objtab[:,2] = [9.5,11.6,19.2,17.8]       # xcen
+    objtab[:,3] = [20.3,29.7,30.9,21.2]      # ycen
+
+    fitradius = 3.0
+    psflookup = np.zeros((1,1,1),np.float64)
+    verbose = False
+    nofreeze = False
+    params = mpars
+    psfnpix = 51
+    psfflux = mnb.model2d_flux(psftype,params)
+    tab = objtab
+    imshape = image.shape
+    skyfit = False
+    psforder = 1
+    
+    xcen = 9.5
+    ycen = 20.3
+    hpsfnpix = psfnpix//2
+    skyradius = psfnpix//2 + 10
+    out = afit.getstarinfo(imshape,mask,xcen,ycen,hpsfnpix,fitradius,skyradius)
+    print('allfit_numba.getstarinfo() okay')
+
+    starx = objtab[:,2]
+    stary = objtab[:,3]
+    out = afit.collatestarsinfo(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius)
+    print('allfit_numba.getcollatestarsinfo() okay')
+    
+    initdata = afit.initstararrays(image,error,mask,tab,psfnpix,fitradius,skyradius)
+    starravelindex,starndata,starfitravelindex,starfitndata,skyravelindex,skyndata = initdata[7:13]
+    xflat,yflat,indflat,imflat,errflat,resflat,ntotpix = initdata[13:20]
+    starfitinvindex,starflat_index,starflat_ndata = initdata[20:]
+    print('allfit_numba.initstararrays() okay')
+
+
+    # t0 = time.time()
+    # out = afit.allfit(psftype,params,psfnpix,psflookup,
+    #                     psfflux,image,error,mask,objtab,
+    #                     fitradius,10,0.5,2,False,False,False)
+    # print('allfit.allfit() okay')
+    # print(time.time()-t0)
+    
+    #import pdb; pdb.set_trace()
+    
+    #return
+
+    #psfdata = out
+    psfdata = (psftype,params,psflookup,psforder,imshape)
+    istar = 1
+    n1 = starflat_ndata[istar]
+    invind1 = starflat_index[istar,:n1]
+    xind1 = xflat[invind1]
+    yind1 = yflat[invind1]
+    xdata1 = (xind1,yind1)
+
+    # xind,yind = xdata1
+    # psftype,psfparams,psflookup,psforder,imshape = psfdata
+    # im1,_ = mnb.psf(xind,yind,params,psftype,psfparams,psflookup,
+    #                 imshape,False,False)
+    
+    out = afit.psf(xdata1,params,psfdata)
+    print('allfit_numba.psf() okay')
+
+    out = afit.psfjac(xdata1,params,psfdata)
+    print('allfit_numba.psfjac() okay')
+
+    nstars = len(objtab)
+    freezepars = np.zeros(3*nstars,bool)
+    freezestars = np.zeros(len(objtab),bool)
+    freezedata = (freezepars,freezestars)
+    flatdata = (starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix)
+    allpars = np.zeros(3*len(objtab),float)
+    allpars[0::3] = objtab[:,1]
+    allpars[1::3] = objtab[:,2]
+    allpars[2::3] = objtab[:,3] 
+    #out = afit.model(psfdata,freezedata,flatdata,allpars,False,False,False)
+    #print('allfit_numba.model() okay')
+
+    return
+    
+    # xdata = xind,yind
+    #xdatatype = 'UniTuple(i8[:],2)'
+    # psfdata = (psftype,psfparams,psflookup,psforder,imshape)
+    #psfdatatype = 'Tuple((i8,f8[:],f8[:,:,:],i8,UniTuple(i8,2)))'
+    # freezedata = (freezepars,freezestars)
+    #freezedatatype = 'Tuple((b1[:],b1[:]))'
+    # flatdata = (starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix)
+    #flatdatatype = 'Tuple((i8[:],i8[:,:],i8[:],i8[:],i8[:],i8))'
+    # stardata = (starravelindex,starndata,xx,yy)
+    #stardatatype = 'Tuple((i8[:,:],i4[:],i8[:,:],i8[:,:]))'
+    # covflatdata = (starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix,imflat,errflat,skyflat)
+    #covflatdatatype = 'Tuple((i8[:],i8[:,:],i8[:],i8[:],i8[:],i8,f8[:],f8[:],f8[:]))'
+    
+    stardata = (starravelindex,starndata,xx,yy)
+    out = afit.fullmodel(psfdata,stardata,allpars)
+    print('allfit_numba.fullmodel() okay')
+    
+    out = afit.jac(psfdata,freezedata,flatdata,allpars,False,False)
+    print('allfit_numba.jac() okay')
+
+    out = afit.chisqflat(freezedata,flatdata,psfdata,resflat,errflat,allpars)
+    print('allfit_numba.chisqflat() okay')
+
+    skyflat = imflat.copy()*0
+    covflatdata = (starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix,imflat,errflat,skyflat)
+    out = afit.cov(psfdata,freezedata,covflatdata,allpars)
+    print('allfit_numba.cov() okay')
+
+    frzpars = np.zeros(len(allpars),bool)
+    frzpars[:3] = True
+    resid = image.copy()*0.0
+    resflat = resid.ravel()[indflat]
+    out = afit.dofreeze(frzpars,allpars,freezedata,flatdata,psfdata,resid,resflat)
+    print('allfit_numba.dofreeze() okay')
+    
+    #allfit(psftype,psfparams,psfnpix,psflookup,psfflux,
+    #          image,error,mask,tab,fitradius,maxiter=10,
+    #          minpercdiff=0.5,reskyiter=2,nofreeze=False,
+    #          skyfit=False,verbose=False)
+
+    out = afit.allfit(psftype,params,psfnpix,psflookup,
+                        psfflux,image,error,mask,objtab,
+                        fitradius,10,0.5,2,False,False,False)
+    print('allfit_numba.allfit() okay')
+
+
+
+
+    
+    
+def allfit_tests2():
     """  Testing the allfit code."""
 
     psftab = np.zeros((4,4),np.float64)
@@ -1105,7 +1278,8 @@ def allfit_tests():
     
 if __name__ == "__main__":
     #alltests()
-    utils_tests()
-    models_tests()
+    #utils_tests()
+    #models_tests()
     #getpsf_tests()
-    groupfit_tests()
+    #groupfit_tests()
+    allfit_tests()

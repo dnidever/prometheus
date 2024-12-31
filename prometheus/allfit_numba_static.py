@@ -23,21 +23,20 @@ import models_numba_static as mnb, utils_numba_static as utils
 # Fit a PSF model to multiple stars in an image
 
 from numba.pycc import CC
-cc = CC('_groupfit_numba_static')
-
+cc = CC('_allfit_numba_static')
 
 # xdata = xind,yind
 xdatatype = 'UniTuple(i8[:],2)'
 # psfdata = (psftype,psfparams,psflookup,psforder,imshape)
-psfdatatype = 'Tuple((i8,f8[:],f8[:,:,:],i8,i8[:]))'
+psfdatatype = 'Tuple((i8,f8[:],f8[:,:,:],i8,UniTuple(i8,2)))'
 # freezedata = (freezepars,freezestars)
 freezedatatype = 'Tuple((b1[:],b1[:]))'
 # flatdata = (starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix)
-flatdatatype = 'Tuple((i8[:],i8[:,:],f8[:],f8[:],i8[:],i8))'
+flatdatatype = 'Tuple((i8[:],i8[:,:],i8[:],i8[:],i8[:],i8))'
 # stardata = (starravelindex,starndata,xx,yy)
-stardatatype = 'Tuple((i8[:,:],i8[:],f8[:,:],f8[:,:]))'
+stardatatype = 'Tuple((i8[:,:],i4[:],i8[:,:],i8[:,:]))'
 # covflatdata = (starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix,imflat,errflat,skyflat)
-covflatdatatype = 'Tuple((i8[:],i8[:,:],f8[:],f8[:],i8[:],i8,f8[:],f8[:],f8[:]))'
+covflatdatatype = 'Tuple((i8[:],i8[:,:],i8[:],i8[:],i8[:],i8,f8[:],f8[:],f8[:]))'
 
 
 @njit
@@ -128,7 +127,7 @@ def collatestarsinfo(imshape,mask,starx,stary,hpsfnpix,fitradius,skyradius):
 
 
 @njit
-@cc.export('initstararrays', '(f8[:,:],f8[:,:],b1[:,:],f8[:,:],i8,f8,f8,b1)')
+@cc.export('initstararrays', '(f8[:,:],f8[:,:],b1[:,:],f8[:,:],i8,f8,f8)')
 def initstararrays(image,error,mask,tab,psfnpix,fitradius,skyradius):
     """ Initialize all of the star arrays."""
 
@@ -273,7 +272,7 @@ def psf(xdata,pars,psfdata):
     xind,yind = xdata
     psftype,psfparams,psflookup,psforder,imshape = psfdata
     im1,_ = mnb.psf(xind,yind,pars,psftype,psfparams,psflookup,
-                    imshape,deriv=False,verbose=False)
+                    imshape,False,False)
     return im1
         
 @njit
@@ -283,14 +282,14 @@ def psfjac(xdata,pars,psfdata):
     xind,yind = xdata
     psftype,psfparams,psflookup,psforder,imshape = psfdata
     im1,jac1 = mnb.psf(xind,yind,pars,psftype,psfparams,psflookup,
-                       imshape,deriv=True,verbose=False)
+                       imshape,True,False)
     return im1,jac1
 
 ### ----- functions above were copied from groupfit_numba.py ---------
 
 
 @njit
-@cc.export('getstarsky', '('+psfdatatype+','+freezedatatype+','+covflatdatatype+',f8[:])')
+@cc.export('getstarsky', '(i8[:],f8[:],f8[:,:])')
 def getstarsky(skyravelindex,resid,error):
     """ Calculate the local sky for a single star."""
     res = resid[skyravelindex]
@@ -299,7 +298,7 @@ def getstarsky(skyravelindex,resid,error):
     return sky
 
 @njit
-@cc.export('starcov', '('+psfdatatype+','+freezedatatype+','+covflatdatatype+',f8[:])')
+@cc.export('starcov', '(i8,f8[:],f8[:,:,:],UniTuple(i8,2),f8[:],i8[:],i8[:],i8[:],f8[:],f8[:,:])')
 def starcov(psftype,psfparams,psflookup,imshape,pars,xind,yind,ravelindex,resid,error):
     """ Determine the covariance matrix for a single star."""
 
@@ -314,7 +313,7 @@ def starcov(psftype,psfparams,psflookup,imshape,pars,xind,yind,ravelindex,resid,
     #  higher order terms are assumed to be small
     # https://www8.cs.umu.se/kurser/5DA001/HT07/lectures/lsq-handouts.pdf
     m,j = mnb.psf(xind,yind,pars,psftype,psfparams,psflookup,
-                  imshape,deriv=True,verbose=False)
+                  imshape,True,False)
     # Weights
     #   If weighted least-squares then
     #   J.T * W * J
@@ -337,7 +336,7 @@ def starcov(psftype,psfparams,psflookup,imshape,pars,xind,yind,ravelindex,resid,
     return cov
 
 @njit
-@cc.export('starfit', '('+psfdatatype+','+freezedatatype+','+covflatdatatype+',f8[:])')
+@cc.export('starfit', '(i8,f8[:],f8[:,:,:],UniTuple(i8,2),f8[:],i8[:],i8[:],i8[:],f8[:],f8[:],f8[:])')
 def starfit(psftype,psfparams,psflookup,imshape,
             pars,xind,yind,ravelindex,resid,error,sky):
     """
@@ -356,7 +355,7 @@ def starfit(psftype,psfparams,psflookup,imshape,
     # Get the Jacobian and model
     #  only for pixels that are affected by the "free" parameters
     model0,j = mnb.psf(xind,yind,pars,psftype,psfparams,psflookup,
-                       imshape,deriv=True,verbose=False)
+                       imshape,True,False)
     # Solve Jacobian
     dbeta = utils.qr_jac_solve(j,res,weight=wt)
     dbeta[~np.isfinite(dbeta)] = 0.0  # deal with NaNs, shouldn't happen
@@ -369,9 +368,9 @@ def starfit(psftype,psfparams,psflookup,imshape,
     data = res + model0
     # Models
     model1,_ = mnb.psf(xind,yind,pars+0.5*dbeta,psftype,psfparams,psflookup,
-                       imshape,deriv=False,verbose=False)
+                       imshape,False,False)
     model2,_ = mnb.psf(xind,yind,pars+dbeta,psftype,psfparams,psflookup,
-                       imshape,deriv=False,verbose=False)
+                       imshape,False,False)
     chisq0 = np.sum((data-model0)**2/err**2)
     chisq1 = np.sum((data-model1)**2/err**2)
     chisq2 = np.sum((data-model2)**2/err**2)
@@ -403,7 +402,7 @@ def starfit(psftype,psfparams,psflookup,imshape,
     return bestpars
 
 @njit
-@cc.export('chisq', '('+freezedatatype+','+flatdatatype+','+psfdatatype+',f8[:],f8[:],f8[:])')
+@cc.export('chisq', '(i8[:],f8[:],f8[:])')
 def chisq(ravelindex,resid,error):
     """ Compute total chi-square of the current best-fit solution for all
         fitting pixels."""
@@ -411,7 +410,7 @@ def chisq(ravelindex,resid,error):
     return chisq
 
 @njit
-@cc.export('dofreeze', '(i8[:],f8[:],'+freezedatatype+','+flatdatatype+','+psfdatatype+',f8[:,:],f8[:])')
+@cc.export('dofreeze', '(f8[:],f8[:],f8)')
 def dofreeze(oldpars,newpars,minpercdiff):
     """ Check if we should freeze this star."""
     # Check differences and changes
@@ -426,10 +425,72 @@ def dofreeze(oldpars,newpars,minpercdiff):
     else:
         result = False
     return result
- 
+
 
 @njit
-@cc.export('allfit', '(i8,f8[:],i8,f8[:,:,:],f8,f8[:,:],f8[:,:],b1[:,:],f8[:,:],f8,i8,f8,i8,b1,b1,b1)')
+@cc.export('dofreeze2', '(b1[:],f8[:],'+freezedatatype+','+flatdatatype+','+psfdatatype+',f8[:,:],f8[:])')
+def dofreeze2(frzpars,pars,freezedata,flatdata,psfdata,resid,resflat):
+    """ Freeze par/stars."""
+    # frzpars: boolean array for all FREE parameters specifying which ones should be frozen [Nfreepars]
+    # pars: all parameters  [Npars]
+    
+    freezepars,freezestars = freezedata
+    starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix = flatdata
+    npars = len(freezepars)
+    nstars = len(freezestars)
+
+    # freezepars: boolean array for all parameters [3*nstars], True means frozen
+    # freezestars: boolean array for all stars [nstars], True means frozen
+    
+    # Freeze parameters/stars that converged
+    #  also subtract models of fixed stars
+    #  also return new free parameters
+    freeparsind, = np.where(freezepars==False)      # parameters for free stars
+    frozenparsind, = np.where(freezepars==True)     # parameters for frozen stars
+    # Save the original freeze values
+    origfreezepars = freezepars.copy()
+    origfreezestars = freezestars.copy()
+    # Update freeze values for current "free" parameters
+    freezepars[freeparsind] = frzpars            # stick in updated frozen values for "free" parameters
+    # Only freeze full stars, not individual parameters (either all 3 or none)
+    #  reconstruct freezestars from the updated freezepars array
+    freezestars = np.sum(freezepars[0:3*nstars].copy().reshape(nstars,3),axis=1)==3
+    #  now make sure only parameters are frozen for frozen stars. again, all or nothing
+    if np.sum(freezestars)>0:
+        #allfrozenstarsind, = np.where(freezestars==True)
+        for i in np.where(freezestars==True)[0]:
+            freezepars[i*3:i*3+3] = True
+    # Subtract model for newly frozen stars
+    newfreezestars, = np.where((origfreezestars==False) & (freezestars==True))
+    
+    # Freezing more stars
+    if len(newfreezestars)>0:
+        for i in range(len(newfreezestars)):
+            istar = newfreezestars[i]
+            freezestars[istar] = True
+            freezepars[3*istar:3*istar+3] = True
+            # Subtract model of frozen star from residuals
+            pars1 = pars[3*istar:3*istar+3]
+            n1 = starflat_ndata[istar]
+            invind1 = starflat_index[istar,:n1]
+            xind1 = xflat[invind1]
+            yind1 = yflat[invind1]
+            xdata1 = (xind1,yind1)
+            im1 = psf(xdata1,pars1,psfdata)
+            resflat[invind1] -= im1
+            resid[indflat[invind1]] -= im1
+            
+        # Get the new array of free parameters
+        freeparsind, = np.where(freezepars==False)
+        bestpar = pars[freeparsind]
+        nfreezepars = np.sum(freezepars)
+        nfreezestars = np.sum(freezestars)
+
+    return freezepars,freezestars,resid,resflat
+
+
+@njit
+@cc.export('allfit', '(i8,f8[:],i8,f8[:,:,:],f8,f8[:,:],f8[:,:],b1[:,:],f8[:,:],f8,i8,f8,i8,b1,b1)')
 def allfit(psftype,psfparams,psfnpix,psflookup,psfflux,
            image,error,mask,tab,fitradius,maxiter=10,
            minpercdiff=0.5,reskyiter=2,verbose=False,
@@ -728,9 +789,9 @@ def allfit(psftype,psfparams,psfnpix,psflookup,psfflux,
             xind1 = xx[ravelindex1]
             yind1 = yy[ravelindex1]
             prevmodel,_ = mnb.psf(xind1,yind1,pars1,psftype,psfparams,psflookup,
-                                  imshape,deriv=False,verbose=False)
+                                  imshape,False,False)
             newmodel,_ = mnb.psf(xind1,yind1,newpars1,psftype,psfparams,psflookup,
-                                 imshape,deriv=False,verbose=False)
+                                 imshape,False,False)
             resid[ravelindex1] += prevmodel
             resid[ravelindex1] -= newmodel
             # Update the model image
@@ -820,260 +881,149 @@ def allfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     return outtab,modelim,skyim
     
 
-def pallfit(psf,image,tab,fitradius=0.0,maxiter=10,minpercdiff=0.5,
-           reskyiter=2,nofreeze=False,verbose=False):
-    """
-    Fit PSF to all stars in an image iteratively.
-
-    Parameters
-    ----------
-    psf : PSF object
-       PSF object to use for the fitting.
-    image : CCDData object
-       Image to use to fit PSF model to stars.
-    tab : table
-       Catalog with initial amp/x/y values for the stars to use to fit the PSF.
-       To pre-group the stars, add a "group_id" in the catalog.
-    fitradius : float, optional
-       The fitting radius in pixels.  By default the PSF FWHM is used.
-           reskyiter=2,nofreeze=False,skyfit=True,verbose=False):
-    maxiter : int, optional
-       Maximum number of iterations to allow.  Only for methods "cholesky", "qr" or "svd".
-       Default is 10.
-    minpercdiff : float, optional
-       Minimum percent change in the parameters to allow until the solution is
-       considered converged and the iteration loop is stopped.  Only for methods
-       "cholesky", "qr" and "svd".  Default is 0.5.
-    reskyiter : int, optional
-       After how many iterations to re-calculate the sky background. Default is 2.
-    nofreeze : boolean, optional
-       Do not freeze any parameters even if they have converged.  Default is False.
-    verbose : boolean, optional
-       Verbose output.
-
-    Returns
-    -------
-    out : table
-       Table of best-fitting parameters for each star.
-       id, amp, amp_error, x, x_err, y, y_err, sky
-    model : numpy array
-       Best-fitting model of the stars and sky background.
-    sky : numpy array
-       Best-fitting sky image.
-
-    Example
-    -------
-
-    outtab,model,sky = gf.fit()
-
-    """
-
-    t0 = time.time()
-
-    # if skyfit==False:
-    #     self.freezepars[-1] = True  # freeze sky value
-        
-    # # Centroids fixed
-    # if recenter==False:
-    #     self.freezepars[1::3] = True  # freeze X values
-    #     self.freezepars[2::3] = True  # freeze Y values
-
-    # Create AllFitter object
-    fitradius = 3.0
-    if psf.haslookup:
-        psflookup = psf.lookup.copy().astype(np.float64)
-    else:
-        psflookup = np.zeros((1,1,1),np.float64)
-    psfflux = psf.flux()
-    out = numba_allfit(psf.psftype,psf.params,psf.npix,psflookup,psfflux,
-                       image.data,image.error,image.mask,tab,fitradius,
-                       maxiter,minpercdiff,reskyiter,verbose,nofreeze)
-    outtab,model,skyim = out
-    model = model.reshape(image.shape)
-    skyim = skyim.reshape(image.shape)
-    return outtab,model,skyim
-        
-    #af = AllFitter(psf.psftype,psf.params,psf.npix,psflookup,
-    #               image.data,image.error,image.mask,tab,
-    #               fitradius,verbose,nofreeze)
-    ## Fit the stars iteratively
-    #af.fit()
-    
-    # Make final model
-    # self.unfreeze()
-    model = af.modelim.copy().reshape(af.imshape)
-    skyim = af.skyim.copy().reshape(af.imshape)
-
-    # Parameters and uncertainties
-    pars = af.pars
-    perror = af.perror
-
-    # Put in catalog
-    outtab = np.zeros((af.nstars,15),np.float64)
-    outtab[:,0] = np.arange(af.nstars)+1           # id
-    outtab[:,1] = pars[0:-1:3]                       # amp
-    outtab[:,2] = perror[0:-1:3]                     # amp_error
-    outtab[:,3] = pars[1::3]                         # x
-    outtab[:,4] = perror[1::3]                       # x_error
-    outtab[:,5] = pars[2::3]                         # y
-    outtab[:,6] = perror[2::3]                       # y_error
-    outtab[:,7] = af._starsky                        # sky
-    psfflux = psf.flux()
-    outtab[:,8] = outtab[:,1]*psfflux                # flux
-    outtab[:,9] = outtab[:,2]*psfflux                # flux_error
-    outtab[:,10] = -2.5*np.log10(np.maximum(outtab[:,8],1e-10))+25.0   # mag
-    outtab[:,11] = (2.5/np.log(10))*outtab[:,9]/outtab[:,8]            # mag_error
-    outtab[:,12] = af.starrms
-    outtab[:,13] = af.starchisq
-    outtab[:,14] = af.starniter                      # niter, what iteration it converged on
-
-    if verbose:
-        print('dt =',(clock()-start)/1e9,'sec.')
-
-    return outtab,model,skyim
-
         
 
-@njit
-@cc.export('fit', '(i8,f8[:],i8,f8[:,:,:],f8,f8[:,:],f8[:,:],b1[:,:],f8[:,:],f8,i8,f8,i8,b1,b1,b1)')
-def fit(psf,image,tab,fitradius=0.0,recenter=True,maxiter=10,minpercdiff=0.5,
-        reskyiter=2,nofreeze=False,skyfit=True,verbose=False):
-    """
-    Fit PSF to all stars in an image.
+# this is the old way to do "allfit", groups and single/isolated stars
+# @njit
+# @cc.export('fit', '(i8,f8[:],i8,f8[:,:,:],f8,f8[:,:],f8[:,:],b1[:,:],f8[:,:],f8,i8,f8,i8,b1,b1,b1)')
+# def fit(psf,image,tab,fitradius=0.0,recenter=True,maxiter=10,minpercdiff=0.5,
+#         reskyiter=2,nofreeze=False,skyfit=True,verbose=False):
+#     """
+#     Fit PSF to all stars in an image.
 
-    To pre-group the stars, add a "group_id" in the input catalog.
+#     To pre-group the stars, add a "group_id" in the input catalog.
 
-    Parameters
-    ----------
-    psf : PSF object
-       PSF object with initial parameters to use.
-    image : CCDData object
-       Image to use to fit PSF model to stars.
-    tab : table
-       Catalog with initial amp/x/y values for the stars to use to fit the PSF.
-       To pre-group the stars, add a "group_id" in the catalog.
-    fitradius : float, optional
-       The fitting radius in pixels.  By default the PSF FWHM is used.
-    recenter : boolean, optional
-       Allow the centroids to be fit.  Default is True.
-    maxiter : int, optional
-       Maximum number of iterations to allow.  Only for methods "qr" or "svd".
-       Default is 10.
-    minpercdiff : float, optional
-       Minimum percent change in the parameters to allow until the solution is
-       considered converged and the iteration loop is stopped.  Only for methods
-       "qr" and "svd".  Default is 0.5.
-    reskyiter : int, optional
-       After how many iterations to re-calculate the sky background. Default is 2.
-    nofreeze : boolean, optional
-       Do not freeze any parameters even if they have converged.  Default is False.
-    skyfit : boolean, optional
-       Fit a constant sky offset with the stellar parameters.  Default is True.
-    verbose : boolean, optional
-       Verbose output.
+#     Parameters
+#     ----------
+#     psf : PSF object
+#        PSF object with initial parameters to use.
+#     image : CCDData object
+#        Image to use to fit PSF model to stars.
+#     tab : table
+#        Catalog with initial amp/x/y values for the stars to use to fit the PSF.
+#        To pre-group the stars, add a "group_id" in the catalog.
+#     fitradius : float, optional
+#        The fitting radius in pixels.  By default the PSF FWHM is used.
+#     recenter : boolean, optional
+#        Allow the centroids to be fit.  Default is True.
+#     maxiter : int, optional
+#        Maximum number of iterations to allow.  Only for methods "qr" or "svd".
+#        Default is 10.
+#     minpercdiff : float, optional
+#        Minimum percent change in the parameters to allow until the solution is
+#        considered converged and the iteration loop is stopped.  Only for methods
+#        "qr" and "svd".  Default is 0.5.
+#     reskyiter : int, optional
+#        After how many iterations to re-calculate the sky background. Default is 2.
+#     nofreeze : boolean, optional
+#        Do not freeze any parameters even if they have converged.  Default is False.
+#     skyfit : boolean, optional
+#        Fit a constant sky offset with the stellar parameters.  Default is True.
+#     verbose : boolean, optional
+#        Verbose output.
 
-    Returns
-    -------
-    results : table
-       Table of best-fitting parameters for each star.
-       id, amp, amp_error, x, x_err, y, y_err, sky
-    model : numpy array
-       Best-fitting model of the stars and sky background.
+#     Returns
+#     -------
+#     results : table
+#        Table of best-fitting parameters for each star.
+#        id, amp, amp_error, x, x_err, y, y_err, sky
+#     model : numpy array
+#        Best-fitting model of the stars and sky background.
 
-    Example
-    -------
+#     Example
+#     -------
 
-    results,model = fit(psf,image,tab,groups)
+#     results,model = fit(psf,image,tab,groups)
 
-    """
+#     """
 
-    start = clock()
-    nstars = len(tab)
-    ny,nx = image.shape
+#     start = clock()
+#     nstars = len(tab)
+#     ny,nx = image.shape
 
-    # Groups
-    if 'group_id' not in tab.keys():
-        daogroup = DAOGroup(crit_separation=2.5*psf.fwhm())
-        starlist = tab.copy()
-        starlist['x_0'] = tab['x']
-        starlist['y_0'] = tab['y']
-        # THIS TAKES ~4 SECONDS!!!!!! WAY TOO LONG!!!!
-        star_groups = daogroup(starlist)
-        tab['group_id'] = star_groups['group_id']
+#     # Groups
+#     if 'group_id' not in tab.keys():
+#         daogroup = DAOGroup(crit_separation=2.5*psf.fwhm())
+#         starlist = tab.copy()
+#         starlist['x_0'] = tab['x']
+#         starlist['y_0'] = tab['y']
+#         # THIS TAKES ~4 SECONDS!!!!!! WAY TOO LONG!!!!
+#         star_groups = daogroup(starlist)
+#         tab['group_id'] = star_groups['group_id']
 
-    # Star index
-    starindex = utils.index(np.array(tab['group_id']))
-    #starindex = dln.create_index(np.array(tab['group_id'])) 
-    groups = starindex['value']
-    ngroups = len(groups)
-    if verbose:
-        print(ngroups,'star groups')
+#     # Star index
+#     starindex = utils.index(np.array(tab['group_id']))
+#     #starindex = dln.create_index(np.array(tab['group_id'])) 
+#     groups = starindex['value']
+#     ngroups = len(groups)
+#     if verbose:
+#         print(ngroups,'star groups')
 
-    # Initialize catalog
-    #dt = np.dtype([('id',int),('amp',float),('amp_error',float),('x',float),
-    #               ('x_error',float),('y',float),('y_error',float),('sky',float),
-    #               ('flux',float),('flux_error',float),('mag',float),('mag_error',float),
-    #               ('niter',int),('group_id',int),('ngroup',int),('rms',float),('chisq',float)])
-    outtab = np.zeros((nstars,17),dtype=dt)
-    outtab[:,0] = tab[:,0]  # copy ID
+#     # Initialize catalog
+#     #dt = np.dtype([('id',int),('amp',float),('amp_error',float),('x',float),
+#     #               ('x_error',float),('y',float),('y_error',float),('sky',float),
+#     #               ('flux',float),('flux_error',float),('mag',float),('mag_error',float),
+#     #               ('niter',int),('group_id',int),('ngroup',int),('rms',float),('chisq',float)])
+#     outtab = np.zeros((nstars,17),dtype=dt)
+#     outtab[:,0] = tab[:,0]  # copy ID
 
 
-    # Group Loop
-    #---------------
-    resid = image.copy()
-    outmodel = np.zeros(image.shape,np.float64)
-    outsky = np.zeros(image.shape,np.float64)
-    for g,grp in enumerate(groups):
-        ind = starindex['index'][starindex['lo'][g]:starindex['hi'][g]+1]
-        nind = len(ind)
-        inptab = tab[ind].copy()
-        if 'amp' not in inptab.columns:
-            # Estimate amp from flux and fwhm
-            # area under 2D Gaussian is 2*pi*A*sigx*sigy
-            if 'fwhm' in inptab.columns:
-                amp = inptab['flux']/(2*np.pi*(inptab['fwhm']/2.35)**2)
-            else:
-                amp = inptab['flux']/(2*np.pi*(psf.fwhm()/2.35)**2)                
-            staramp = np.maximum(amp,0)   # make sure it's positive
-            inptab['amp'] = staramp
+#     # Group Loop
+#     #---------------
+#     resid = image.copy()
+#     outmodel = np.zeros(image.shape,np.float64)
+#     outsky = np.zeros(image.shape,np.float64)
+#     for g,grp in enumerate(groups):
+#         ind = starindex['index'][starindex['lo'][g]:starindex['hi'][g]+1]
+#         nind = len(ind)
+#         inptab = tab[ind].copy()
+#         if 'amp' not in inptab.columns:
+#             # Estimate amp from flux and fwhm
+#             # area under 2D Gaussian is 2*pi*A*sigx*sigy
+#             if 'fwhm' in inptab.columns:
+#                 amp = inptab['flux']/(2*np.pi*(inptab['fwhm']/2.35)**2)
+#             else:
+#                 amp = inptab['flux']/(2*np.pi*(psf.fwhm()/2.35)**2)                
+#             staramp = np.maximum(amp,0)   # make sure it's positive
+#             inptab['amp'] = staramp
         
-        if verbose:
-            print('-- Group '+str(grp)+'/'+str(len(groups))+' : '+str(nind)+' star(s) --')
+#         if verbose:
+#             print('-- Group '+str(grp)+'/'+str(len(groups))+' : '+str(nind)+' star(s) --')
 
-        # Single Star
-        if nind==1:
-            inptab = np.array([inptab[1],inptab[2],inptab[3]])
-            out,model = psf.fit(resid,inptab,niter=3,verbose=verbose,retfullmodel=True,recenter=recenter)
-            model.data -= out['sky']   # remove sky
-            outmodel.data[model.bbox.slices] += model.data
-            outsky.data[model.bbox.slices] = out['sky']
+#         # Single Star
+#         if nind==1:
+#             inptab = np.array([inptab[1],inptab[2],inptab[3]])
+#             out,model = psf.fit(resid,inptab,niter=3,verbose=verbose,retfullmodel=True,recenter=recenter)
+#             model.data -= out['sky']   # remove sky
+#             outmodel.data[model.bbox.slices] += model.data
+#             outsky.data[model.bbox.slices] = out['sky']
 
-        # Group
-        else:
-            bbox = cutoutbbox(image,psf,inptab)
-            out,model,sky = gfit.fit(psf,resid[bbox.slices],inptab,fitradius=fitradius,
-                                     recenter=recenter,maxiter=maxiter,minpercdiff=minpercdiff,
-                                     reskyiter=reskyiter,nofreeze=nofreeze,verbose=verbose,
-                                     skyfit=skyfit,absolute=True)
-            outmodel.data[model.bbox.slices] += model.data
-            outsky.data[model.bbox.slices] = sky
+#         # Group
+#         else:
+#             bbox = cutoutbbox(image,psf,inptab)
+#             out,model,sky = gfit.fit(psf,resid[bbox.slices],inptab,fitradius=fitradius,
+#                                      recenter=recenter,maxiter=maxiter,minpercdiff=minpercdiff,
+#                                      reskyiter=reskyiter,nofreeze=nofreeze,verbose=verbose,
+#                                      skyfit=skyfit,absolute=True)
+#             outmodel.data[model.bbox.slices] += model.data
+#             outsky.data[model.bbox.slices] = sky
             
-        # Subtract the best model for the group/star
-        resid[model.bbox.slices].data -= model.data
+#         # Subtract the best model for the group/star
+#         resid[model.bbox.slices].data -= model.data
 
-        # Put in catalog
-        cols = ['amp','amp_error','x','x_error','y','y_error',
-                'sky','flux','flux_error','mag','mag_error','niter','rms','chisq']
-        for c in cols:
-            outtab[c][ind] = out[c]
-        outtab['group_id'][ind] = grp
-        outtab['ngroup'][ind] = nind
-        outtab = Table(outtab)
+#         # Put in catalog
+#         cols = ['amp','amp_error','x','x_error','y','y_error',
+#                 'sky','flux','flux_error','mag','mag_error','niter','rms','chisq']
+#         for c in cols:
+#             outtab[c][ind] = out[c]
+#         outtab['group_id'][ind] = grp
+#         outtab['ngroup'][ind] = nind
+#         outtab = Table(outtab)
         
-    if verbose:
-        print('dt = {:.2f} sec.'.format(time.time()-t0))
+#     if verbose:
+#         print('dt = {:.2f} sec.'.format(time.time()-t0))
     
-    return outtab,outmodel,outsky
+#     return outtab,outmodel,outsky
 
 
 if __name__ == "__main__":
