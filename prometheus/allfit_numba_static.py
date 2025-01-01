@@ -336,7 +336,7 @@ def starcov(psftype,psfparams,psflookup,imshape,pars,xind,yind,ravelindex,resid,
     return cov
 
 @njit
-@cc.export('starfit', '(i8,f8[:],f8[:,:,:],UniTuple(i8,2),f8[:],i8[:],i8[:],i8[:],f8[:],f8[:],f8[:])')
+@cc.export('starfit', '(i8,f8[:],f8[:,:,:],UniTuple(i8,2),f8[:],i8[:],i8[:],i8[:],f8[:],f8[:,:],f8)')
 def starfit(psftype,psfparams,psflookup,imshape,
             pars,xind,yind,ravelindex,resid,error,sky):
     """
@@ -402,7 +402,7 @@ def starfit(psftype,psfparams,psflookup,imshape,
     return bestpars
 
 @njit
-@cc.export('chisq', '(i8[:],f8[:],f8[:])')
+@cc.export('chisq', '(i8[:],f8[:],f8[:,:])')
 def chisq(ravelindex,resid,error):
     """ Compute total chi-square of the current best-fit solution for all
         fitting pixels."""

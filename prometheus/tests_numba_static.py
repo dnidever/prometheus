@@ -1063,10 +1063,37 @@ def allfit_tests():
     allpars[0::3] = objtab[:,1]
     allpars[1::3] = objtab[:,2]
     allpars[2::3] = objtab[:,3] 
-    #out = afit.model(psfdata,freezedata,flatdata,allpars,False,False,False)
-    #print('allfit_numba.model() okay')
 
-    return
+    sn1 = skyndata[0]
+    skyravelindex1 = skyravelindex[0,:sn1]
+    resid = image.ravel()
+    sky1 = afit.getstarsky(skyravelindex1,resid,error)
+    print('allfit_numba.getstarsky() okay')
+
+    i = 0
+    #pars1 = pars[3*i:3*i+3]
+    pars1 = objtab[i,1:]
+    fn1 = starfitndata[i]
+    fravelindex1 = starfitravelindex[i,:fn1]
+    fxind1 = xx.flatten()[fravelindex1]
+    fyind1 = yy.flatten()[fravelindex1]
+    psfparams = mpars
+    cov1 = afit.starcov(psftype,psfparams,psflookup,imshape,
+                        pars1,fxind1,fyind1,fravelindex1,resid,error)
+    print('allfit_numba.starcov() okay')
+
+    out = afit.starfit(psftype,psfparams,psflookup,imshape,
+                       pars1,fxind1,fyind1,fravelindex1,resid,error,sky)
+    print('allfit_numba.starfit() okay')
+    
+    out = afit.chisq(fravelindex1,resid,error)
+    print('allfit_numba.chisq() okay')
+    
+    # out = afit.dofreeze(oldpars,newpars,minpercdiff)
+    # print('allfit_numba.dofreeze() okay')
+    
+    # out = afit.dofreeze2(frzpars,pars,freezedata,flatdata,psfdata,resid,resflat)
+    # print('allfit_numba.dofreeze2() okay')
     
     # xdata = xind,yind
     #xdatatype = 'UniTuple(i8[:],2)'
@@ -1080,21 +1107,12 @@ def allfit_tests():
     #stardatatype = 'Tuple((i8[:,:],i4[:],i8[:,:],i8[:,:]))'
     # covflatdata = (starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix,imflat,errflat,skyflat)
     #covflatdatatype = 'Tuple((i8[:],i8[:,:],i8[:],i8[:],i8[:],i8,f8[:],f8[:],f8[:]))'
-    
-    stardata = (starravelindex,starndata,xx,yy)
-    out = afit.fullmodel(psfdata,stardata,allpars)
-    print('allfit_numba.fullmodel() okay')
-    
-    out = afit.jac(psfdata,freezedata,flatdata,allpars,False,False)
-    print('allfit_numba.jac() okay')
 
-    out = afit.chisqflat(freezedata,flatdata,psfdata,resflat,errflat,allpars)
-    print('allfit_numba.chisqflat() okay')
 
-    skyflat = imflat.copy()*0
-    covflatdata = (starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix,imflat,errflat,skyflat)
-    out = afit.cov(psfdata,freezedata,covflatdata,allpars)
-    print('allfit_numba.cov() okay')
+    # skyflat = imflat.copy()*0
+    # covflatdata = (starflat_ndata,starflat_index,xflat,yflat,indflat,ntotpix,imflat,errflat,skyflat)
+    # out = afit.cov(psfdata,freezedata,covflatdata,allpars)
+    # print('allfit_numba.cov() okay')
 
     frzpars = np.zeros(len(allpars),bool)
     frzpars[:3] = True
