@@ -618,11 +618,16 @@ def allfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     #   imflat/errflat - 1D raveled image and error arrays for the flat/fitting pixels
     #   skyflat - smooth sky values for the flat pixels
     #   resflat - flat pixel values of "resid"
+
+    # Create initial smooth sky image
+    skyim = utils.sky(im).flatten()
+    skyflat = skyim[indflat]
     
-    # Create initial sky image
-    #  improve initial sky estimate by removing initial models
-    tresid = np.zeros(imshape[0]*imshape[1],np.float64)
-    tresid[:] = im.copy().astype(np.float64).flatten()
+    # Subtract the initial sky and star models from the residual array
+    resid = np.zeros(imshape[0]*imshape[1],np.float64)
+    resid[:] = im.copy().astype(np.float64).flatten()   # flatten makes it easier to modify
+    resid[:] -= skyim   # subtract smooth sky
+    modelim = np.zeros(imshape[0]*imshape[1],np.float64)
     for i in range(nstars):
         pars1 = pars[3*i:3*i+3]
         n1 = starndata[i]
@@ -631,15 +636,12 @@ def allfit(psftype,psfparams,psfnpix,psflookup,psfflux,
         yind1 = yy[ravelind1]
         xdata1 = (xind1,yind1)
         m = psf(xdata1,pars1,psfdata)
-        tresid[ravelind1] -= m
-    skyim = utils.sky(tresid.copy().reshape(imshape[0],imshape[1])).flatten()
-    skyflat = skyim[indflat]
+        #m,_ = mnb.psf(xind1,yind1,pars1,psftype,psfparams,psflookup,
+        #              imshape,deriv=False,verbose=False)
+        resid[ravelind1] -= m
+        modelim[ravelind1] += m
+    resflat = resid[indflat]    # initialize resflat
 
-    # Initialize RESID and subtract initial smooth sky
-    resid = np.zeros(imshape[0]*imshape[1],np.float64)
-    resid[:] = im.copy().astype(np.float64).flatten()   # flatten makes it easier to modify
-    resid[:] -= skyim          # subtract smooth sky
-    resflat = resid[indflat]   # initialize resflat
 
     # Perform the fitting
     #--------------------
@@ -668,7 +670,7 @@ def allfit(psftype,psfparams,psfnpix,psflookup,psfflux,
     # ----- END copied from groupfit_numba.py ---------
 
 
-    return
+    #return
 
 
     
@@ -835,7 +837,7 @@ def allfit(psftype,psfparams,psfnpix,psflookup,psfflux,
             
         niter += 1     # increment counter
 
-            
+        
     # Check that all starniter are set properly
     #  if we stopped "prematurely" then not all stars were frozen
     #  and didn't have starniter set
