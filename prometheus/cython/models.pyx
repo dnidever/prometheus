@@ -384,73 +384,77 @@ cpdef double[:] gauss_cxy2abt(double cxx, double cyy, double cxy):
 # ####### GAUSSIAN ########
 
 
-# cpdef gaussian2d_flux(pars):
-#     """
-#     Return the total flux (or volume) of a 2D Gaussian.
+cpdef double gaussian2d_flux(double[:] pars):
+    """
+    Return the total flux (or volume) of a 2D Gaussian.
 
-#     Parameters
-#     ----------
-#     pars : numpy array
-#        Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+    Parameters
+    ----------
+    pars : numpy array
+       Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta]
 
-#     Returns
-#     -------
-#     flux : float
-#        Total flux or volumne of the 2D Gaussian.
+    Returns
+    -------
+    flux : float
+       Total flux or volumne of the 2D Gaussian.
     
-#     Example
-#     -------
+    Example
+    -------
 
-#     flux = gaussian2d_flux(pars)
+    flux = gaussian2d_flux(pars)
 
-#     """
-#     # Volume is 2*pi*A*sigx*sigy
-#     amp = pars[0]
-#     xsig = pars[3]
-#     ysig = pars[4]    
-#     volume = 2*np.pi*amp*xsig*ysig
-#     return volume
+    """
+    cdef double volume
+    # Volume is 2*pi*A*sigx*sigy
+    amp = pars[0]
+    xsig = pars[3]
+    ysig = pars[4]    
+    volume = 2*pi*amp*xsig*ysig
+    return volume
 
 
-# cpdef gaussian2d_fwhm(pars):
-#     """
-#     Return the FWHM of a 2D Gaussian.
+cpdef double gaussian2d_fwhm(double[:] pars):
+    """
+    Return the FWHM of a 2D Gaussian.
 
-#     Parameters
-#     ----------
-#     pars : numpy array
-#        Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+    Parameters
+    ----------
+    pars : numpy array
+       Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta]
 
-#     Returns
-#     -------
-#     fwhm : float
-#        The full-width at half maximum of the Gaussian.
+    Returns
+    -------
+    fwhm : float
+       The full-width at half maximum of the Gaussian.
     
-#     Example
-#     -------
+    Example
+    -------
 
-#     fwhm = gaussian2d_fwhm(pars)
+    fwhm = gaussian2d_fwhm(pars)
 
-#     """
-    
-#     # pars = [amplitude, x0, y0, xsig, ysig, theta]
+    """
+    cdef double fwhm
 
-#     # xdiff = x-x0
-#     # ydiff = y-y0
-#     # f(x,y) = A*exp(-0.5 * (a*xdiff**2 + b*xdiff*ydiff + c*ydiff**2))
+    # pars = [amplitude, x0, y0, xsig, ysig, theta]
 
-#     xsig = pars[3]
-#     ysig = pars[4]
+    # xdiff = x-x0
+    # ydiff = y-y0
+    # f(x,y) = A*exp(-0.5 * (a*xdiff**2 + b*xdiff*ydiff + c*ydiff**2))
 
-#     # The mean radius of an ellipse is: (2a+b)/3
-#     sig_major = np.max(np.array([xsig,ysig]))
-#     sig_minor = np.min(np.array([xsig,ysig]))
-#     mnsig = (2.0*sig_major+sig_minor)/3.0
-#     # Convert sigma to FWHM
-#     # FWHM = 2*sqrt(2*ln(2))*sig ~ 2.35482*sig
-#     fwhm = mnsig*2.35482
+    xsig = pars[3]
+    ysig = pars[4]
 
-#     return fwhm
+    # The mean radius of an ellipse is: (2a+b)/3
+    #sig_major = np.max(np.array([xsig,ysig]))
+    #sig_minor = np.min(np.array([xsig,ysig]))
+    sig_major = max([xsig,ysig])
+    sig_minor = min([xsig,ysig])
+    mnsig = (2.0*sig_major+sig_minor)/3.0
+    # Convert sigma to FWHM
+    # FWHM = 2*sqrt(2*ln(2))*sig ~ 2.35482*sig
+    fwhm = mnsig*2.35482
+
+    return fwhm
 
 
 # cpdef agaussian2d(x,y,pars,nderiv):
@@ -522,99 +526,102 @@ cpdef double[:] gauss_cxy2abt(double cxx, double cyy, double cxy):
 #     return g,deriv
     
 
-# cpdef double gaussian2d(double x, double y, double[:] pars, int nderiv):
-#     """
-#     Two dimensional Gaussian model function.
+cpdef list gaussian2d(double x, double y, double[:] pars, int nderiv):
+    """
+    Two dimensional Gaussian model function.
     
-#     Parameters
-#     ----------
-#     x : float
-#       Single X-value for which to compute the Gaussian model.
-#     y : float
-#       Single Y-value of points for which to compute the Gaussian model.
-#     pars : numpy array
-#        Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta]
-#     nderiv : int
-#        The number of derivatives to return.
+    Parameters
+    ----------
+    x : float
+      Single X-value for which to compute the Gaussian model.
+    y : float
+      Single Y-value of points for which to compute the Gaussian model.
+    pars : numpy array
+       Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+    nderiv : int
+       The number of derivatives to return.
 
-#     Returns
-#     -------
-#     g : float
-#       The Gaussian model for the input x/y values and parameters (same
-#         shape as x/y).
-#     derivative : numpy array
-#       Array of derivatives of g relative to the input parameters.
+    Returns
+    -------
+    g : float
+      The Gaussian model for the input x/y values and parameters (same
+        shape as x/y).
+    derivative : numpy array
+      Array of derivatives of g relative to the input parameters.
 
-#     Example
-#     -------
+    Example
+    -------
 
-#     g,derivative = gaussian2d(x,y,pars,nderiv)
+    g,derivative = gaussian2d(x,y,pars,nderiv)
 
-#     """
-#     cdef double g
+    """
+    cdef double g
+    cdef double[:] deriv = np.zeros(nderiv)
 
-#     if len(pars)==6:
-#         amp,xc,yc,asemi,bsemi,theta = pars
-#         cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
-#     else:
-#         amp,xc,yc,asemi,bsemi,theta,cxx,cyy,cxy = pars
-#     u = (x-xc)
-#     u2 = u**2
-#     v = (y-yc)
-#     v2 = v**2
-#     # amp = 1/(asemi*bsemi*2*np.pi)
-#     g = amp * exp(-0.5*(cxx*u**2 + cyy*v**2 + cxy*u*v))
+    if len(pars)==6:
+        amp,xc,yc,asemi,bsemi,theta = pars
+        cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
+    else:
+        amp,xc,yc,asemi,bsemi,theta,cxx,cyy,cxy = pars
+    u = (x-xc)
+    u2 = u**2
+    v = (y-yc)
+    v2 = v**2
+    # amp = 1/(asemi*bsemi*2*np.pi)
+    g = amp * exp(-0.5*(cxx*u**2 + cyy*v**2 + cxy*u*v))
 
-    # #  pars = [amplitude, x0, y0, xsigma, ysigma, theta]
-    # deriv = np.zeros(nderiv,float)    
-    # if nderiv>0:
-    #     # amplitude
-    #     dg_dA = g / amp
-    #     deriv[0] = dg_dA
-    #     # x0
-    #     dg_dx_mean = g * 0.5*((2. * cxx * u) + (cxy * v))
-    #     deriv[1] = dg_dx_mean
-    #     # y0
-    #     dg_dy_mean = g * 0.5*((cxy * u) + (2. * cyy * v))
-    #     deriv[2] = dg_dy_mean
-    #     if nderiv>3:
-    #         sint = sin(theta)        
-    #         cost = cos(theta)        
-    #         sint2 = sint ** 2
-    #         cost2 = cost ** 2
-    #         sin2t = sin(2. * theta)
-    #         # xsig
-    #         asemi2 = asemi ** 2
-    #         asemi3 = asemi ** 3
-    #         da_dxsig = -cost2 / asemi3
-    #         db_dxsig = -sin2t / asemi3
-    #         dc_dxsig = -sint2 / asemi3
-    #         dg_dxsig = g * (-(da_dxsig * u2 +
-    #                           db_dxsig * u * v +
-    #                           dc_dxsig * v2))
-    #         deriv[3] = dg_dxsig
-    #         # ysig
-    #         bsemi2 = bsemi ** 2
-    #         bsemi3 = bsemi ** 3
-    #         da_dysig = -sint2 / bsemi3
-    #         db_dysig = sin2t / bsemi3
-    #         dc_dysig = -cost2 / bsemi3
-    #         dg_dysig = g * (-(da_dysig * u2 +
-    #                           db_dysig * u * v +
-    #                           dc_dysig * v2))
-    #         deriv[4] = dg_dysig
-    #         # dtheta
-    #         if asemi != bsemi:
-    #             cos2t = cos(2.0*theta)
-    #             da_dtheta = (sint * cost * ((1. / bsemi2) - (1. / asemi2)))
-    #             db_dtheta = (cos2t / asemi2) - (cos2t / bsemi2)
-    #             dc_dtheta = -da_dtheta
-    #             dg_dtheta = g * (-(da_dtheta * u2 +
-    #                                db_dtheta * u * v +
-    #                                dc_dtheta * v2))
-    #             deriv[5] = dg_dtheta
+    #return g
 
-    # return g,deriv
+    #  pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+    #deriv = np.zeros(nderiv,float)    
+    if nderiv>0:
+        # amplitude
+        dg_dA = g / amp
+        deriv[0] = dg_dA
+        # x0
+        dg_dx_mean = g * 0.5*((2. * cxx * u) + (cxy * v))
+        deriv[1] = dg_dx_mean
+        # y0
+        dg_dy_mean = g * 0.5*((cxy * u) + (2. * cyy * v))
+        deriv[2] = dg_dy_mean
+        if nderiv>3:
+            sint = sin(theta)        
+            cost = cos(theta)        
+            sint2 = sint ** 2
+            cost2 = cost ** 2
+            sin2t = sin(2. * theta)
+            # xsig
+            asemi2 = asemi ** 2
+            asemi3 = asemi ** 3
+            da_dxsig = -cost2 / asemi3
+            db_dxsig = -sin2t / asemi3
+            dc_dxsig = -sint2 / asemi3
+            dg_dxsig = g * (-(da_dxsig * u2 +
+                              db_dxsig * u * v +
+                              dc_dxsig * v2))
+            deriv[3] = dg_dxsig
+            # ysig
+            bsemi2 = bsemi ** 2
+            bsemi3 = bsemi ** 3
+            da_dysig = -sint2 / bsemi3
+            db_dysig = sin2t / bsemi3
+            dc_dysig = -cost2 / bsemi3
+            dg_dysig = g * (-(da_dysig * u2 +
+                              db_dysig * u * v +
+                              dc_dysig * v2))
+            deriv[4] = dg_dysig
+            # dtheta
+            if asemi != bsemi:
+                cos2t = cos(2.0*theta)
+                da_dtheta = (sint * cost * ((1. / bsemi2) - (1. / asemi2)))
+                db_dtheta = (cos2t / asemi2) - (cos2t / bsemi2)
+                dc_dtheta = -da_dtheta
+                dg_dtheta = g * (-(da_dtheta * u2 +
+                                   db_dtheta * u * v +
+                                   dc_dtheta * v2))
+                deriv[5] = dg_dtheta
+
+    return [g,deriv]
 
 
 
