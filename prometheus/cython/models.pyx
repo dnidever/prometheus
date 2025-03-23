@@ -457,73 +457,81 @@ cpdef double gaussian2d_fwhm(double[:] pars):
     return fwhm
 
 
-# cpdef agaussian2d(x,y,pars,nderiv):
-#     """
-#     Two dimensional Gaussian model function with x/y array inputs.
+cpdef list agaussian2d(double[:] x, double[:] y, double[:] pars, int nderiv):
+    """
+    Two dimensional Gaussian model function with x/y array inputs.
     
-#     Parameters
-#     ----------
-#     x : numpy array
-#       Array of X-values of points for which to compute the Gaussian model.
-#     y : numpy array
-#       Array of Y-values of points for which to compute the Gaussian model.
-#     pars : numpy array
-#        Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta].
-#          Or can include cxx, cyy, cxy at the end so they don't have to be
-#          computed.
-#     nderiv : int
-#        The number of derivatives to return.
+    Parameters
+    ----------
+    x : numpy array
+      Array of X-values of points for which to compute the Gaussian model.
+    y : numpy array
+      Array of Y-values of points for which to compute the Gaussian model.
+    pars : numpy array
+       Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta].
+         Or can include cxx, cyy, cxy at the end so they don't have to be
+         computed.
+    nderiv : int
+       The number of derivatives to return.
 
-#     Returns
-#     -------
-#     g : numpy array
-#       The Gaussian model for the input x/y values and parameters.  Always
-#         returned as 1D raveled() array.
-#     derivative : numpy array
-#       List of derivatives of g relative to the input parameters.
-#         Always 2D [Npix,Nderiv] with the 1st dimension being the x/y arrays
-#         raveled() to 1D.
+    Returns
+    -------
+    g : numpy array
+      The Gaussian model for the input x/y values and parameters.  Always
+        returned as 1D raveled() array.
+    derivative : numpy array
+      List of derivatives of g relative to the input parameters.
+        Always 2D [Npix,Nderiv] with the 1st dimension being the x/y arrays
+        raveled() to 1D.
 
-#     Example
-#     -------
+    Example
+    -------
 
-#     g,derivative = agaussian2d(x,y,pars,3)
+    g,derivative = agaussian2d(x,y,pars,3)
 
-#     """
-#     if len(pars)!=6 and len(pars)!=9:
-#         raise Exception('agaussian2d pars must have either 6 or 9 elements')
+    """
+    cdef double[:] g = np.zeros(len(x))
+    cdef double[:,:] deriv = np.zeros((len(x),nderiv))
+    #cdef double[:] d1 = np.zeros(nderiv)
+
+    #if len(pars)!=6 and len(pars)!=9:
+    #    raise Exception('agaussian2d pars must have either 6 or 9 elements')
     
-#     if len(pars)==6:
-#         amp,xc,yc,asemi,bsemi,theta = pars
-#         cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
-#         allpars = np.zeros(9,float)
-#         allpars[:6] = pars
-#         allpars[6:] = [cxx,cyy,cxy]
-#     else:
-#         amp,xc,yc,asemi,bsemi,theta,cxx,cyy,cxy = pars
-#         allpars = pars
+    if len(pars)==6:
+        amp,xc,yc,asemi,bsemi,theta = pars
+        cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
+        allpars = np.zeros(9,float)
+        allpars[:6] = pars
+        allpars[6:] = [cxx,cyy,cxy]
+    else:
+        amp,xc,yc,asemi,bsemi,theta,cxx,cyy,cxy = pars
+        allpars = pars
 
-#     # Unravel 2D arrays
-#     if x.ndim==2:
-#         xx = x.ravel()
-#         yy = y.ravel()
-#     else:
-#         xx = x
-#         yy = y
-#     npix = len(xx)
-#     # Initialize output
-#     g = np.zeros(npix,float)
-#     if nderiv>0:
-#         deriv = np.zeros((npix,nderiv),float)
-#     else:
-#         deriv = np.zeros((1,1),float)
-#     # Loop over the points
-#     for i in range(npix):
-#         g1,deriv1 = gaussian2d(xx[i],yy[i],allpars,nderiv)
-#         g[i] = g1
-#         if nderiv>0:
-#             deriv[i,:] = deriv1
-#     return g,deriv
+    # Unravel 2D arrays
+    if x.ndim==2:
+        xx = x.ravel()
+        yy = y.ravel()
+    else:
+        xx = x
+        yy = y
+    npix = len(x)
+    # Initialize output
+    #g = np.zeros(npix,float)
+    #if nderiv>0:
+    #    deriv = np.zeros((npix,nderiv))
+    #else:
+    #    deriv = np.zeros((1,1))
+
+    # Loop over the points
+    for i in range(npix):
+        g1,deriv1 = gaussian2d(xx[i],yy[i],allpars,nderiv)
+        g[i] = g1
+        if nderiv>0:
+            #deriv[i,:] = deriv1
+            for j in range(nderiv):
+                deriv[i,j] = deriv1[j]
+    #print(np.asarray(deriv))
+    return [np.asarray(g),np.asarray(deriv)]
     
 
 cpdef list gaussian2d(double x, double y, double[:] pars, int nderiv):
@@ -621,7 +629,7 @@ cpdef list gaussian2d(double x, double y, double[:] pars, int nderiv):
                                    dc_dtheta * v2))
                 deriv[5] = dg_dtheta
 
-    return [g,deriv]
+    return [g,np.asarray(deriv)]
 
 
 
