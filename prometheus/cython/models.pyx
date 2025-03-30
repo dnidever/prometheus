@@ -12,6 +12,7 @@ cdef extern from "math.h":
     double cos(double x)
     #double atan2(double x)
 
+#cimport utils
 
 cpdef int sum1i(int[:] array):
     cdef int sm
@@ -901,7 +902,7 @@ cpdef double moffat2d_flux(double[:] pars):
 
 
 
-cpdef list amoffat2d(double[:] x, double[:] y, double[:] pars,int nderiv):
+cpdef list amoffat2d(double[:] x, double[:] y, double[:] pars, int nderiv):
     """
     Two dimensional Moffat model function with x/y array inputs.
     
@@ -947,14 +948,7 @@ cpdef list amoffat2d(double[:] x, double[:] y, double[:] pars,int nderiv):
     else:
         allpars[:] = pars
 
-    # Unravel 2D arrays
-    if x.ndim==2:
-        xx = x.ravel()
-        yy = y.ravel()
-    else:
-        xx = x
-        yy = y
-    npix = len(xx)
+    npix = len(x)
     # Initialize output
     g = np.zeros(npix,float)
     if nderiv>0:
@@ -963,10 +957,11 @@ cpdef list amoffat2d(double[:] x, double[:] y, double[:] pars,int nderiv):
         deriv = np.zeros((1,1),float)
     # Loop over the points
     for i in range(npix):
-        g1,deriv1 = moffat2d(xx[i],yy[i],allpars,nderiv)
+        g1,deriv1 = moffat2d(x[i],y[i],allpars,nderiv)
         g[i] = g1
         if nderiv>0:
-            deriv[i,:] = deriv1
+            for j in range(nderiv):
+                deriv[i,j] = deriv1[j]
     return [g,deriv]
 
     
@@ -1231,7 +1226,9 @@ cpdef double penny2d_fwhm(double[:] pars):
     """
     cdef double amp,xsig,ysig,relamp,sigma,beta
     cdef double sig_major,sig_minor,mnsig,gfwhm
-    cdef double mnfwhm,x,f,hwhm,fwhm
+    cdef double mnfwhm,hwhm,fwhm,x1,x2
+    cdef double[:] x,f
+    cdef int nx
 
     # [amplitude, x0, y0, xsig, ysig, theta, relative amplitude, sigma]
 
@@ -1256,12 +1253,16 @@ cpdef double penny2d_fwhm(double[:] pars):
     mfwhm = 2.0 * np.abs(sigma) * np.sqrt(2.0 ** (1.0/beta) - 1.0)
 
     # Generate a small profile
-    x = np.arange( np.min(np.array([gfwhm,mfwhm]))/2.35/2,
-                   np.max(np.array([gfwhm,mfwhm])), 0.5)
-    f = (1-relamp)*np.exp(-0.5*(x/mnsig)**2) + relamp/(1+(x/sigma)**2)**beta
+    x1 = np.min(np.array([gfwhm,mfwhm]))/2.35/2
+    x2 = np.max(np.array([gfwhm,mfwhm]))
+    x = np.arange(x1,x2,0.5)
+    nx = len(x)
+    f = np.zeros(nx,float)
+    for i in range(nx):
+        f[i] = (1-relamp)*np.exp(-0.5*(x[i]/mnsig)**2) + relamp/(1+(x[i]/sigma)**2)**beta
     hwhm = np.interp(0.5,f[::-1],x[::-1])
     fwhm = 2*hwhm
-        
+
     return fwhm
 
 
@@ -1382,7 +1383,8 @@ cpdef list apenny2d(double[:] x, double[:] y, double[:] pars, int nderiv):
         g1,deriv1 = penny2d(xx[i],yy[i],allpars,nderiv)
         g[i] = g1
         if nderiv>0:
-            deriv[i,:] = deriv1
+            for j in range(nderiv):
+                deriv[i,j] = deriv1[j]
     return [g,deriv]
 
     
@@ -1662,7 +1664,9 @@ cpdef double gausspow2d_fwhm(double[:] pars):
     cdef double amp,xsig,ysig,theta,beta4,beta6
     cdef double cost2,sint2,sin2t,xsig2,ysig2
     cdef double a,b,c,sig_major,sig_minor,mnsig
-    cdef double gfwhm,x,z2,gxy,f,hwhm,fwhm
+    cdef double gfwhm,hwhm,fwhm
+    cdef double[:] x,z2,gxy,f
+    cdef int nx
 
     # pars = [amplitude, x0, y0, xsig, ysig, theta, beta4, beta6]    
 
@@ -1693,9 +1697,14 @@ cpdef double gausspow2d_fwhm(double[:] pars):
 
     # Generate a small profile along one axis with xsig=mnsig
     x = np.arange(gfwhm/2.35/2, gfwhm, 0.5)
-    z2 = 0.5*(x/mnsig)**2
-    gxy = (1+z2+0.5*beta4*z2**2+(1.0/6.0)*beta6*z2**3)
-    f = amp / gxy
+    nx = len(x)
+    z2 = np.zeros(nx,float)
+    gxy = np.zeros(nx,float)
+    f = np.zeros(nx,float)
+    for i in range(nx):
+        z2[i] = 0.5*(x[i]/mnsig)**2
+        gxy[i] = (1+z2[i]+0.5*beta4*z2[i]**2+(1.0/6.0)*beta6*z2[i]**3)
+        f[i] = amp / gxy[i]
 
     hwhm = np.interp(0.5,f[::-1],x[::-1])
     fwhm = 2*hwhm
@@ -1799,18 +1808,13 @@ cpdef list agausspow2d(double[:] x, double[:] y, double[:] pars, int nderiv):
         amp,xc,yc,asemi,bsemi,theta,beta4,beta6 = pars
         cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
         allpars[:8] = pars
-        allpars[8:] = np.array([cxx,cyy,cxy])
+        allpars[8] = cxx
+        allpars[9] = cyy
+        allpars[10] = cxy
     else:
         allpars[:] = pars
 
-    # Unravel 2D arrays
-    if x.ndim==2:
-        xx = x.ravel()
-        yy = y.ravel()
-    else:
-        xx = x
-        yy = y
-    npix = len(xx)
+    npix = len(x)
     # Initialize output
     g = np.zeros(npix,float)
     if nderiv>0:
@@ -1819,10 +1823,11 @@ cpdef list agausspow2d(double[:] x, double[:] y, double[:] pars, int nderiv):
         deriv = np.zeros((1,1),float)
     # Loop over the points
     for i in range(npix):
-        g1,deriv1 = gausspow2d(xx[i],yy[i],allpars,nderiv)
+        g1,deriv1 = gausspow2d(x[i],y[i],allpars,nderiv)
         g[i] = g1
         if nderiv>0:
-            deriv[i,:] = deriv1
+            for j in range(nderiv):
+                deriv[i,j] = deriv1[j]
     return [g,deriv]
 
     
@@ -2120,15 +2125,8 @@ cpdef list asersic2d(double[:] x, double[:] y, double[:] pars, int nderiv):
 
     if len(pars)!=7:
         raise Exception('aseric2d pars must have 7 elements')
-    
-    # Unravel 2D arrays
-    if x.ndim==2:
-        xx = x.ravel()
-        yy = y.ravel()
-    else:
-        xx = x
-        yy = y
-    npix = len(xx)
+
+    npix = len(x)
     # Initialize output
     g = np.zeros(npix,float)
     if nderiv>0:
@@ -2137,10 +2135,11 @@ cpdef list asersic2d(double[:] x, double[:] y, double[:] pars, int nderiv):
         deriv = np.zeros((1,1),float)
     # Loop over the points
     for i in range(npix):
-        g1,deriv1 = sersic2d(xx[i],yy[i],pars,nderiv)
+        g1,deriv1 = sersic2d(x[i],y[i],pars,nderiv)
         g[i] = g1
         if nderiv>0:
-            deriv[i,:] = deriv1
+            for j in range(nderiv):
+                deriv[i,j] = deriv1[j]
     return [g,deriv]
 
   
@@ -2754,37 +2753,54 @@ cpdef double[:] model2d_estimates(int psftype, double ampc, double xc, double yc
     initpars = model2d_estimates(psftype,amp,xc,yc)
     
     """
+    cdef int npars
+    cdef long[:] npararr
     cdef double[:] initpars
+    #npararr = np.zeros(5,long)
+    npararr = np.array([6,7,8,8,7])
+    npars = npararr[psftype-1]
+    initpars = np.zeros(npars,float)
+    initpars[0] = ampc
+    initpars[1] = xc
+    initpars[2] = yc
     # Gaussian
     if psftype==1:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
-        initpars = np.zeros(6,float)
-        initpars[:3] = np.array([ampc,xc,yc])
-        initpars[3:] = np.array([3.5,3.0,0.2])
+        initpars[3] = 3.5
+        initpars[4] = 3.0
+        initpars[5] = 0.2
     # Moffat
     elif psftype==2:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
-        initpars = np.zeros(7,float)
-        initpars[:3] = np.array([ampc,xc,yc])
-        initpars[3:] = np.array([3.5,3.0,0.2,2.5])
+        initpars[3] = 3.5
+        initpars[4] = 3.0
+        initpars[5] = 0.2
+        initpars[6] = 2.5
     # Penny
     elif psftype==3:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
-        initpars = np.zeros(8,float)
-        initpars[:3] = np.array([ampc,xc,yc])
-        initpars[3:] = np.array([3.5,3.0,0.2,0.1,5.0])
+        initpars[3] = 3.5
+        initpars[4] = 3.0
+        initpars[5] = 0.2
+        initpars[6] = 0.1
+        initpars[7] = 5.0
     # Gausspow
     elif psftype==4:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
-        initpars = np.zeros(8,float)
-        initpars[:3] = np.array([ampc,xc,yc])
-        initpars[3:] = np.array([3.5,3.0,0.2,4.0,6.0])
+        #initpars = np.zeros(8,float)
+        #initpars[:3] = np.array([ampc,xc,yc])
+        initpars[3] = 3.5
+        initpars[4] = 3.0
+        initpars[5] = 0.2
+        initpars[6] = 4.0
+        initpars[7] = 6.0
     # Sersic
     elif psftype==5:
         # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
-        initpars = np.zeros(7,float)
-        initpars[:3] = np.array([ampc,xc,yc])
-        initpars[3:] = np.array([0.3,0.7,0.2,0.2])
+        initpars[3] = 0.3
+        initpars[4] = 0.7
+        initpars[5] = 0.2
+        initpars[6] = 0.2
     else:
         print('psftype=',psftype,'not supported')
         initpars = np.zeros(7,float)
@@ -2812,41 +2828,47 @@ cpdef double[:,:] model2d_bounds(int psftype):
     bounds = model2d_bounds(2)
     
     """
+    cdef int npars
+    cdef long[:] npararr
+    cdef double[:] lbounds,ubounds
     cdef double[:,:] bounds
+
+    #npararr = np.zeros(5,int)
+    npararr = np.array([6,7,8,8,7])
+    npars = npararr[psftype-1]
+    #bounds = np.zeros((npars,2),float)
+    lbounds = np.zeros(npars,float)
+    ubounds = np.zeros(npars,float)
     # Gaussian
     if psftype==1:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
-        bounds = np.zeros((6,2),float)
-        bounds[:,0] = np.array([0.00, 0.0, 0.0, 0.1, 0.1, -np.pi])
-        bounds[:,1] = np.array([1e30, 1e4, 1e4,  50,  50,  np.pi])
+        lbounds = np.array([0.00, 0.0, 0.0, 0.1, 0.1, -np.pi])
+        ubounds = np.array([1e30, 1e4, 1e4,  50,  50,  np.pi])
     # Moffat
     elif psftype==2:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
-        bounds = np.zeros((7,2),float)
-        bounds[:,0] = np.array([0.00, 0.0, 0.0, 0.1, 0.1, -np.pi, 0.1])
-        bounds[:,1] = np.array([1e30, 1e4, 1e4,  50,  50,  np.pi, 10])
+        lbounds = np.array([0.00, 0.0, 0.0, 0.1, 0.1, -np.pi, 0.1])
+        ubounds = np.array([1e30, 1e4, 1e4,  50,  50,  np.pi, 10])
     # Penny
     elif psftype==3:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
-        bounds = np.zeros((8,2),float)
-        bounds[:,0] = np.array([0.00, 0.0, 0.0, 0.1, 0.1, -np.pi, 0.0, 0.1])
-        bounds[:,1] = np.array([1e30, 1e4, 1e4,  50,  50,  np.pi, 1.0,  50])
+        lbounds = np.array([0.00, 0.0, 0.0, 0.1, 0.1, -np.pi, 0.0, 0.1])
+        ubounds = np.array([1e30, 1e4, 1e4,  50,  50,  np.pi, 1.0,  50])
     # Gausspow
     elif psftype==4:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
-        bounds = np.zeros((8,2),float)
-        bounds[:,0] = np.array([0.00, 0.0, 0.0, 0.1, 0.1, -np.pi, 0.1, 0.1])
-        bounds[:,1] = np.array([1e30, 1e4, 1e4,  50,  50,  np.pi,  50,  50])
+        lbounds = np.array([0.00, 0.0, 0.0, 0.1, 0.1, -np.pi, 0.1, 0.1])
+        ubounds = np.array([1e30, 1e4, 1e4,  50,  50,  np.pi,  50,  50])
     # Sersic
     elif psftype==5:
         # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
-        bounds = np.zeros((7,2),float)
-        bounds[:,0] = np.array([0.00, 0.0, 0.0, 0.01, 0.02, 0.0, -np.pi])
-        bounds[:,1] = np.array([1e30, 1e4, 1e4,   20,  100, 1.0,  np.pi])
+        lbounds = np.array([0.00, 0.0, 0.0, 0.01, 0.02, 0.0, -np.pi])
+        ubounds = np.array([1e30, 1e4, 1e4,   20,  100, 1.0,  np.pi])
     else:
         print('psftype=',psftype,'not supported')
         bounds = np.zeros((7,2),float)
         bounds[:,:] = np.nan
+    bounds = np.array([lbounds,ubounds]).T
     return bounds
     
 
@@ -2873,31 +2895,27 @@ cpdef double[:] model2d_maxsteps(int psftype, double[:] pars):
     
     """
     cdef double[:] maxsteps
+
     # Gaussian
     if psftype==1:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
-        maxsteps = np.zeros(6,float)
-        maxsteps[:] = np.array([0.5*pars[0],0.5,0.5,0.5,0.5,0.05])
+        maxsteps = np.array([0.5*pars[0],0.5,0.5,0.5,0.5,0.05])
     # Moffat
     elif psftype==2:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
-        maxsteps = np.zeros(7,float)
-        maxsteps[:] = np.array([0.5*pars[0],0.5,0.5,0.5,0.5,0.05,0.03])
+        maxsteps = np.array([0.5*pars[0],0.5,0.5,0.5,0.5,0.05,0.03])
     # Penny
     elif psftype==3:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
-        maxsteps = np.zeros(8,float)
-        maxsteps[:] = np.array([0.5*pars[0],0.5,0.5,0.5,0.5,0.05,0.01,0.5])
+        maxsteps = np.array([0.5*pars[0],0.5,0.5,0.5,0.5,0.05,0.01,0.5])
     # Gausspow
     elif psftype==4:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
-        maxsteps = np.zeros(8,float)
-        maxsteps[:] = np.array([0.5*pars[0],0.5,0.5,0.5,0.5,0.05,0.5,0.5])
+        maxsteps = np.array([0.5*pars[0],0.5,0.5,0.5,0.5,0.05,0.5,0.5])
     # Sersic
     elif psftype==5:
         # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
-        maxsteps = np.zeros(7,float)
-        maxsteps[:] = np.array([0.5*pars[0],0.5,0.5,0.05,0.1,0.05,0.05])
+        maxsteps = np.array([0.5*pars[0],0.5,0.5,0.05,0.1,0.05,0.05])
     else:
         print('psftype=',psftype,'not supported')
         maxsteps = np.zeros(7,float)
@@ -3109,7 +3127,7 @@ cpdef list relcoord(double[:] x, double[:] y, int[:] shape):
 
 #     """
 #     cdef int npsfx,npsfy,npsforder
-#     cdef double amp,xc,yc,xoff,yoff
+#     cdef double amp,xc,yc,xoff,yoff,relx,rely
 #     cdef double[:] dx,dy,coeff,gxplus,gyplus,g
 #     cdef double[:,:] derivative
 
