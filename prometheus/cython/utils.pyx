@@ -1,10 +1,15 @@
+# cython: boundscheck=False
+# cython: wraparound=False
+# cython: language_level=3
+
 import cython
 cimport cython
 import numpy as np
 cimport numpy as np
-from scipy.special import gamma, gammaincinv, gammainc
+from cython.view cimport array as cvarray
+#from scipy.special import gamma, gammaincinv, gammainc
 
-from libc.math cimport exp,sqrt,atan2,pi
+from libc.math cimport exp,sqrt,atan2,pi,NAN,floor
 from libcpp cimport bool
 
 cdef extern from "math.h":
@@ -12,8 +17,30 @@ cdef extern from "math.h":
     double cos(double x)
     #double atan2(double x)
 
+cdef extern from "math.h":
+    bint isnan(double x)
 
-cpdef double linearinterp(double[:,:] data, double x, double y):
+# https://stackoverflow.com/questions/8353076/how-do-i-pass-a-pointer-to-a-c-fun$
+cdef extern from "stdlib.h":
+    ctypedef void const_void "const void"
+    void qsort(void *base, int nmemb, int size,
+                int(*compar)(const_void *, const_void *)) nogil
+
+cdef int mycmp(const_void * pa, const_void * pb) noexcept:
+    cdef double a = (<double *>pa)[0]
+    cdef double b = (<double *>pb)[0]
+    if a < b:
+        return -1
+    elif a > b:
+        return 1
+    else:
+        return 0
+
+cdef void myqsort(double * y, ssize_t l) nogil:
+    qsort(y, l, sizeof(double), mycmp)
+
+
+cdef double linearinterp(double[:,:] data, double x, double y):
     """
     Linear interpolation.
 
@@ -45,13 +72,14 @@ cpdef double linearinterp(double[:,:] data, double x, double y):
 
     # Out of bounds
     if x<0 or x>(nx-1) or y<0 or y>(ny-1):
-        return 0.0
+        f = NAN
+        return f
 
-    x1 = int(x)
+    x1 = int(floor(x))
     if x1==nx-1:
         x1 -= 1
     x2 = x1+1
-    y1 = int(y)
+    y1 = int(floor(y))
     if y1==ny-1:
         y1 -= 1
     y2 = y1+1
@@ -71,7 +99,7 @@ cpdef double linearinterp(double[:,:] data, double x, double y):
 
     return f
 
-cpdef double[:] alinearinterp(double[:,:] data, double[:] x, double[:] y):
+cdef double[:] alinearinterp(double[:,:] data, double[:] x, double[:] y):
     """
     Linear interpolation.
 
@@ -95,21 +123,96 @@ cpdef double[:] alinearinterp(double[:,:] data, double[:] x, double[:] y):
     f = alinearinterp(data,x,y)
 
     """
-    cdef int npix
-    cdef double[:] f
-
-    #if x.ndim==2:
-    #    x1d = x.ravel()
-    #    y1d = y.ravel()
-    #else:
-    #    x1d = x
-    #    y1d = y
+    cdef Py_ssize_t npix
+    #npix = x.size
     npix = len(x)
-    f = np.zeros(npix,float)
+    #f = np.zeros(npix,float)
+    f = cvarray(shape=(100),itemsize=sizeof(double),format="d")
+    cdef double[:] mf = f
     for i in range(npix):
-        f[i] = linearinterp(data,x[i],y[i])
-    return f
+       mf[i] = linearinterp(data,x[i],y[i])
+    return mf
 
+cpdef double nanmean(double[:] data):
+    """ Calculate the mean of an array checking for nans."""
+    cdef long n = len(data)
+    cdef double result
+    cdef long ngood = 0
+
+    result = 0.0
+    for i in range(n):
+        if isnan(data[i])==False:
+            ngood += 1
+            result += data[i]
+    if ngood > 0:
+        result = result / ngood
+    else:
+        result = NAN
+    return result
+
+cpdef tuple nonnanindexes(double[:] data):
+    """ Return array of non-nan index values """
+    cdef long[:] index
+    cdef long n
+    cdef long count = 0
+    n = len(data)
+    index = cvarray(shape=(n,),itemsize=sizeof(long),format="l")
+    #index = np.empty(n,int)
+    cdef long[:] mindex = index
+    count = 0
+    for i in range(n):
+        if isnan(data[i])==False:
+            mindex[count] = i
+            count += 1
+    return mindex,count
+
+cpdef double[:] nonnanarray(double[:] data):
+    """ Return array of non-nan values """
+    cdef long[:] index
+    cdef long n
+    index,n = nonnanindexes(data)
+    nndata = cvarray(shape=(n,),itemsize=sizeof(double),format="d")
+    cdef double[:] mnndata = nndata
+    for i in range(n):
+        mnndata[i] =  data[index[i]]
+    return mnndata
+
+cpdef double nanmedian(double[:] data):
+    """  """
+    cdef long n
+    cdef double result
+
+    nndata = nonnanarray(data)
+    n = len(nndata)
+
+    #cdef double *nndataptr = <double *>nndata.data
+    # qsort
+    #myqsort(nndataptr,n)
+    #void qsort(void *base, int nmemb, int size,
+    #            int(*compar)(const_void *, const_void *)) nogil
+
+    # return an array of the non-nan values
+    # then use qsort() to sort that array in place
+    # can get the median value of that array
+    #return result
+
+
+# cpdef double nanmedian(double[:] data):
+#     """ Calculate the median of an array checking for nans."""
+#     cdef long n = len(data)
+#     cdef double result
+#     cdef long ngood = 0
+
+#     result = 0.0
+#     for i in range(n):
+#         if isnan(data[i])==False:
+#             ngood += 1
+#             result += data[i]
+#     if ngood > 0:
+#         result = result / ngood
+#     else:
+#         result = NAN
+#     return result
 
 cpdef double mad(double[:] data, int ignore_nan, int zero):
     """ Calculate the median absolute deviation of an array."""
@@ -119,6 +222,7 @@ cpdef double mad(double[:] data, int ignore_nan, int zero):
 
     ndata = len(data)
     resid = np.zeros(ndata,float)
+    resid = cvarray(shape=(),itemsize=sizeof(double),format="d")
     # With median reference point
     if zero==0:
         if ignore_nan==1:
@@ -140,124 +244,128 @@ cpdef double mad(double[:] data, int ignore_nan, int zero):
             result = np.nanmedian(np.abs(data))
     return result * 1.482602218505602
 
-cpdef double[:] mad2d(double[:,:] data, int axis, int ignore_nan, int zero):
-    """ Calculate the median absolute deviation of an array."""
-    cdef double[:] result,ref
-    cdef int nx,ny
-    ny = data.shape[0]
-    nx = data.shape[1]
-    if axis==0:
-        ref = np.zeros(nx,float)
-    elif axis==1:
-        ref = np.zeros(ny,float)
-    resid = np.zeros((ny,nx),float)
+# cpdef double[:] mad2d(double[:,:] data, int axis, int ignore_nan, int zero):
+#     """ Calculate the median absolute deviation of an array."""
+#     cdef double[:] result,ref
+#     cdef int nx,ny
+#     cdef double[:,:] ref2d
+#     ny = data.shape[0]
+#     nx = data.shape[1]
+#     if axis==0:
+#         ref = np.zeros(nx,float)
+#     elif axis==1:
+#         ref = np.zeros(ny,float)
+#     ref2d = np.zeros((ny,nx),float)
+#     resid = np.zeros((ny,nx),float)
 
-    # With median reference point
-    if zero==0:
-        if ignore_nan==1:
-            ref = np.nanmedian(data,axis=axis)
-            newshape = np.array(data.shape)
-            newshape[axis] = -1
-            newshape = (newshape[0],newshape[1])
-            resid = data-ref.reshape(newshape)
-            result = np.nanmedian(np.abs(resid),axis=axis) * 1.482602218505602
-        else:
-            ref = np.median(data,axis=axis)
-            newshape = np.array(data.shape)
-            newshape[axis] = -1
-            newshape = (newshape[0],newshape[1])
-            resid = data-ref.reshape(newshape)
-            result = np.median(np.abs(resid),axis=axis) * 1.482602218505602
-    # Using zero as reference point
-    else:
-        if ignore_nan==1:
-            result = np.nanmedian(np.abs(data),axis=axis) * 1.482602218505602
-        else:
-            result = np.median(np.abs(data),axis=axis) * 1.482602218505602
+#     # With median reference point
+#     if zero==0:
+#         if ignore_nan==1:
+#             ref = np.asarray(np.nanmedian(data,axis=axis))
+#             newshape = np.array(data.shape)
+#             newshape[axis] = -1
+#             newshape = (newshape[0],newshape[1])
+# 	    for i in range():
+#                 ref2d[i,:] = ref
+#             resid = data-ref.reshape(newshape)
+#             result = np.nanmedian(np.abs(resid),axis=axis) * 1.482602218505602
+#         else:
+#             ref = np.asarray(np.median(data,axis=axis))
+#             newshape = np.array(data.shape)
+#             newshape[axis] = -1
+#             newshape = (newshape[0],newshape[1])
+#             resid = data-ref.reshape(newshape)
+#             result = np.median(np.abs(resid),axis=axis) * 1.482602218505602
+#     # Using zero as reference point
+#     else:
+#         if ignore_nan==1:
+#             result = np.nanmedian(np.abs(data),axis=axis) * 1.482602218505602
+#         else:
+#             result = np.median(np.abs(data),axis=axis) * 1.482602218505602
 
-    return result
+#     return result
 
-cpdef double[:,:] mad3d(double[:,:,:] data, int axis, int ignore_nan, int zero):
-    """ Calculate the median absolute deviation of an array."""
-    cdef double[:] ref
-    cdef double[:,:] result
+# cpdef double[:,:] mad3d(double[:,:,:] data, int axis, int ignore_nan, int zero):
+#     """ Calculate the median absolute deviation of an array."""
+#     cdef double[:] ref
+#     cdef double[:,:] result
 
-    nz = data.shape[0]
-    ny = data.shape[1]
-    nx = data.shape[2]
-    if axis==0:
-        ref = np.zeros((ny,nx),float)
-    elif axis==1:
-        ref = np.zeros((nz,nx),float)
-    elif axis==2:
-        ref = np.zeros((nz,ny),float)
-    resid = np.zeros((nz,ny,nx),float)
+#     nz = data.shape[0]
+#     ny = data.shape[1]
+#     nx = data.shape[2]
+#     if axis==0:
+#         ref = np.zeros((ny,nx),float)
+#     elif axis==1:
+#         ref = np.zeros((nz,nx),float)
+#     elif axis==2:
+#         ref = np.zeros((nz,ny),float)
+#     resid = np.zeros((nz,ny,nx),float)
 
-    # With median reference point
-    if zero==0:
-        if ignore_nan==1:
-            ref = np.nanmedian(data,axis=axis)
-            newshape = np.array(data.shape)
-            newshape[axis] = -1
-            newshape = (newshape[0],newshape[1],newshape[2])
-            resid = data-ref.reshape(newshape)
-            result = np.nanmedian(np.abs(resid),axis=axis) * 1.482602218505602
-        else:
-            ref = np.median(data,axis=axis)
-            newshape = np.array(data.shape)
-            newshape[axis] = -1
-            newshape = (newshape[0],newshape[1],newshape[2])
-            resid = data-ref.reshape(newshape)
-            result = np.median(np.abs(resid),axis=axis) * 1.482602218505602
-    # Using zero as reference point
-    else:
-        if ignore_nan==1:
-            result = np.nanmedian(np.abs(data),axis=axis) * 1.482602218505602
-        else:
-            result = np.median(np.abs(data),axis=axis) * 1.482602218505602
-    return result
+#     # With median reference point
+#     if zero==0:
+#         if ignore_nan==1:
+#             ref = np.nanmedian(data,axis=axis)
+#             newshape = np.array(data.shape)
+#             newshape[axis] = -1
+#             newshape = (newshape[0],newshape[1],newshape[2])
+#             resid = data-ref.reshape(newshape)
+#             result = np.nanmedian(np.abs(resid),axis=axis) * 1.482602218505602
+#         else:
+#             ref = np.median(data,axis=axis)
+#             newshape = np.array(data.shape)
+#             newshape[axis] = -1
+#             newshape = (newshape[0],newshape[1],newshape[2])
+#             resid = data-ref.reshape(newshape)
+#             result = np.median(np.abs(resid),axis=axis) * 1.482602218505602
+#     # Using zero as reference point
+#     else:
+#         if ignore_nan==1:
+#             result = np.nanmedian(np.abs(data),axis=axis) * 1.482602218505602
+#         else:
+#             result = np.median(np.abs(data),axis=axis) * 1.482602218505602
+#     return result
 
-cpdef double quadratic_bisector(double[:] x, double[:] y):
-    """ Calculate the axis of symmetric or bisector of parabola"""
-    #https://www.azdhs.gov/documents/preparedness/state-laboratory/lab-licensure-certification/technical-resources/
-    #    calibration-training/12-quadratic-least-squares-regression-calib.pdf
-    #quadratic regression statistical equation
-    cdef long n
-    cdef double Sx,Sy,Sxx,Sxy,Sxx2,Sx2y,Sx2x2,denom,a,b
-    n = len(x)
-    if n<3:
-        return np.nan
-    Sx = np.sum(x)
-    Sy = np.sum(y)
-    Sx2 = 0.0
-    for i in range(n):
-        Sx2 += x[i]**2
-    Sxx = 0.0
-    Sxy = 0.0
-    Sxx2 = 0.0
-    Sx2y = 0.0
-    Sx2x2 = 0.0
-    for i in range(n):
-        Sxx += x[i]**2 - Sx/n
-        Sxy += x[i]*y[i] - Sx*Sy/n
-        Sxx2 += x[i]**3 - Sx*Sx2/n
-        Sx2y += x[i]**2 * y[i] - Sx2*Sy/n
-        Sx2x2 += x[i]**4 - Sx2**2/n
-    #Sxx = np.sum(x**2) - np.sum(x)**2/n
-    #Sxy = np.sum(x*y) - np.sum(x)*np.sum(y)/n
-    #Sxx2 = np.sum(x**3) - np.sum(x)*np.sum(x**2)/n
-    #Sx2y = np.sum(x**2 * y) - np.sum(x**2)*np.sum(y)/n
-    #Sx2x2 = np.sum(x**4) - np.sum(x**2)**2/n
-    #a = ( S(x^2*y)*S(xx)-S(xy)*S(xx^2) ) / ( S(xx)*S(x^2x^2) - S(xx^2)^2 )
-    #b = ( S(xy)*S(x^2x^2) - S(x^2y)*S(xx^2) ) / ( S(xx)*S(x^2x^2) - S(xx^2)^2 )
-    denom = Sxx*Sx2x2 - Sxx2**2
-    if denom==0:
-        return np.nan
-    a = ( Sx2y*Sxx - Sxy*Sxx2 ) / denom
-    b = ( Sxy*Sx2x2 - Sx2y*Sxx2 ) / denom
-    if a==0:
-        return np.nan
-    return -b/(2*a)
+# cpdef double quadratic_bisector(double[:] x, double[:] y):
+#     """ Calculate the axis of symmetric or bisector of parabola"""
+#     #https://www.azdhs.gov/documents/preparedness/state-laboratory/lab-licensure-certification/technical-resources/
+#     #    calibration-training/12-quadratic-least-squares-regression-calib.pdf
+#     #quadratic regression statistical equation
+#     cdef long n
+#     cdef double Sx,Sy,Sxx,Sxy,Sxx2,Sx2y,Sx2x2,denom,a,b
+#     n = len(x)
+#     if n<3:
+#         return np.nan
+#     Sx = np.sum(x)
+#     Sy = np.sum(y)
+#     Sx2 = 0.0
+#     for i in range(n):
+#         Sx2 += x[i]**2
+#     Sxx = 0.0
+#     Sxy = 0.0
+#     Sxx2 = 0.0
+#     Sx2y = 0.0
+#     Sx2x2 = 0.0
+#     for i in range(n):
+#         Sxx += x[i]**2 - Sx/n
+#         Sxy += x[i]*y[i] - Sx*Sy/n
+#         Sxx2 += x[i]**3 - Sx*Sx2/n
+#         Sx2y += x[i]**2 * y[i] - Sx2*Sy/n
+#         Sx2x2 += x[i]**4 - Sx2**2/n
+#     #Sxx = np.sum(x**2) - np.sum(x)**2/n
+#     #Sxy = np.sum(x*y) - np.sum(x)*np.sum(y)/n
+#     #Sxx2 = np.sum(x**3) - np.sum(x)*np.sum(x**2)/n
+#     #Sx2y = np.sum(x**2 * y) - np.sum(x**2)*np.sum(y)/n
+#     #Sx2x2 = np.sum(x**4) - np.sum(x**2)**2/n
+#     #a = ( S(x^2*y)*S(xx)-S(xy)*S(xx^2) ) / ( S(xx)*S(x^2x^2) - S(xx^2)^2 )
+#     #b = ( S(xy)*S(x^2x^2) - S(x^2y)*S(xx^2) ) / ( S(xx)*S(x^2x^2) - S(xx^2)^2 )
+#     denom = Sxx*Sx2x2 - Sxx2**2
+#     if denom==0:
+#         return np.nan
+#     a = ( Sx2y*Sxx - Sxy*Sxx2 ) / denom
+#     b = ( Sxy*Sx2x2 - Sx2y*Sxx2 ) / denom
+#     if a==0:
+#         return np.nan
+#     return -b/(2*a)
 
 # cpdef qr_jac_solve(jac,resid,weight=None):
 #     """ Solve part of a non-linear least squares equation using QR decomposition
@@ -314,38 +422,38 @@ cpdef double quadratic_bisector(double[:] x, double[:] y):
 #     return cov
 
 
-cpdef double[:] poly2d(double[:,:] xdata, double[:] pars):
-    """ model of 2D linear polynomial."""
-    cdef double[:] x,y,result
-    cdef long n
-    x = xdata[:,0]
-    y = xdata[:,1]
-    n = len(x)
-    result = np.zeros(n,float)
-    for i in range(n):
-        result[i] = pars[0]+pars[1]*x[i]+pars[2]*y[i]+pars[3]*x[i]*y[i]
-    return result
+# cpdef double[:] poly2d(double[:,:] xdata, double[:] pars):
+#     """ model of 2D linear polynomial."""
+#     cdef double[:] x,y,result
+#     cdef long n
+#     x = xdata[:,0]
+#     y = xdata[:,1]
+#     n = len(x)
+#     result = np.zeros(n,float)
+#     for i in range(n):
+#         result[i] = pars[0]+pars[1]*x[i]+pars[2]*y[i]+pars[3]*x[i]*y[i]
+#     return result
 
-cpdef list jacpoly2d(double[:,:] xdata, double[:] pars):
-    """ jacobian of 2D linear polynomial."""
-    cdef double[:] x,y,m
-    cdef double[:,:] jac
-    cdef long n
-    x = xdata[:,0]
-    y = xdata[:,1]
-    n = len(x)
-    # Model
-    m = np.zeros(n,float)
-    for i in range(n):
-        m[i] = pars[0]+pars[1]*x[i]+pars[2]*y[i]+pars[3]*x[i]*y[i]
-    # Jacobian, partical derivatives wrt the parameters
-    jac = np.zeros((n,4),float)
-    jac[:,0] = 1    # constant coefficient
-    jac[:,1] = x    # x-coefficient
-    jac[:,2] = y    # y-coefficient
-    for i in range(n):
-        jac[i,3] = x[i]*y[i]  # xy-coefficient
-    return m,jac
+# cpdef list jacpoly2d(double[:,:] xdata, double[:] pars):
+#     """ jacobian of 2D linear polynomial."""
+#     cdef double[:] x,y,m
+#     cdef double[:,:] jac
+#     cdef long n
+#     x = xdata[:,0]
+#     y = xdata[:,1]
+#     n = len(x)
+#     # Model
+#     m = np.zeros(n,float)
+#     for i in range(n):
+#         m[i] = pars[0]+pars[1]*x[i]+pars[2]*y[i]+pars[3]*x[i]*y[i]
+#     # Jacobian, partical derivatives wrt the parameters
+#     jac = np.zeros((n,4),float)
+#     jac[:,0] = 1    # constant coefficient
+#     jac[:,1] = x    # x-coefficient
+#     jac[:,2] = y    # y-coefficient
+#     for i in range(n):
+#         jac[i,3] = x[i]*y[i]  # xy-coefficient
+#     return m,jac
 
 # cpdef poly2dfit(x,y,data,error,maxiter=2,minpercdiff=0.5,verbose=False):
 #     """ Fit a 2D linear function to data robustly."""

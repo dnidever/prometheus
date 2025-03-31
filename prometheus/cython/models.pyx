@@ -1,10 +1,19 @@
+# cython: boundscheck=False
+# cython: wraparound=False
+# cython: language_level=3
+# cython: cdivision=True
+# cython: binding=False
+# cython: inter_types=True
+
 import cython
 cimport cython
 import numpy as np
 cimport numpy as np
+from cython.view cimport array as cvarray
+from cpython cimport array
 from scipy.special import gamma, gammaincinv, gammainc
 
-from libc.math cimport exp,sqrt,atan2,pi
+from libc.math cimport exp,sqrt,atan2,pi,NAN
 from libcpp cimport bool
 
 cdef extern from "math.h":
@@ -382,11 +391,10 @@ cpdef double[:] limsteps(double[:] steps, double[:] maxsteps):
 # # Numba analytical PSF models
 
 
-cpdef double[:] gauss_abt2cxy(double asemi,double bsemi,double theta):
+cpdef (double,double,double) gauss_abt2cxy(double asemi,double bsemi,double theta):
     """ Convert asemi/bsemi/theta to cxx/cyy/cxy. """
     cdef float sintheta,costheta,sintheta2,costheta2
     cdef float asemi2,bsemi2,cxx,cyy,cxy
-    cdef double[:] out = np.zeros(3)
     # theta in radians
     sintheta = sin(theta)
     costheta = cos(theta)
@@ -394,19 +402,19 @@ cpdef double[:] gauss_abt2cxy(double asemi,double bsemi,double theta):
     costheta2 = costheta**2
     asemi2 = asemi**2
     bsemi2 = bsemi**2
-    cxx = costheta2/asemi2 + sintheta2/bsemi2
-    cyy = sintheta2/asemi2 + costheta2/bsemi2
-    cxy = 2*costheta*sintheta*(1/asemi2-1/bsemi2)
-    out[0] = cxx
-    out[1] = cyy
-    out[2] = cxy
-    return out
+    if asemi2 != 0.0 and bsemi2 != 0.0:
+        cxx = costheta2/asemi2 + sintheta2/bsemi2
+        cyy = sintheta2/asemi2 + costheta2/bsemi2
+        cxy = 2*costheta*sintheta*(1/asemi2-1/bsemi2)
+    else:
+        cxx = NAN
+        cyy = NAN
+        cxy = NAN
+    return cxx,cyy,cxy
 
-
-cpdef double[:] gauss_cxy2abt(double cxx, double cyy, double cxy):
+cpdef (double,double,double) gauss_cxy2abt(double cxx, double cyy, double cxy):
     """ Convert asemi/bsemi/theta to cxx/cyy/cxy. """
     cdef double xstd,ystd,theta,sin2t
-    cdef double[:] out = np.zeros(3)
     # a+c = 1/xstd2 + 1/ystd2
     # b = sin2t * (1/xstd2 + 1/ystd2)
     # tan 2*theta = b/(a-c)
@@ -432,10 +440,8 @@ cpdef double[:] gauss_cxy2abt(double cxx, double cyy, double cxy):
 
         # theta in radians
 
-    out[0] = xstd
-    out[1] = ystd
-    out[2] = theta
-    return out
+    return xstd,ystd,theta
+
 
 # ####### GAUSSIAN ########
 
@@ -460,7 +466,7 @@ cpdef double gaussian2d_flux(double[:] pars):
     flux = gaussian2d_flux(pars)
 
     """
-    cdef double volume
+    cdef double amp,xsig,ysig,volume
     # Volume is 2*pi*A*sigx*sigy
     amp = pars[0]
     xsig = pars[3]
@@ -546,30 +552,37 @@ cpdef list agaussian2d(double[:] x, double[:] y, double[:] pars, int nderiv):
     g,derivative = agaussian2d(x,y,pars,3)
 
     """
-    cdef double[:] g = np.zeros(len(x))
-    cdef double[:,:] deriv = np.zeros((len(x),nderiv))
+    #cdef double[:] g = np.zeros(len(x))
+    #cdef double[:,:] deriv = np.zeros((len(x),nderiv))
     #cdef double[:] d1 = np.zeros(nderiv)
+    cdef double amp,xc,yc,asemi,bsemi,theta,cxx,cyy,cxy
 
-    #if len(pars)!=6 and len(pars)!=9:
-    #    raise Exception('agaussian2d pars must have either 6 or 9 elements')
-    
+    amp = pars[0]
+    xc = pars[1]
+    yc = pars[2]
+    asemi = pars[3]
+    bsemi = pars[4]
+    theta = pars[5]
     if len(pars)==6:
-        amp,xc,yc,asemi,bsemi,theta = pars
         cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
-        allpars = np.zeros(9,float)
-        allpars[:6] = pars
-        allpars[6:] = [cxx,cyy,cxy]
     else:
-        amp,xc,yc,asemi,bsemi,theta,cxx,cyy,cxy = pars
-        allpars = pars
+        cxx = pars[6]
+        cyy = pars[7]
+        cxy = pars[8]
+    #cdef array.array allpars = array.array('d',[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
+    #allpars = cvarray(shape=(9,),itemsize=sizeof(double),format="d")
+    cdef double allpars[9]
+    allpars[0] = amp
+    allpars[1] = xc
+    allpars[2] = yc
+    allpars[3] = asemi
+    allpars[4] = bsemi
+    allpars[5] = theta
+    allpars[6] = cxx
+    allpars[7] = cyy
+    allpars[8] = cxy
 
     # Unravel 2D arrays
-    if x.ndim==2:
-        xx = x.ravel()
-        yy = y.ravel()
-    else:
-        xx = x
-        yy = y
     npix = len(x)
     # Initialize output
     #g = np.zeros(npix,float)
@@ -578,19 +591,25 @@ cpdef list agaussian2d(double[:] x, double[:] y, double[:] pars, int nderiv):
     #else:
     #    deriv = np.zeros((1,1))
 
+    #g = np.zeros(len(x),float)
+    g = cvarray(shape=(npix,),itemsize=sizeof(double),format="d")
+    cdef double[:] mg = g
+    #deriv = np.zeros((len(x),nderiv),float)
+    deriv = cvarray(shape=(npix,nderiv),itemsize=sizeof(double),format="d")
+    cdef double[:,:] mderiv = deriv
     # Loop over the points
     for i in range(npix):
-        g1,deriv1 = gaussian2d(xx[i],yy[i],allpars,nderiv)
-        g[i] = g1
+        g1,deriv1 = gaussian2d(x[i],y[i],allpars,nderiv)
+        mg[i] = g1
         if nderiv>0:
             #deriv[i,:] = deriv1
             for j in range(nderiv):
-                deriv[i,j] = deriv1[j]
-    #print(np.asarray(deriv))
-    return [np.asarray(g),np.asarray(deriv)]
+                mderiv[i,j] = deriv1[j]
+    return [mg,mderiv]
+    #return [np.asarray(g),np.asarray(deriv)]
     
 
-cpdef list gaussian2d(double x, double y, double[:] pars, int nderiv):
+cdef (double,double[6]) gaussian2d(double x, double y, double[:] pars, int nderiv):
     """
     Two dimensional Gaussian model function.
     
@@ -620,13 +639,21 @@ cpdef list gaussian2d(double x, double y, double[:] pars, int nderiv):
 
     """
     cdef double g
-    cdef double[:] deriv = np.zeros(nderiv)
+    cdef double deriv[6]
 
+    amp = pars[0]
+    xc = pars[1]
+    yc = pars[2]
+    asemi = pars[3]
+    bsemi = pars[4]
+    theta = pars[5]
     if len(pars)==6:
-        amp,xc,yc,asemi,bsemi,theta = pars
         cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
     else:
-        amp,xc,yc,asemi,bsemi,theta,cxx,cyy,cxy = pars
+        cxx = pars[6]
+        cyy = pars[7]
+        cxy = pars[8]
+
     u = (x-xc)
     u2 = u**2
     v = (y-yc)
@@ -685,7 +712,7 @@ cpdef list gaussian2d(double x, double y, double[:] pars, int nderiv):
                                    dc_dtheta * v2))
                 deriv[5] = dg_dtheta
 
-    return [g,np.asarray(deriv)]
+    return g,deriv
 
 
 
