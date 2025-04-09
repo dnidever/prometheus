@@ -15,6 +15,8 @@ from scipy.special import gamma, gammaincinv, gammainc
 
 from libc.math cimport exp,sqrt,atan2,pi,NAN
 from libcpp cimport bool
+from libc.stdlib cimport malloc, free
+from cpython.mem cimport PyMem_Malloc, PyMem_Realloc, PyMem_Free
 
 cdef extern from "math.h":
     double sin(double x)
@@ -388,10 +390,10 @@ cpdef double[:] limsteps(double[:] steps, double[:] maxsteps):
 
 
 # ###################################################################
-# # Numba analytical PSF models
+# # Analytical PSF models
 
 
-cpdef (double,double,double) gauss_abt2cxy(double asemi,double bsemi,double theta):
+cdef (double,double,double) gauss_abt2cxy(double asemi,double bsemi,double theta):
     """ Convert asemi/bsemi/theta to cxx/cyy/cxy. """
     cdef float sintheta,costheta,sintheta2,costheta2
     cdef float asemi2,bsemi2,cxx,cyy,cxy
@@ -412,7 +414,7 @@ cpdef (double,double,double) gauss_abt2cxy(double asemi,double bsemi,double thet
         cxy = NAN
     return cxx,cyy,cxy
 
-cpdef (double,double,double) gauss_cxy2abt(double cxx, double cyy, double cxy):
+cdef (double,double,double) gauss_cxy2abt(double cxx, double cyy, double cxy):
     """ Convert asemi/bsemi/theta to cxx/cyy/cxy. """
     cdef double xstd,ystd,theta,sin2t
     # a+c = 1/xstd2 + 1/ystd2
@@ -519,7 +521,8 @@ cpdef double gaussian2d_fwhm(double[:] pars):
     return fwhm
 
 
-cpdef list agaussian2d(double[:] x, double[:] y, double[:] pars, int nderiv):
+#cdef double* agaussian2d(double[:] x, double[:] y, double[:] pars, int nderiv):
+cpdef double[:,:] agaussian2d(double[:] x, double[:] y, double[:] pars, int nderiv, int osamp):
     """
     Two dimensional Gaussian model function with x/y array inputs.
     
@@ -552,10 +555,9 @@ cpdef list agaussian2d(double[:] x, double[:] y, double[:] pars, int nderiv):
     g,derivative = agaussian2d(x,y,pars,3)
 
     """
-    #cdef double[:] g = np.zeros(len(x))
-    #cdef double[:,:] deriv = np.zeros((len(x),nderiv))
-    #cdef double[:] d1 = np.zeros(nderiv)
     cdef double amp,xc,yc,asemi,bsemi,theta,cxx,cyy,cxy
+    cdef double x1,y1
+    cdef long i,j,npix,index
 
     amp = pars[0]
     xc = pars[1]
@@ -569,9 +571,9 @@ cpdef list agaussian2d(double[:] x, double[:] y, double[:] pars, int nderiv):
         cxx = pars[6]
         cyy = pars[7]
         cxy = pars[8]
-    #cdef array.array allpars = array.array('d',[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])
-    #allpars = cvarray(shape=(9,),itemsize=sizeof(double),format="d")
+
     cdef double allpars[9]
+    #cdef double* allpars = <double*>malloc(9 * sizeof(double))
     allpars[0] = amp
     allpars[1] = xc
     allpars[2] = yc
@@ -582,34 +584,119 @@ cpdef list agaussian2d(double[:] x, double[:] y, double[:] pars, int nderiv):
     allpars[7] = cyy
     allpars[8] = cxy
 
-    # Unravel 2D arrays
     npix = len(x)
-    # Initialize output
-    #g = np.zeros(npix,float)
-    #if nderiv>0:
-    #    deriv = np.zeros((npix,nderiv))
-    #else:
-    #    deriv = np.zeros((1,1))
 
-    #g = np.zeros(len(x),float)
-    g = cvarray(shape=(npix,),itemsize=sizeof(double),format="d")
-    cdef double[:] mg = g
-    #deriv = np.zeros((len(x),nderiv),float)
-    deriv = cvarray(shape=(npix,nderiv),itemsize=sizeof(double),format="d")
-    cdef double[:,:] mderiv = deriv
+    # 2D arrays
+    out = cvarray(shape=(npix,7),itemsize=sizeof(double),format="d")
+    cdef double[:,:] mout = out
+
+    cdef double *out1 = <double*>malloc(7 * sizeof(double))
+
     # Loop over the points
     for i in range(npix):
-        g1,deriv1 = gaussian2d(x[i],y[i],allpars,nderiv)
-        mg[i] = g1
-        if nderiv>0:
-            #deriv[i,:] = deriv1
-            for j in range(nderiv):
-                mderiv[i,j] = deriv1[j]
-    return [mg,mderiv]
-    #return [np.asarray(g),np.asarray(deriv)]
-    
+        x1 = x[i]
+        y1 = y[i]
+        gaussian2d_integrate(x1,y1,allpars,nderiv,osamp,out1)
+        for j in range(nderiv+1):
+            mout[i,j] = out1[j]
 
-cdef (double,double[6]) gaussian2d(double x, double y, double[:] pars, int nderiv):
+    free(out1)
+
+    return mout
+
+
+
+
+cpdef void testgaussian2d(double[:] x, double[:] y, double[:] pars, int nderiv, int osamp):
+    out = agaussian2d(x,y,pars,nderiv,osamp)
+    #free(out)
+
+
+cpdef double[:] npgaussian2d(double[:] x, double[:] y, double[:] pars, int nderiv):
+    cdef double[:] xdiff,ydiff
+    cdef double amp,xsig,ysig,theta,cost2,sint2,sin2t,xsig2,ysig2
+    cdef long npix
+
+    amp = pars[0]
+    xsig = pars[3]
+    ysig = pars[4]
+    theta = pars[5]
+    cost2 = np.cos(theta) ** 2
+    sint2 = np.sin(theta) ** 2
+    sin2t = np.sin(2. * theta)
+    xsig2 = xsig ** 2
+    ysig2 = ysig ** 2
+    a = ((cost2 / xsig2) + (sint2 / ysig2))
+    b = ((sin2t / xsig2) - (sin2t / ysig2))    
+    c = ((sint2 / xsig2) + (cost2 / ysig2))
+
+    npix = len(x)
+    xdiff = np.zeros(npix,float)
+    ydiff = np.zeros(npix,float)
+    for i in range(npix):
+        xdiff[i] = x[i] - pars[1]
+        ydiff[i] = y[i] - pars[2]
+    # g = amp * np.exp(-0.5*((a * xdiff**2) + (b * xdiff * ydiff) +
+    #                        (c * ydiff**2)))
+
+    # cdef double[:,:] out = np.zeros((npix,nderiv+1),float)
+
+    # # Compute derivative as well
+    # if nderiv>0:
+    #     if nderiv>=1:
+    #         dg_dA = g / amp
+    #         out[:,1] = dg_dA
+    #         #derivative.append(dg_dA)
+    #     if nderiv>=2:        
+    #         dg_dx_mean = g * 0.5*((2 * a * xdiff) + (b * ydiff))
+    #         out[:,2] = dg_dx_mean
+    #         #derivative.append(dg_dx_mean)
+    #     if nderiv>=3:
+    #         dg_dy_mean = g * 0.5*((2 * c * ydiff) + (b * xdiff))
+    #         out[:,3] = dg_dy_mean
+    #         #derivative.append(dg_dy_mean)
+    #     if nderiv>=4:
+    #         xdiff2 = xdiff ** 2
+    #         ydiff2 = ydiff ** 2
+    #         xsig3 = xsig ** 3
+    #         da_dxsig = -cost2 / xsig3
+    #         db_dxsig = -sin2t / xsig3            
+    #         dc_dxsig = -sint2 / xsig3            
+    #         dg_dxsig = g * (-(da_dxsig * xdiff2 +
+    #                           db_dxsig * xdiff * ydiff +
+    #                           dc_dxsig * ydiff2))
+    #         out[:,4] = dg_dxsig
+    #         #derivative.append(dg_dxsig)
+    #     if nderiv>=5:
+    #         ysig3 = ysig ** 3
+    #         da_dysig = -sint2 / ysig3
+    #         db_dysig = sin2t / ysig3            
+    #         dc_dysig = -cost2 / ysig3            
+    #         dg_dysig = g * (-(da_dysig * xdiff2 +
+    #                           db_dysig * xdiff * ydiff +
+    #                           dc_dysig * ydiff2))
+    #         out[:,5] = dg_dysig
+    #         #derivative.append(dg_dysig)
+    #     if nderiv>=6:
+    #         sint = np.sin(theta)
+    #         cost = np.cos(theta)
+    #         cos2t = np.cos(2.0*theta)
+    #         da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
+    #         db_dtheta = (cos2t / xsig2) - (cos2t / ysig2)            
+    #         dc_dtheta = -da_dtheta            
+    #         dg_dtheta = g * (-(da_dtheta * xdiff2 +
+    #                            db_dtheta * xdiff * ydiff +
+    #                            dc_dtheta * ydiff2))
+    #         #derivative.append(dg_dtheta)
+    #         out[:,6] = dg_dtheta
+
+    # return out
+
+
+#cdef (double,double[6]) gaussian2d(double x, double y, double[:] pars, int nderiv):
+#cdef list gaussian2d(double x, double y, double[:] pars, int nderiv):
+cdef double* gaussian2d(double x, double y, double[:] pars, int nderiv):
+#cdef double[:] gaussian2d(double x, double y, double[:] pars, int nderiv):
     """
     Two dimensional Gaussian model function.
     
@@ -639,7 +726,10 @@ cdef (double,double[6]) gaussian2d(double x, double y, double[:] pars, int nderi
 
     """
     cdef double g
-    cdef double deriv[6]
+    #cdef double[6] deriv = [0.0,0.0,0.0,0.0,0.0,0.0]
+    #cdef double[7] out
+    cdef double *out = <double*>malloc(7 * sizeof(double))
+    #cdef double[7] out
 
     amp = pars[0]
     xc = pars[1]
@@ -661,20 +751,27 @@ cdef (double,double[6]) gaussian2d(double x, double y, double[:] pars, int nderi
     # amp = 1/(asemi*bsemi*2*np.pi)
     g = amp * exp(-0.5*(cxx*u**2 + cyy*v**2 + cxy*u*v))
 
+    out[0] = g
+
     #return g
 
     #  pars = [amplitude, x0, y0, xsigma, ysigma, theta]
-    #deriv = np.zeros(nderiv,float)    
+    #deriv = np.zeros(nderiv,float)
+    #deriv = array.array(6)
+    #deriv[0] = 0.0
     if nderiv>0:
         # amplitude
         dg_dA = g / amp
-        deriv[0] = dg_dA
+        #deriv[0] = dg_dA
+        out[1] = dg_dA
         # x0
         dg_dx_mean = g * 0.5*((2. * cxx * u) + (cxy * v))
-        deriv[1] = dg_dx_mean
+        #deriv[1] = dg_dx_mean
+        out[2] = dg_dx_mean
         # y0
         dg_dy_mean = g * 0.5*((cxy * u) + (2. * cyy * v))
-        deriv[2] = dg_dy_mean
+        #deriv[2] = dg_dy_mean
+        out[3] = dg_dy_mean
         if nderiv>3:
             sint = sin(theta)        
             cost = cos(theta)        
@@ -690,7 +787,8 @@ cdef (double,double[6]) gaussian2d(double x, double y, double[:] pars, int nderi
             dg_dxsig = g * (-(da_dxsig * u2 +
                               db_dxsig * u * v +
                               dc_dxsig * v2))
-            deriv[3] = dg_dxsig
+            #deriv[3] = dg_dxsig
+            out[4] = dg_dxsig
             # ysig
             bsemi2 = bsemi ** 2
             bsemi3 = bsemi ** 3
@@ -700,7 +798,8 @@ cdef (double,double[6]) gaussian2d(double x, double y, double[:] pars, int nderi
             dg_dysig = g * (-(da_dysig * u2 +
                               db_dysig * u * v +
                               dc_dysig * v2))
-            deriv[4] = dg_dysig
+            #deriv[4] = dg_dysig
+            out[5] = dg_dysig
             # dtheta
             if asemi != bsemi:
                 cos2t = cos(2.0*theta)
@@ -710,10 +809,149 @@ cdef (double,double[6]) gaussian2d(double x, double y, double[:] pars, int nderi
                 dg_dtheta = g * (-(da_dtheta * u2 +
                                    db_dtheta * u * v +
                                    dc_dtheta * v2))
-                deriv[5] = dg_dtheta
+                #deriv[5] = dg_dtheta
+                out[6] = dg_dtheta
 
-    return g,deriv
+    return out
 
+cdef void gaussian2d_integrate(double x, double y, double[9] pars, int nderiv, int osamp, double* out):
+    cdef double theta,cost2,sint2,amp
+    cdef double xsig2,ysig2,a,b,c,xdiff,ydiff,xdiff2,ydiff2,x0,y0,dx,dy
+    cdef int nx,ny,col,row,nsamp,hosamp,i
+    #cdef double[:] x2,y2,xdiff,ydiff,g
+    cdef double dg_dA,dg_dx_mean,dg_dy_mean,dg_dxsig,dg_dysig,dg_dtheta
+    cdef double cost,sint,xsig3,ysig3,da_dxsig,db_dxsig,dc_dxsig
+    cdef double da_dysig,db_dysig,dc_dysig
+    cdef double da_dtheta,db_dtheta,dc_dtheta
+
+    # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+    amp = pars[0]
+    x0 = pars[1]
+    y0 = pars[2]
+    theta = pars[5]
+    cost2 = cos(theta) ** 2
+    sint2 = sin(theta) ** 2
+    sin2t = sin(2. * theta)
+    xsig = pars[3]
+    ysig = pars[4]
+    xsig2 = pars[3] ** 2
+    ysig2 = pars[4] ** 2
+    a = 0.5 * ((cost2 / xsig2) + (sint2 / ysig2))
+    b = 0.5 * ((sin2t / xsig2) - (sin2t / ysig2))
+    c = 0.5 * ((sint2 / xsig2) + (cost2 / ysig2))
+
+    xdiff = x-x0
+    ydiff = y-y0
+    cdef double f = 0.0
+    if osamp < 1:
+        f = exp(-((a * xdiff ** 2) + (b * xdiff * ydiff) +
+                  (c * ydiff ** 2)))
+    #cdef double df_dx_mean = 0.0
+    #cdef double df_dy_mean = 0.0
+    #df_dx_mean = f * ((2. * a * xdiff) + (b * ydiff))
+    #df_dy_mean = f * ((b * xdiff) + (2. * c * ydiff))
+    #cdef double maxdiff = max(abs(df_dx_mean),abs(df_dy_mean))
+    #printf("%.3f\n",maxdiff)
+    #cdef double earg = ((a * xdiff ** 2) + (b * xdiff * ydiff) +
+    #                    (c * ydiff ** 2))
+
+    # Automatically determine the oversampling
+    # These are the thresholds that daophot uses
+    # from the IRAF daophot version in
+    # noao/digiphot/daophot/daolib/profile.x
+    if osamp < 1:
+        if (f >= 0.046):
+            osamp = 4
+        elif (f >= 0.0022):
+            osamp = 3
+        elif (f >= 0.0001):
+            osamp = 2
+        elif (f >= 1.0e-10):
+            osamp = 1
+
+    nsamp = osamp*osamp
+    #cdef double[16] dxarr = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+    #cdef double[16] dyarr = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+    cdef double dd = 0.0
+    cdef double dd0 = 0.0
+    # dx = (np.arange(osamp).astype(float)+1)/osamp-(1/(2*osamp))-0.5
+    if osamp>1:
+        dd = 1/float(osamp)
+        dd0 = 1/(2*float(osamp))-0.5
+
+    cdef double g = 0.0
+    #cdef double g1 = 0.0
+    #cdef double[7] out = [0,0,0,0,0,0,0]
+    #cdef double *out =  <double*>malloc(7 * sizeof(double))
+    #out = cvarray(shape=(7,),itemsize=sizeof(double),format="d")
+    #cdef double[:] mout = out
+    #for i in range(7):
+    #    mout[i] = 0.0
+    for i in range(7):
+        out[i] = 0.0
+    hosamp = osamp//2
+    dg_dA = 0.0
+    dg_dx_mean = 0.0
+    dg_dy_mean = 0.0
+    dg_dxsig = 0.0
+    dg_dysig = 0.0
+    dg_dtheta = 0.0
+    for i in range(nsamp):
+        col = i // osamp
+        row = i % osamp
+        dx = col*dd+dd0
+        dy = row*dd+dd0
+        xdiff = (x+dx)-x0
+        ydiff = (y+dy)-y0
+        xdiff2 = xdiff*xdiff
+        ydiff2 = ydiff*ydiff
+        g = amp * exp(-((a * xdiff ** 2) + (b * xdiff * ydiff) +
+                        (c * ydiff ** 2)))
+        out[0] += g
+
+        # Compute derivative as well
+        if nderiv>=1:
+            dg_dA = g / amp
+            out[1] += dg_dA
+        if nderiv>=2:        
+            dg_dx_mean = g * ((2. * a * xdiff) + (b * ydiff))
+            out[2] += dg_dx_mean
+        if nderiv>=3:
+            dg_dy_mean = g * ((b * xdiff) + (2. * c * ydiff))
+            out[3] += dg_dy_mean
+        if nderiv>=4:
+            cost = cos(theta)
+            sint = sin(theta)
+            xsig3 = xsig ** 3
+            da_dxsig = -cost2 / xsig3
+            db_dxsig = -sin2t / xsig3
+            dc_dxsig = -sint2 / xsig3        
+            dg_dxsig = g * (-(da_dxsig * xdiff2 +
+                                   db_dxsig * xdiff * ydiff +
+                                   dc_dxsig * ydiff2))
+            out[4] += dg_dxsig
+        if nderiv>=5:
+            ysig3 = ysig ** 3            
+            da_dysig = -sint2 / ysig3
+            db_dysig = sin2t / ysig3
+            dc_dysig = -cost2 / ysig3        
+            dg_dysig = g * (-(da_dysig * xdiff2 +
+                                   db_dysig * xdiff * ydiff +
+                                   dc_dysig * ydiff2))
+            out[5] += dg_dysig
+        if nderiv>=6:
+            cos2t = cos(2. * theta)            
+            da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
+            db_dtheta = (cos2t / xsig2) - (cos2t / ysig2)
+            dc_dtheta = -da_dtheta        
+            dg_dtheta = g * (-(da_dtheta * xdiff2 +
+                                db_dtheta * xdiff * ydiff +
+                                dc_dtheta * ydiff2))
+            out[6] += dg_dtheta
+
+    if osamp>1:
+        for i in range(nderiv+1):
+            out[i] /= nsamp   # take average
 
 
 # #
@@ -2544,118 +2782,118 @@ cpdef double sersic2d_flux(double[:] pars):
 # Generic model routines
 
 
-cpdef list model2d(double x, double y, int psftype, double[:] pars, int nderiv):
-    """
-    Two dimensional model function.
+# cpdef list model2d(double x, double y, int psftype, double[:] pars, int nderiv):
+#     """
+#     Two dimensional model function.
     
-    Parameters
-    ----------
-    x : float
-      Single X-value for which to compute the 2D model.
-    y : float
-      Single Y-value of points for which to compute the 2D model.
-    psftype : int
-      Type of PSF model: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic.
-    pars : numpy array
-       Parameter list.
-    nderiv : int
-       The number of derivatives to return.
+#     Parameters
+#     ----------
+#     x : float
+#       Single X-value for which to compute the 2D model.
+#     y : float
+#       Single Y-value of points for which to compute the 2D model.
+#     psftype : int
+#       Type of PSF model: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic.
+#     pars : numpy array
+#        Parameter list.
+#     nderiv : int
+#        The number of derivatives to return.
 
-    Returns
-    -------
-    g : float
-      The 2D model for the input x/y values and parameters (same
-        shape as x/y).
-    derivative : numpy array
-      Array of derivatives of g relative to the input parameters.
+#     Returns
+#     -------
+#     g : float
+#       The 2D model for the input x/y values and parameters (same
+#         shape as x/y).
+#     derivative : numpy array
+#       Array of derivatives of g relative to the input parameters.
 
-    Example
-    -------
+#     Example
+#     -------
 
-    g,derivative = model2d(x,y,1,pars,nderiv)
+#     g,derivative = model2d(x,y,1,pars,nderiv)
 
-    """
-    # Gaussian
-    if psftype==1:
-        # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
-        return gaussian2d(x,y,pars,nderiv)
-    # Moffat
-    elif psftype==2:
-        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
-        return moffat2d(x,y,pars,nderiv)
-    # Penny
-    elif psftype==3:
-        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
-        return penny2d(x,y,pars,nderiv)
-    # Gausspow
-    elif psftype==4:
-        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
-        return gausspow2d(x,y,pars,nderiv)
-    # Sersic
-    elif psftype==5:
-        # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
-        return sersic2d(x,y,pars,nderiv)
-    else:
-        print('psftype=',psftype,'not supported')
-        return [np.nan,np.nan]
+#     """
+#     # Gaussian
+#     if psftype==1:
+#         # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+#         return gaussian2d(x,y,pars,nderiv)
+#     # Moffat
+#     elif psftype==2:
+#         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
+#         return moffat2d(x,y,pars,nderiv)
+#     # Penny
+#     elif psftype==3:
+#         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
+#         return penny2d(x,y,pars,nderiv)
+#     # Gausspow
+#     elif psftype==4:
+#         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
+#         return gausspow2d(x,y,pars,nderiv)
+#     # Sersic
+#     elif psftype==5:
+#         # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
+#         return sersic2d(x,y,pars,nderiv)
+#     else:
+#         print('psftype=',psftype,'not supported')
+#         return [np.nan,np.nan]
 
 
-cpdef list amodel2d(double[:] x, double[:] y, int psftype, double[:] pars, int nderiv):
-    """
-    Two dimensional model function with x/y array inputs.
+# cpdef list amodel2d(double[:] x, double[:] y, int psftype, double[:] pars, int nderiv):
+#     """
+#     Two dimensional model function with x/y array inputs.
     
-    Parameters
-    ----------
-    x : numpy array
-      Array of X-values of points for which to compute the 2D model.
-    y : numpy array
-      Array of Y-values of points for which to compute the 2D model.
-    psftype : int
-      Type of PSF model: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic.
-    pars : numpy array
-       Parameter list.
-    nderiv : int
-       The number of derivatives to return.
+#     Parameters
+#     ----------
+#     x : numpy array
+#       Array of X-values of points for which to compute the 2D model.
+#     y : numpy array
+#       Array of Y-values of points for which to compute the 2D model.
+#     psftype : int
+#       Type of PSF model: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic.
+#     pars : numpy array
+#        Parameter list.
+#     nderiv : int
+#        The number of derivatives to return.
 
-    Returns
-    -------
-    g : numpy array
-      The 2D model for the input x/y values and parameters.  Always
-        returned as 1D raveled() array.
-    derivative : numpy array
-      Array of derivatives of g relative to the input parameters.
-        Always 2D [Npix,Nderiv] with the 1st dimension being the x/y arrays
-        raveled() to 1D.
+#     Returns
+#     -------
+#     g : numpy array
+#       The 2D model for the input x/y values and parameters.  Always
+#         returned as 1D raveled() array.
+#     derivative : numpy array
+#       Array of derivatives of g relative to the input parameters.
+#         Always 2D [Npix,Nderiv] with the 1st dimension being the x/y arrays
+#         raveled() to 1D.
 
-    Example
-    -------
+#     Example
+#     -------
 
-    g,derivative = amodel2d(x,y,1,pars,3)
+#     g,derivative = amodel2d(x,y,1,pars,3)
 
-    """
-    # Gaussian
-    if psftype==1:
-        # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
-        return agaussian2d(x,y,pars,nderiv)
-    # Moffat
-    elif psftype==2:
-        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
-        return amoffat2d(x,y,pars,nderiv)
-    # Penny
-    elif psftype==3:
-        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
-        return apenny2d(x,y,pars,nderiv)
-    # Gausspow
-    elif psftype==4:
-        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
-        return agausspow2d(x,y,pars,nderiv)
-    # Sersic
-    elif psftype==5:
-        # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
-        return asersic2d(x,y,pars,nderiv)
-    else:
-        print('psftype=',psftype,'not supported')
-        return [np.nan,np.nan]
+#     """
+#     # Gaussian
+#     if psftype==1:
+#         # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
+#         return agaussian2d(x,y,pars,nderiv)
+#     # Moffat
+#     elif psftype==2:
+#         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
+#         return amoffat2d(x,y,pars,nderiv)
+#     # Penny
+#     elif psftype==3:
+#         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
+#         return apenny2d(x,y,pars,nderiv)
+#     # Gausspow
+#     elif psftype==4:
+#         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
+#         return agausspow2d(x,y,pars,nderiv)
+#     # Sersic
+#     elif psftype==5:
+#         # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
+#         return asersic2d(x,y,pars,nderiv)
+#     else:
+#         print('psftype=',psftype,'not supported')
+#         return [np.nan,np.nan]
 
 
 cpdef double model2d_flux(int psftype, double[:] pars):
@@ -3383,139 +3621,139 @@ cpdef double[:] packpsf(int psftype, double[:] pars, double[:,:,:] lookup, int[:
 #             print('Image size = [',nimx,nimy,']')
 
 
-cpdef double psf2d_fwhm(double[:] psf):
-    """
-    Return the FWHM of the PSF
-    """
-    cdef int psftype
-    cdef int[:] imshape
-    cdef double[:] pars,tpars
-    cdef double[:,:,:] lookup
-    cdef double fwhm
+# cpdef double psf2d_fwhm(double[:] psf):
+#     """
+#     Return the FWHM of the PSF
+#     """
+#     cdef int psftype
+#     cdef int[:] imshape
+#     cdef double[:] pars,tpars
+#     cdef double[:,:,:] lookup
+#     cdef double fwhm
 
-    psftype,psfpars,lookup,imshape = unpackpsf(psf)
-    tpars = np.zeros(3+len(psfpars),float)
-    tpars[0] = 1.0
-    tpars[3:] = psfpars
-    fwhm = model2d_fwhm(psftype,tpars)
-    # Need to make the PSF if it is empirical or has a lookup table
+#     psftype,psfpars,lookup,imshape = unpackpsf(psf)
+#     tpars = np.zeros(3+len(psfpars),float)
+#     tpars[0] = 1.0
+#     tpars[3:] = psfpars
+#     fwhm = model2d_fwhm(psftype,tpars)
+#     # Need to make the PSF if it is empirical or has a lookup table
     
-    return fwhm
+#     return fwhm
 
 
-cpdef double psf2d_flux(double[:] psf, double amp, double xc, double yc):
-    """
-    Return the flux of the PSF
-    """
-    cdef int psftype
-    cdef double[:] psfpars,tpars
-    cdef double[:,:,:] lookup
-    cdef int[:] imshape
-    cdef double flux
+# cpdef double psf2d_flux(double[:] psf, double amp, double xc, double yc):
+#     """
+#     Return the flux of the PSF
+#     """
+#     cdef int psftype
+#     cdef double[:] psfpars,tpars
+#     cdef double[:,:,:] lookup
+#     cdef int[:] imshape
+#     cdef double flux
 
-    psftype,psfpars,lookup,imshape = unpackpsf(psf)
-    tpars = np.zeros(3+len(psfpars),float)
-    tpars[:3] = np.array([amp,xc,yc])
-    tpars[3:] = psfpars
-    flux = model2d_flux(psftype,tpars)
-    # Need to make the PSF if it is empirical or has a lookup table
+#     psftype,psfpars,lookup,imshape = unpackpsf(psf)
+#     tpars = np.zeros(3+len(psfpars),float)
+#     tpars[:3] = np.array([amp,xc,yc])
+#     tpars[3:] = psfpars
+#     flux = model2d_flux(psftype,tpars)
+#     # Need to make the PSF if it is empirical or has a lookup table
     
-    return flux
+#     return flux
 
 
-cpdef list psf(double[:] x, double[:] y, double[:] pars, int psftype, double[:] psfparams,
-               double[:,:,:] lookup, int[:] imshape, int deriv, int verbose):
-    """
-    Return a PSF model.
+# cpdef list psf(double[:] x, double[:] y, double[:] pars, int psftype, double[:] psfparams,
+#                double[:,:,:] lookup, int[:] imshape, int deriv, int verbose):
+#     """
+#     Return a PSF model.
 
-    Parameters
-    ----------
-    x : numpy array
-       Array of X-values at which to evaluate the PSF model.
-    y : numpy array
-       Array of Y-values at which to evaluate the PSF model.
-    pars : numpy array
-       Amplitude, xcen, ycen of the model.
-    psftype : int
-       PSF type.
-    psfparams : numpy array
-       Analytical model parameters.
-    lookup : numpy array
-       Empirical lookup table.
-    imshape : numpy array
-       Shape of the whole image.
-    deriv : bool
-       Return derivatives as well.
-    verbose : bool
-       Verbose output to the screen.
+#     Parameters
+#     ----------
+#     x : numpy array
+#        Array of X-values at which to evaluate the PSF model.
+#     y : numpy array
+#        Array of Y-values at which to evaluate the PSF model.
+#     pars : numpy array
+#        Amplitude, xcen, ycen of the model.
+#     psftype : int
+#        PSF type.
+#     psfparams : numpy array
+#        Analytical model parameters.
+#     lookup : numpy array
+#        Empirical lookup table.
+#     imshape : numpy array
+#        Shape of the whole image.
+#     deriv : bool
+#        Return derivatives as well.
+#     verbose : bool
+#        Verbose output to the screen.
 
-    Returns
-    -------
-    model : numpy array
-       PSF model.
-    derivatives : numpy array
-       Array of partial derivatives.
+#     Returns
+#     -------
+#     model : numpy array
+#        PSF model.
+#     derivatives : numpy array
+#        Array of partial derivatives.
     
-    Examples
-    --------
+#     Examples
+#     --------
 
-    model,derivatives = psf2d(x,y,pars,1,psfparams,lookup,imshape)
+#     model,derivatives = psf2d(x,y,pars,1,psfparams,lookup,imshape)
 
-    """
-    cdef int nderiv,npars
-    cdef int[:] nparsarr
-    cdef double[:] g,allpars
-    cdef double[:,:] derivative
+#     """
+#     cdef int nderiv,npars
+#     cdef int[:] nparsarr
+#     cdef double[:] g,allpars
+#     cdef double[:,:] derivative
 
-    # Unpack psf parameters
-    #psftype,psfpars,lookup,imshape = unpackpsf(psf)
+#     # Unpack psf parameters
+#     #psftype,psfpars,lookup,imshape = unpackpsf(psf)
 
-    # Get the analytic portion
-    if deriv==True:
-        nderiv = 3
-    else:
-        nderiv = 0
+#     # Get the analytic portion
+#     if deriv==True:
+#         nderiv = 3
+#     else:
+#         nderiv = 0
 
-    if psftype <= 5:
-        nparsarr = np.zeros(5,np.int32)
-        nparsarr[:] = np.array([6,7,8,8,7])
-        npars = nparsarr[psftype-1]
-        # Add amp, xc, yc to the parameters
-        allpars = np.zeros(npars,float)
-        allpars[:3] = pars
-        allpars[3:] = psfparams
+#     if psftype <= 5:
+#         nparsarr = np.zeros(5,np.int32)
+#         nparsarr[:] = np.array([6,7,8,8,7])
+#         npars = nparsarr[psftype-1]
+#         # Add amp, xc, yc to the parameters
+#         allpars = np.zeros(npars,float)
+#         allpars[:3] = pars
+#         allpars[3:] = psfparams
         
-    # Gaussian
-    if psftype==1:
-        g,derivative = agaussian2d(x,y,allpars,nderiv)
-    # Moffat
-    elif psftype==2:
-        g,derivative = amoffat2d(x,y,allpars,nderiv)
-    # Penny
-    elif psftype==3:
-        g,derivative = apenny2d(x,y,allpars,nderiv)
-    # Gausspow
-    elif psftype==4:
-        g,derivative = agausspow2d(x,y,allpars,nderiv)
-    # Sersic
-    elif psftype==5:
-        g,derivative = asersic2d(x,y,allpars,nderiv)
-    # Empirical
-    #elif psftype==6:
-    #    g,derivative = empirical(x,y,pars,lookup,imshape,nderiv)
-    else:
-        print('psftype=',psftype,'not supported')
-        g = np.zeros(1,float)
-        derivative = np.zeros((1,1),float)
+#     # Gaussian
+#     if psftype==1:
+#         g,derivative = agaussian2d(x,y,allpars,nderiv)
+#     # Moffat
+#     elif psftype==2:
+#         g,derivative = amoffat2d(x,y,allpars,nderiv)
+#     # Penny
+#     elif psftype==3:
+#         g,derivative = apenny2d(x,y,allpars,nderiv)
+#     # Gausspow
+#     elif psftype==4:
+#         g,derivative = agausspow2d(x,y,allpars,nderiv)
+#     # Sersic
+#     elif psftype==5:
+#         g,derivative = asersic2d(x,y,allpars,nderiv)
+#     # Empirical
+#     #elif psftype==6:
+#     #    g,derivative = empirical(x,y,pars,lookup,imshape,nderiv)
+#     else:
+#         print('psftype=',psftype,'not supported')
+#         g = np.zeros(1,float)
+#         derivative = np.zeros((1,1),float)
 
-    # Add lookup table portion
-    #if psftype <= 5 and lookup.size > 1:
-    #    eg,ederivative = empirical(x,y,pars,lookup,imshape,(nderiv>0))
-    #    g[:] += eg
-    #    # Make sure the model is positive everywhere
-    #    derivative[:,:] += ederivative
+#     # Add lookup table portion
+#     #if psftype <= 5 and lookup.size > 1:
+#     #    eg,ederivative = empirical(x,y,pars,lookup,imshape,(nderiv>0))
+#     #    g[:] += eg
+#     #    # Make sure the model is positive everywhere
+#     #    derivative[:,:] += ederivative
     
-    return [g,derivative]
+#     return [g,derivative]
 
 
 # cpdef psffit(im,err,x,y,pars,psftype,psfparams,lookup,imshape=None,verbose=False):
