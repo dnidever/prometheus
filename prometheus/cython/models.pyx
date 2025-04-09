@@ -13,7 +13,7 @@ from cython.view cimport array as cvarray
 from cpython cimport array
 from scipy.special import gamma, gammaincinv, gammainc
 
-from libc.math cimport exp,sqrt,atan2,pi,NAN
+from libc.math cimport exp,sqrt,atan2,pi,NAN,log,log10
 from libcpp cimport bool
 from libc.stdlib cimport malloc, free
 from cpython.mem cimport PyMem_Malloc, PyMem_Realloc, PyMem_Free
@@ -521,7 +521,6 @@ cpdef double gaussian2d_fwhm(double[:] pars):
     return fwhm
 
 
-#cdef double* agaussian2d(double[:] x, double[:] y, double[:] pars, int nderiv):
 cpdef double[:,:] agaussian2d(double[:] x, double[:] y, double[:] pars, int nderiv, int osamp):
     """
     Two dimensional Gaussian model function with x/y array inputs.
@@ -555,18 +554,18 @@ cpdef double[:,:] agaussian2d(double[:] x, double[:] y, double[:] pars, int nder
     g,derivative = agaussian2d(x,y,pars,3)
 
     """
-    cdef double amp,xc,yc,asemi,bsemi,theta,cxx,cyy,cxy
+    cdef double amp,xc,yc,xsig,ysig,theta,cxx,cyy,cxy
     cdef double x1,y1
     cdef long i,j,npix,index
 
     amp = pars[0]
     xc = pars[1]
     yc = pars[2]
-    asemi = pars[3]
-    bsemi = pars[4]
+    xsig = pars[3]
+    ysig = pars[4]
     theta = pars[5]
     if len(pars)==6:
-        cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
+        cxx,cyy,cxy = gauss_abt2cxy(xsig,ysig,theta)
     else:
         cxx = pars[6]
         cyy = pars[7]
@@ -577,8 +576,8 @@ cpdef double[:,:] agaussian2d(double[:] x, double[:] y, double[:] pars, int nder
     allpars[0] = amp
     allpars[1] = xc
     allpars[2] = yc
-    allpars[3] = asemi
-    allpars[4] = bsemi
+    allpars[3] = xsig
+    allpars[4] = ysig
     allpars[5] = theta
     allpars[6] = cxx
     allpars[7] = cyy
@@ -816,9 +815,9 @@ cdef double* gaussian2d(double x, double y, double[:] pars, int nderiv):
 
 cdef void gaussian2d_integrate(double x, double y, double[9] pars, int nderiv, int osamp, double* out):
     cdef double theta,cost2,sint2,amp
-    cdef double xsig2,ysig2,a,b,c,xdiff,ydiff,xdiff2,ydiff2,x0,y0,dx,dy
+    cdef double xsig2,ysig2,a,b,c,u,v,u2,v2,x0,y0,dx,dy
     cdef int nx,ny,col,row,nsamp,hosamp,i
-    #cdef double[:] x2,y2,xdiff,ydiff,g
+    #cdef double[:] x2,y2,u,v,g
     cdef double dg_dA,dg_dx_mean,dg_dy_mean,dg_dxsig,dg_dysig,dg_dtheta
     cdef double cost,sint,xsig3,ysig3,da_dxsig,db_dxsig,dc_dxsig
     cdef double da_dysig,db_dysig,dc_dysig
@@ -828,32 +827,29 @@ cdef void gaussian2d_integrate(double x, double y, double[9] pars, int nderiv, i
     amp = pars[0]
     x0 = pars[1]
     y0 = pars[2]
-    theta = pars[5]
-    cost2 = cos(theta) ** 2
-    sint2 = sin(theta) ** 2
-    sin2t = sin(2. * theta)
     xsig = pars[3]
     ysig = pars[4]
+    theta = pars[5]
+    cxx = pars[6]
+    cyy = pars[7]
+    cxy = pars[8]
+    cost = cos(theta)
+    sint = sin(theta)
+    cost2 = cost ** 2
+    sint2 = sint ** 2
+    sin2t = sin(2. * theta)
     xsig2 = pars[3] ** 2
     ysig2 = pars[4] ** 2
-    a = 0.5 * ((cost2 / xsig2) + (sint2 / ysig2))
-    b = 0.5 * ((sin2t / xsig2) - (sin2t / ysig2))
-    c = 0.5 * ((sint2 / xsig2) + (cost2 / ysig2))
+    #a = 0.5 * ((cost2 / xsig2) + (sint2 / ysig2))
+    #b = 0.5 * ((sin2t / xsig2) - (sin2t / ysig2))
+    #c = 0.5 * ((sint2 / xsig2) + (cost2 / ysig2))
 
-    xdiff = x-x0
-    ydiff = y-y0
+    u = x-x0
+    v = y-y0
     cdef double f = 0.0
     if osamp < 1:
-        f = exp(-((a * xdiff ** 2) + (b * xdiff * ydiff) +
-                  (c * ydiff ** 2)))
-    #cdef double df_dx_mean = 0.0
-    #cdef double df_dy_mean = 0.0
-    #df_dx_mean = f * ((2. * a * xdiff) + (b * ydiff))
-    #df_dy_mean = f * ((b * xdiff) + (2. * c * ydiff))
-    #cdef double maxdiff = max(abs(df_dx_mean),abs(df_dy_mean))
-    #printf("%.3f\n",maxdiff)
-    #cdef double earg = ((a * xdiff ** 2) + (b * xdiff * ydiff) +
-    #                    (c * ydiff ** 2))
+        f = exp(-((cxx * u ** 2) + (cxy * u * v) +
+                  (cyy * v ** 2)))
 
     # Automatically determine the oversampling
     # These are the thresholds that daophot uses
@@ -870,23 +866,14 @@ cdef void gaussian2d_integrate(double x, double y, double[9] pars, int nderiv, i
             osamp = 1
 
     nsamp = osamp*osamp
-    #cdef double[16] dxarr = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
-    #cdef double[16] dyarr = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
     cdef double dd = 0.0
     cdef double dd0 = 0.0
     # dx = (np.arange(osamp).astype(float)+1)/osamp-(1/(2*osamp))-0.5
     if osamp>1:
         dd = 1/float(osamp)
-        dd0 = 1/(2*float(osamp))-0.5
+        dd0 = 1/(2*float(osamp))-0.5  
 
     cdef double g = 0.0
-    #cdef double g1 = 0.0
-    #cdef double[7] out = [0,0,0,0,0,0,0]
-    #cdef double *out =  <double*>malloc(7 * sizeof(double))
-    #out = cvarray(shape=(7,),itemsize=sizeof(double),format="d")
-    #cdef double[:] mout = out
-    #for i in range(7):
-    #    mout[i] = 0.0
     for i in range(7):
         out[i] = 0.0
     hosamp = osamp//2
@@ -901,12 +888,12 @@ cdef void gaussian2d_integrate(double x, double y, double[9] pars, int nderiv, i
         row = i % osamp
         dx = col*dd+dd0
         dy = row*dd+dd0
-        xdiff = (x+dx)-x0
-        ydiff = (y+dy)-y0
-        xdiff2 = xdiff*xdiff
-        ydiff2 = ydiff*ydiff
-        g = amp * exp(-((a * xdiff ** 2) + (b * xdiff * ydiff) +
-                        (c * ydiff ** 2)))
+        u = (x+dx)-x0
+        v = (y+dy)-y0
+        u2 = u*u
+        v2 = v*v
+        g = amp * exp(-((cxx * u ** 2) + (cxy * u * v) +
+                        (cyy * v ** 2)))
         out[0] += g
 
         # Compute derivative as well
@@ -914,10 +901,10 @@ cdef void gaussian2d_integrate(double x, double y, double[9] pars, int nderiv, i
             dg_dA = g / amp
             out[1] += dg_dA
         if nderiv>=2:        
-            dg_dx_mean = g * ((2. * a * xdiff) + (b * ydiff))
+            dg_dx_mean = g * ((2. * cxx * u) + (cxy * v))
             out[2] += dg_dx_mean
         if nderiv>=3:
-            dg_dy_mean = g * ((b * xdiff) + (2. * c * ydiff))
+            dg_dy_mean = g * ((cxy * u) + (2. * cyy * v))
             out[3] += dg_dy_mean
         if nderiv>=4:
             cost = cos(theta)
@@ -926,27 +913,27 @@ cdef void gaussian2d_integrate(double x, double y, double[9] pars, int nderiv, i
             da_dxsig = -cost2 / xsig3
             db_dxsig = -sin2t / xsig3
             dc_dxsig = -sint2 / xsig3        
-            dg_dxsig = g * (-(da_dxsig * xdiff2 +
-                                   db_dxsig * xdiff * ydiff +
-                                   dc_dxsig * ydiff2))
+            dg_dxsig = g * (-(da_dxsig * u2 +
+                                   db_dxsig * u * v +
+                                   dc_dxsig * v2))
             out[4] += dg_dxsig
         if nderiv>=5:
             ysig3 = ysig ** 3            
             da_dysig = -sint2 / ysig3
             db_dysig = sin2t / ysig3
             dc_dysig = -cost2 / ysig3        
-            dg_dysig = g * (-(da_dysig * xdiff2 +
-                                   db_dysig * xdiff * ydiff +
-                                   dc_dysig * ydiff2))
+            dg_dysig = g * (-(da_dysig * u2 +
+                                   db_dysig * u * v +
+                                   dc_dysig * v2))
             out[5] += dg_dysig
         if nderiv>=6:
             cos2t = cos(2. * theta)            
             da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
             db_dtheta = (cos2t / xsig2) - (cos2t / ysig2)
             dc_dtheta = -da_dtheta        
-            dg_dtheta = g * (-(da_dtheta * xdiff2 +
-                                db_dtheta * xdiff * ydiff +
-                                dc_dtheta * ydiff2))
+            dg_dtheta = g * (-(da_dtheta * u2 +
+                                db_dtheta * u * v +
+                                dc_dtheta * v2))
             out[6] += dg_dtheta
 
     if osamp>1:
@@ -1167,7 +1154,7 @@ cpdef double moffat2d_flux(double[:] pars):
 
 
 
-cpdef list amoffat2d(double[:] x, double[:] y, double[:] pars, int nderiv):
+cpdef double[:,:] amoffat2d(double[:] x, double[:] y, double[:] pars, int nderiv, int osamp):
     """
     Two dimensional Moffat model function with x/y array inputs.
     
@@ -1198,139 +1185,186 @@ cpdef list amoffat2d(double[:] x, double[:] y, double[:] pars, int nderiv):
     g,derivative = amoffat2d(x,y,pars,3)
 
     """
-    cdef double[:] g = np.zeros(len(x))
-    cdef double[:,:] deriv = np.zeros((len(x),nderiv))
 
-    if len(pars)!=7 and len(pars)!=10:
-        raise Exception('amoffat2d pars must have either 6 or 9 elements')
-    
-    allpars = np.zeros(10,float)
+    cdef double amp,xc,yc,xsig,ysig,theta,cxx,cyy,cxy,beta
+    cdef double x1,y1
+    cdef long i,j,npix,index
+
+    amp = pars[0]
+    xc = pars[1]
+    yc = pars[2]
+    xsig = pars[3]
+    ysig = pars[4]
+    theta = pars[5]
+    beta = pars[6]
     if len(pars)==7:
-        amp,xc,yc,asemi,bsemi,theta,beta = pars
-        cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
-        allpars[:7] = pars
-        allpars[7:] = [cxx,cyy,cxy]
+        cxx,cyy,cxy = gauss_abt2cxy(xsig,ysig,theta)
     else:
-        allpars[:] = pars
+        cxx = pars[7]
+        cyy = pars[8]
+        cxy = pars[9]
+
+    cdef double allpars[10]
+    #cdef double* allpars = <double*>malloc(9 * sizeof(double))
+    allpars[0] = amp
+    allpars[1] = xc
+    allpars[2] = yc
+    allpars[3] = xsig
+    allpars[4] = ysig
+    allpars[5] = theta
+    allpars[6] = beta
+    allpars[7] = cxx
+    allpars[8] = cyy
+    allpars[9] = cxy
 
     npix = len(x)
-    # Initialize output
-    g = np.zeros(npix,float)
-    if nderiv>0:
-        deriv = np.zeros((npix,nderiv),float)
-    else:
-        deriv = np.zeros((1,1),float)
+
+    # 2D arrays
+    out = cvarray(shape=(npix,8),itemsize=sizeof(double),format="d")
+    cdef double[:,:] mout = out
+
+    cdef double *out1 = <double*>malloc(8 * sizeof(double))
+
     # Loop over the points
     for i in range(npix):
-        g1,deriv1 = moffat2d(x[i],y[i],allpars,nderiv)
-        g[i] = g1
-        if nderiv>0:
-            for j in range(nderiv):
-                deriv[i,j] = deriv1[j]
-    return [g,deriv]
+        x1 = x[i]
+        y1 = y[i]
+        moffat2d_integrate(x1,y1,allpars,nderiv,osamp,out1)
+        for j in range(nderiv+1):
+            mout[i,j] = out1[j]
 
-    
+    free(out1)
 
-cpdef list moffat2d(double x, double y, double[:] pars, int nderiv):
-    """
-    Two dimensional Moffat model function for a single point.
+    return mout
 
-    Parameters
-    ----------
-    x : float
-      Single X-value for which to compute the Moffat model.
-    y : float
-      Single Y-value for which to compute the Moffat model.
-    pars : numpy array
-       Parameter list. pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
-         The cxx, cyy, cxy parameter can be added to the end so they don't
-         have to be computed.
-    nderiv : int
-       The number of derivatives to return.
 
-    Returns
-    -------
-    g : float
-      The Moffat model for the input x/y values and parameters.
-    derivative : numpy array
-      Array of derivatives of g relative to the input parameters.
+cdef void moffat2d_integrate(double x, double y, double[10] pars, int nderiv, int osamp, double* out):
+    cdef double theta,cost2,sint2,amp,beta
+    cdef double xsig2,ysig2,a,b,c,u,v,u2,v2,x0,y0,dx,dy
+    cdef int nx,ny,col,row,nsamp,hosamp,i
+    #cdef double[:] x2,y2,u,v,g
+    cdef double dg_dA,dg_dx_mean,dg_dy_mean,dg_dxsig,dg_dysig,dg_dtheta,dg_dbeta
+    cdef double cost,sint,xsig3,ysig3,da_dxsig,db_dxsig,dc_dxsig
+    cdef double da_dysig,db_dysig,dc_dysig
+    cdef double da_dtheta,db_dtheta,dc_dtheta
 
-    Example
-    -------
+    # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta, cxx, cyy, cxy]
+    amp = pars[0]
+    x0 = pars[1]
+    y0 = pars[2]
+    xsig = pars[3]
+    ysig = pars[4]
+    theta = pars[5]
+    beta = pars[6]
+    cxx = pars[7]
+    cyy = pars[8]
+    cxy = pars[9]
+    sint = sin(theta)
+    cost = cos(theta)
+    cost2 = cost ** 2
+    sint2 = sint ** 2
+    sin2t = sin(2. * theta)
+    xsig2 = xsig ** 2
+    ysig2 = ysig ** 2
 
-    g,derivative = moffat2d(x,y,pars,nderiv)
+    u = x-x0
+    v = y-y0
+    cdef double f = 0.0
+    if osamp < 1:
+        f = exp(-((cxx * u ** 2) + (cxy * u * v) +
+                  (cyy * v ** 2)))
 
-    """
-    cdef double g
-    cdef double[:] deriv = np.zeros(nderiv)
+    # Automatically determine the oversampling
+    # These are the thresholds that daophot uses
+    # from the IRAF daophot version in
+    # noao/digiphot/daophot/daolib/profile.x
+    if osamp < 1:
+        if (f >= 0.046):
+            osamp = 4
+        elif (f >= 0.0022):
+            osamp = 3
+        elif (f >= 0.0001):
+            osamp = 2
+        elif (f >= 1.0e-10):
+            osamp = 1
 
-    if len(pars)==7:
-        amp,xc,yc,asemi,bsemi,theta,beta = pars
-        cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
-    else:
-        amp,xc,yc,asemi,bsemi,theta,beta,cxx,cyy,cxy = pars
-        
-    u = (x-xc)
-    u2 = u**2
-    v = (y-yc)
-    v2 = v**2
-    # amp = 1/(asemi*bsemi*2*np.pi)
-    rr_gg = (cxx*u**2 + cyy*v**2 + cxy*u*v)
-    g = amp * (1 + rr_gg) ** (-beta)
-    
-    #  pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
-    deriv = np.zeros(nderiv,float)    
-    if nderiv>0:
-        # amplitude
-        dg_dA = g / amp
-        deriv[0] = dg_dA
-        # x0
-        dg_dx_mean = beta * g/(1+rr_gg) * ((2. * cxx * u) + (cxy * v))
-        deriv[1] = dg_dx_mean
-        # y0
-        dg_dy_mean = beta * g/(1+rr_gg) * ((cxy * u) + (2. * cyy * v))
-        deriv[2] = dg_dy_mean
-        if nderiv>3:
-            sint = np.sin(theta)        
-            cost = np.cos(theta)        
-            sint2 = sint ** 2
-            cost2 = cost ** 2
-            sin2t = np.sin(2. * theta)
-            # asemi/xsig
-            asemi2 = asemi ** 2
-            asemi3 = asemi ** 3
-            da_dxsig = -cost2 / asemi3
-            db_dxsig = -sin2t / asemi3
-            dc_dxsig = -sint2 / asemi3
+    nsamp = osamp*osamp
+    cdef double dd = 0.0
+    cdef double dd0 = 0.0
+    # dx = (np.arange(osamp).astype(float)+1)/osamp-(1/(2*osamp))-0.5
+    if osamp>1:
+        dd = 1/float(osamp)
+        dd0 = 1/(2*float(osamp))-0.5
+
+    cdef double g = 0.0
+    for i in range(8):
+        out[i] = 0.0
+    hosamp = osamp//2
+    dg_dA = 0.0
+    dg_dx_mean = 0.0
+    dg_dy_mean = 0.0
+    dg_dxsig = 0.0
+    dg_dysig = 0.0
+    dg_dtheta = 0.0
+    dg_dbeta = 0.0
+    for i in range(nsamp):
+        col = i // osamp
+        row = i % osamp
+        dx = col*dd+dd0
+        dy = row*dd+dd0
+        u = (x+dx)-x0
+        v = (y+dy)-y0
+        u2 = u*u
+        v2 = v*v
+
+        rr_gg = (cxx*u**2 + cyy*v**2 + cxy*u*v)
+        g = amp * (1 + rr_gg) ** (-beta)
+        out[0] += g
+
+        # Compute derivative as well
+        if nderiv>=1:
+            dg_dA = g / amp
+            out[1] += dg_dA
+        if nderiv>=2:
+            dg_dx_mean = beta * g/(1+rr_gg) * ((2. * cxx * u) + (cxy * v))
+            out[2] += dg_dx_mean
+        if nderiv>=3:
+            dg_dy_mean = beta * g/(1+rr_gg) * ((cxy * u) + (2. * cyy * v))
+            out[3] += dg_dy_mean
+        if nderiv>=4:
+            xsig3 = xsig ** 3
+            da_dxsig = -cost2 / xsig3
+            db_dxsig = -sin2t / xsig3
+            dc_dxsig = -sint2 / xsig3
             dg_dxsig = (-beta)*g/(1+rr_gg) * 2*(da_dxsig * u2 +
                                                 db_dxsig * u * v +
                                                 dc_dxsig * v2)
-            deriv[3] = dg_dxsig
-            # bsemi/ysig
-            bsemi2 = bsemi ** 2
-            bsemi3 = bsemi ** 3
-            da_dysig = -sint2 / bsemi3
-            db_dysig = sin2t / bsemi3
-            dc_dysig = -cost2 / bsemi3
+            out[4] += dg_dxsig
+        if nderiv>=5:
+            ysig3 = ysig ** 3
+            da_dysig = -sint2 / ysig3
+            db_dysig = sin2t / ysig3
+            dc_dysig = -cost2 / ysig3
             dg_dysig = (-beta)*g/(1+rr_gg) * 2*(da_dysig * u2 +
                                                 db_dysig * u * v +
                                                 dc_dysig * v2)
-            deriv[4] = dg_dysig
-            # dtheta
-            if asemi != bsemi:
-                cos2t = np.cos(2.0*theta)
-                da_dtheta = (sint * cost * ((1. / bsemi2) - (1. / asemi2)))
-                db_dtheta = (cos2t / asemi2) - (cos2t / bsemi2)
-                dc_dtheta = -da_dtheta
-                dg_dtheta = (-beta)*g/(1+rr_gg) * 2*(da_dtheta * u2 +
-                                                     db_dtheta * u * v +
-                                                     dc_dtheta * v2)
-                deriv[5] = dg_dtheta
-            # beta
-            dg_dbeta = -g * np.log(1 + rr_gg)
-            deriv[6] = dg_dbeta
-                
-    return [g,np.asarray(deriv)]
+            out[5] += dg_dysig
+        if nderiv>=6 and xsig != ysig:
+            cos2t = np.cos(2.0*theta)
+            da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
+            db_dtheta = (cos2t / xsig2) - (cos2t / ysig2)
+            dc_dtheta = -da_dtheta
+            dg_dtheta = (-beta)*g/(1+rr_gg) * 2*(da_dtheta * u2 +
+                                                 db_dtheta * u * v +
+                                                 dc_dtheta * v2)
+            out[6] += dg_dtheta
+        if nderiv>=7:
+            dg_dbeta = -g * log(1 + rr_gg)
+            out[7] += dg_dbeta
+
+    if osamp>1:
+        for i in range(nderiv+1):
+            out[i] /= nsamp   # take average
 
 
 # cpdef moffat2dfit(im,err,ampc,xc,yc,verbose):
@@ -1581,7 +1615,7 @@ cpdef double penny2d_flux(double[:] pars):
     return volume
 
 
-cpdef list apenny2d(double[:] x, double[:] y, double[:] pars, int nderiv):
+cpdef double[:,:] apenny2d(double[:] x, double[:] y, double[:] pars, int nderiv, int osamp):
     """
     Two dimensional Penny model function with x/y array inputs.
     
@@ -1612,49 +1646,59 @@ cpdef list apenny2d(double[:] x, double[:] y, double[:] pars, int nderiv):
     g,derivative = apenny2d(x,y,pars,3)
 
     """
+    cdef double amp,xc,yc,asemi,bsemi,theta,relamp,sigma,cxx,cyy,cxy
+    cdef double x1,y1
+    cdef long i,j,npix,index
 
-    cdef double[:] g
-    cdef int npix
-    cdef double[:,:] deriv
-
-    if len(pars)!=8 and len(pars)!=11:
-        raise Exception('apenny2d pars must have either 6 or 9 elements')
-    
-    allpars = np.zeros(11,float)
+    amp = pars[0]
+    xc = pars[1]
+    yc = pars[2]
+    xsig = pars[3]
+    ysig = pars[4]
+    theta = pars[5]
+    relamp = pars[6]
+    sigma = pars[7]
     if len(pars)==8:
-        amp,xc,yc,asemi,bsemi,theta,relamp,sigma = pars
-        cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
-        allpars[:8] = pars
-        allpars[8:] = [cxx,cyy,cxy]
+        cxx,cyy,cxy = gauss_abt2cxy(xsig,ysig,theta)
     else:
-        allpars[:] = pars
+        cxx = pars[8]
+        cyy = pars[9]
+        cxy = pars[10]
 
-    # Unravel 2D arrays
-    if x.ndim==2:
-        xx = x.ravel()
-        yy = y.ravel()
-    else:
-        xx = x
-        yy = y
-    npix = len(xx)
-    # Initialize output
-    g = np.zeros(npix,float)
-    if nderiv>0:
-        deriv = np.zeros((npix,nderiv),float)
-    else:
-        deriv = np.zeros((1,1),float)
+    cdef double allpars[11]
+    allpars[0] = amp
+    allpars[1] = xc
+    allpars[2] = yc
+    allpars[3] = xsig
+    allpars[4] = ysig
+    allpars[5] = theta
+    allpars[6] = relamp
+    allpars[7] = sigma
+    allpars[8] = cxx
+    allpars[9] = cyy
+    allpars[10] = cxy
+
+    npix = len(x)
+
+    # 2D arrays
+    out = cvarray(shape=(npix,9),itemsize=sizeof(double),format="d")
+    cdef double[:,:] mout = out
+
+    cdef double *out1 = <double*>malloc(9 * sizeof(double))
+
     # Loop over the points
     for i in range(npix):
-        g1,deriv1 = penny2d(xx[i],yy[i],allpars,nderiv)
-        g[i] = g1
-        if nderiv>0:
-            for j in range(nderiv):
-                deriv[i,j] = deriv1[j]
-    return [g,deriv]
+        x1 = x[i]
+        y1 = y[i]
+        penny2d_integrate(x1,y1,allpars,nderiv,osamp,out1)
+        for j in range(nderiv+1):
+            mout[i,j] = out1[j]
 
-    
+    free(out1)
 
-cpdef list penny2d(double x, double y, double[:] pars, int nderiv):
+    return mout    
+
+cdef void penny2d_integrate(double x, double y, double[11] pars, int nderiv, int osamp, double* out):
     """
     Two dimensional Penny model function for a single point.
     Gaussian core and Lorentzian-like wings, only Gaussian is tilted.
@@ -1687,86 +1731,154 @@ cpdef list penny2d(double x, double y, double[:] pars, int nderiv):
 
     """
 
-    if len(pars)==8:
-        amp,xc,yc,asemi,bsemi,theta,relamp,sigma = pars
-        cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
-    else:
-        amp,xc,yc,asemi,bsemi,theta,relamp,sigma,cxx,cyy,cxy = pars
-        
-    u = (x-xc)
-    u2 = u**2
-    v = (y-yc)
-    v2 = v**2
-    relamp = np.clip(relamp,0.0,1.0)  # 0<relamp<1
-    # Gaussian component
-    g = amp * (1-relamp) * np.exp(-0.5*((cxx * u2) + (cxy * u*v) +
-                                        (cyy * v2)))
-    # Add Lorentzian/Moffat beta=1.2 wings
-    sigma = np.maximum(sigma,0)
-    rr_gg = (u2+v2) / sigma ** 2
-    beta = 1.2
-    l = amp * relamp / (1 + rr_gg)**(beta)
-    # Sum of Gaussian + Lorentzian
-    f = g + l
-    
-    #  pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
-    deriv = np.zeros(nderiv,float)    
-    if nderiv>0:
-        # amplitude
-        df_dA = f / amp
-        deriv[0] = df_dA
-        # x0
-        df_dx_mean = ( g * 0.5*((2 * cxx * u) + (cxy * v)) +                           
-                       2*beta*l*u/(sigma**2 * (1+rr_gg)) )  
-        deriv[1] = df_dx_mean
-        # y0
-        df_dy_mean = ( g * 0.5*((2 * cyy * v) + (cxy * u)) +
-                       2*beta*l*v/(sigma**2 * (1+rr_gg)) ) 
-        deriv[2] = df_dy_mean
-        if nderiv>3:
-            sint = np.sin(theta)        
-            cost = np.cos(theta)        
-            sint2 = sint ** 2
-            cost2 = cost ** 2
-            sin2t = np.sin(2. * theta)
-            # asemi/xsig
-            asemi2 = asemi ** 2
-            asemi3 = asemi ** 3
-            da_dxsig = -cost2 / asemi3
-            db_dxsig = -sin2t / asemi3
-            dc_dxsig = -sint2 / asemi3
+    cdef double theta,cost2,sint2,amp,relamp,sigma,beta
+    cdef double xsig2,ysig2,a,b,c,u,v,u2,v2,x0,y0,dx,dy
+    cdef int nx,ny,col,row,nsamp,hosamp,i
+    cdef double df_dA,df_dx_mean,df_dy_mean,df_dxsig,df_dysig,df_dtheta,df_drelamp,df_dsigma
+    cdef double cost,sint,xsig3,ysig3,da_dxsig,db_dxsig,dc_dxsig
+    cdef double da_dysig,db_dysig,dc_dysig
+    cdef double da_dtheta,db_dtheta,dc_dtheta
+
+    # pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma, cxx, cyy, cxy]
+    amp = pars[0]
+    x0 = pars[1]
+    y0 = pars[2]
+    xsig = pars[3]
+    ysig = pars[4]
+    theta = pars[5]
+    relamp = pars[6]
+    sigma = pars[7]
+    cxx = pars[8]
+    cyy = pars[9]
+    cxy = pars[10]
+    sint = sin(theta)
+    cost = cos(theta)
+    cost2 = cost ** 2
+    sint2 = sint ** 2
+    sin2t = sin(2. * theta)
+    xsig2 = xsig ** 2
+    ysig2 = ysig ** 2
+
+    if relamp < 0:
+        relamp = 0.0
+    if relamp > 1:
+        relamp = 1.0
+    if sigma < 0:
+        sigma = 0.0
+
+    u = x-x0
+    v = y-y0
+    cdef double f = 0.0
+    if osamp < 1:
+        f = exp(-((cxx * u ** 2) + (cxy * u * v) +
+                  (cyy * v ** 2)))
+
+    # Automatically determine the oversampling
+    # These are the thresholds that daophot uses
+    # from the IRAF daophot version in
+    # noao/digiphot/daophot/daolib/profile.x
+    if osamp < 1:
+        if (f >= 0.046):
+            osamp = 4
+        elif (f >= 0.0022):
+            osamp = 3
+        elif (f >= 0.0001):
+            osamp = 2
+        elif (f >= 1.0e-10):
+            osamp = 1
+
+    nsamp = osamp*osamp
+    cdef double dd = 0.0
+    cdef double dd0 = 0.0
+    # dx = (np.arange(osamp).astype(float)+1)/osamp-(1/(2*osamp))-0.5
+    if osamp>1:
+        dd = 1/float(osamp)
+        dd0 = 1/(2*float(osamp))-0.5
+
+    cdef double g = 0.0
+    cdef double l = 0.0
+    for i in range(8):
+        out[i] = 0.0
+    hosamp = osamp//2
+    df_dA = 0.0
+    df_dx_mean = 0.0
+    df_dy_mean = 0.0
+    df_dxsig = 0.0
+    df_dysig = 0.0
+    df_dtheta = 0.0
+    df_drelamp = 0.0
+    df_dsigma = 0.0
+    for i in range(nsamp):
+        col = i // osamp
+        row = i % osamp
+        dx = col*dd+dd0
+        dy = row*dd+dd0
+        u = (x+dx)-x0
+        v = (y+dy)-y0
+        u2 = u*u
+        v2 = v*v
+
+        # Gaussian component
+        g = amp * (1-relamp) * exp(-0.5*((cxx * u2) + (cxy * u*v) +
+                                         (cyy * v2)))
+        # Add Lorentzian/Moffat beta=1.2 wings
+        rr_gg = (u2+v2) / sigma ** 2
+        beta = 1.2
+        l = amp * relamp / (1 + rr_gg)**(beta)
+        # Sum of Gaussian + Lorentzian
+        f = g + l
+        out[0] += f
+
+        # Compute derivative as well
+        if nderiv>=1:
+            df_dA = f / amp
+            out[1] += df_dA
+        if nderiv>=2:
+            df_dx_mean = ( g * 0.5*((2 * cxx * u) + (cxy * v)) +                           
+                           2*beta*l*u/(sigma**2 * (1+rr_gg)) )  
+            out[2] += df_dx_mean
+        if nderiv>=3:
+            df_dy_mean = ( g * 0.5*((2 * cyy * v) + (cxy * u)) +
+                           2*beta*l*v/(sigma**2 * (1+rr_gg)) ) 
+            out[3] += df_dy_mean
+        if nderiv>=4:
+            xsig3 = xsig ** 3
+            da_dxsig = -cost2 / xsig3
+            db_dxsig = -sin2t / xsig3
+            dc_dxsig = -sint2 / xsig3
             df_dxsig = g * (-(da_dxsig * u2 +
                               db_dxsig * u * v +
                               dc_dxsig * v2))
-            deriv[3] = df_dxsig
-            # bsemi/ysig
-            bsemi2 = bsemi ** 2
-            bsemi3 = bsemi ** 3
-            da_dysig = -sint2 / bsemi3
-            db_dysig = sin2t / bsemi3
-            dc_dysig = -cost2 / bsemi3
+            out[4] += df_dxsig
+        if nderiv>=5:
+            ysig3 = ysig ** 3
+            da_dysig = -sint2 / ysig3
+            db_dysig = sin2t / ysig3
+            dc_dysig = -cost2 / ysig3
             df_dysig = g * (-(da_dysig * u2 +
                               db_dysig * u * v +
                               dc_dysig * v2))
-            deriv[4] = df_dysig
-            # dtheta
-            if asemi != bsemi:
-                cos2t = np.cos(2.0*theta)
-                da_dtheta = (sint * cost * ((1. / bsemi2) - (1. / asemi2)))
-                db_dtheta = (cos2t / asemi2) - (cos2t / bsemi2)
-                dc_dtheta = -da_dtheta
-                df_dtheta = g * (-(da_dtheta * u2 +
-                                   db_dtheta * u * v +
-                                   dc_dtheta * v2))
-                deriv[5] = df_dtheta
-            # relamp
+            out[5] += df_dysig
+        if nderiv>=6 and xsig != ysig:
+            cos2t = cos(2.0*theta)
+            da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
+            db_dtheta = (cos2t / xsig2) - (cos2t / ysig2)
+            dc_dtheta = -da_dtheta
+            df_dtheta = g * (-(da_dtheta * u2 +
+                               db_dtheta * u * v +
+                               dc_dtheta * v2))
+            out[6] += df_dtheta
+        if nderiv>=7:
             df_drelamp = -g/(1-relamp) + l/relamp
-            deriv[6] = df_drelamp
-            # sigma
+            out[7] += df_drelamp
+        if nderiv>=8:
             df_dsigma = beta*l/(1+rr_gg) * 2*(u2+v2)/sigma**3 
-            deriv[7] = df_dsigma
-            
-    return [f,deriv]
+            out[8] += df_dsigma
+
+    if osamp>1:
+        for i in range(nderiv+1):
+            out[i] /= nsamp   # take average
+
 
 # #
 # cpdef penny2dfit(im,err,ampc,xc,yc,verbose):
@@ -2440,7 +2552,7 @@ cpdef list sersic2d(double x, double y, double[:] pars, int nderiv):
 
     """
     cdef double amp,xc,yc,kserc,alpha,recc,theta
-    cdef double xdiff,xdiff2,ydiff,ydiff2
+    cdef double u,u2,v,v2
     cdef double cost2,sint2,xsig2,ysig2
     cdef double a,b,c,rr,g
     cdef double[:] deriv
@@ -2457,10 +2569,10 @@ cpdef list sersic2d(double x, double y, double[:] pars, int nderiv):
     # n=1 is the exponential
 
     amp,xc,yc,kserc,alpha,recc,theta = pars
-    xdiff = (x-xc)
-    xdiff2 = xdiff**2
-    ydiff = (y-yc)
-    ydiff2 = ydiff**2
+    u = (x-xc)
+    u2 = u**2
+    v = (y-yc)
+    v2 = v**2
     # recc = b/c
     cost2 = np.cos(theta) ** 2
     sint2 = np.sin(theta) ** 2
@@ -2471,7 +2583,7 @@ cpdef list sersic2d(double x, double y, double[:] pars, int nderiv):
     b = (sin2t - (sin2t / ysig2))    
     c = (sint2 + (cost2 / ysig2))
 
-    rr = np.sqrt( (a * xdiff ** 2) + (b * xdiff * ydiff) + (c * ydiff ** 2) )
+    rr = np.sqrt( (a * u ** 2) + (b * u * v) + (c * v ** 2) )
     g = amp * np.exp(-kserc*rr**alpha)
 
     #  pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
@@ -2486,7 +2598,7 @@ cpdef list sersic2d(double x, double y, double[:] pars, int nderiv):
         deriv[0] = dg_dA
         # x0
         if rr != 0:
-            dg_dx_mean = g * du_drr * 0.5 * ((2 * a * xdiff) + (b * ydiff))
+            dg_dx_mean = g * du_drr * 0.5 * ((2 * a * u) + (b * v))
         else:
             # not well defined at rr=0
             # g comes to a sharp point at rr=0
@@ -2497,7 +2609,7 @@ cpdef list sersic2d(double x, double y, double[:] pars, int nderiv):
         deriv[1] = dg_dx_mean
         # y0
         if rr != 0:
-            dg_dy_mean = g * du_drr * 0.5 * ((2 * c * ydiff) + (b * xdiff))
+            dg_dy_mean = g * du_drr * 0.5 * ((2 * c * v) + (b * u))
         else:
             # not well defined at rr=0, see above
             dg_dy_mean = 0.0
@@ -2513,8 +2625,8 @@ cpdef list sersic2d(double x, double y, double[:] pars, int nderiv):
                 dg_dalpha = 0.0
             deriv[4] = dg_dalpha
             # recc
-            xdiff2 = xdiff ** 2
-            ydiff2 = ydiff ** 2
+            u2 = u ** 2
+            v2 = v ** 2
             recc3 = recc**3
             da_drecc = -2*sint2 / recc3
             db_drecc =  2*sin2t / recc3            
@@ -2522,9 +2634,9 @@ cpdef list sersic2d(double x, double y, double[:] pars, int nderiv):
             if rr==0:
                 dg_drecc = 0.0
             else:
-                dg_drecc = -g * du_drr * 0.5 * (da_drecc * xdiff2 +
-                                                db_drecc * xdiff * ydiff +
-                                                dc_drecc * ydiff2)
+                dg_drecc = -g * du_drr * 0.5 * (da_drecc * u2 +
+                                                db_drecc * u * v +
+                                                dc_drecc * v2)
             deriv[5] = dg_drecc
             # theta
             sint = np.sin(theta)
@@ -2536,9 +2648,9 @@ cpdef list sersic2d(double x, double y, double[:] pars, int nderiv):
             if rr==0:
                 dg_dtheta = 0.0
             else:
-                dg_dtheta = -g * du_drr * (da_dtheta * xdiff2 +
-                                           db_dtheta * xdiff * ydiff +
-                                           dc_dtheta * ydiff2)
+                dg_dtheta = -g * du_drr * (da_dtheta * u2 +
+                                           db_dtheta * u * v +
+                                           dc_dtheta * v2)
             deriv[6] = dg_dtheta
 
     return [g,deriv]
