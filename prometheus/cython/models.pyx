@@ -4,6 +4,7 @@
 # cython: cdivision=True
 # cython: binding=False
 # cython: inter_types=True
+# cython: cpow=True
 
 import cython
 cimport cython
@@ -13,10 +14,13 @@ from cython.view cimport array as cvarray
 from cpython cimport array
 from scipy.special import gamma, gammaincinv, gammainc
 
-from libc.math cimport exp,sqrt,atan2,pi,NAN,log,log10
+from libc.math cimport exp,sqrt,atan2,pi,NAN,log,log10,abs,pow
 from libcpp cimport bool
 from libc.stdlib cimport malloc, free
 from cpython.mem cimport PyMem_Malloc, PyMem_Realloc, PyMem_Free
+
+#cdef extern from "complex.h":
+#    complex double cpow(complex double base, complex double exponent)
 
 cdef extern from "math.h":
     double sin(double x)
@@ -1239,7 +1243,7 @@ cpdef double[:,:] amoffat2d(double[:] x, double[:] y, double[:] pars, int nderiv
 
 
 cdef void moffat2d_integrate(double x, double y, double[10] pars, int nderiv, int osamp, double* out):
-    cdef double theta,cost2,sint2,amp,beta,denom
+    cdef double theta,cost2,sint2,amp,beta
     cdef double xsig2,ysig2,a,b,c,u,v,u2,v2,x0,y0,dx,dy
     cdef int nx,ny,col,row,nsamp,hosamp,i
     #cdef double[:] x2,y2,u,v,g
@@ -1319,8 +1323,7 @@ cdef void moffat2d_integrate(double x, double y, double[10] pars, int nderiv, in
 
         rr_gg = (cxx*u**2 + cyy*v**2 + cxy*u*v)
         #g = amp * (1 + rr_gg) ** (-beta)
-        denom = (1 + rr_gg) ** beta
-        g = amp / denom
+        g = amp / (1 + rr_gg) ** beta
         out[0] += g
 
         # Compute derivative as well
@@ -1733,7 +1736,7 @@ cdef void penny2d_integrate(double x, double y, double[11] pars, int nderiv, int
 
     """
 
-    cdef double theta,cost2,sint2,amp,relamp,sigma,beta,rr_gg,ldenom
+    cdef double theta,cost2,sint2,amp,relamp,sigma,beta,rr_gg
     cdef double xsig2,ysig2,a,b,c,u,v,u2,v2,x0,y0,dx,dy
     cdef int nx,ny,col,row,nsamp,hosamp,i
     cdef double df_dA,df_dx_mean,df_dy_mean,df_dxsig,df_dysig,df_dtheta,df_drelamp,df_dsigma
@@ -1826,8 +1829,7 @@ cdef void penny2d_integrate(double x, double y, double[11] pars, int nderiv, int
         # Add Lorentzian/Moffat beta=1.2 wings
         rr_gg = (u2+v2) / sigma ** 2
         beta = 1.2
-        ldenom = (1 + rr_gg)**(beta)
-        l = amp * relamp / ldenom
+        l = amp * relamp / (1 + rr_gg)**(beta)
         # Sum of Gaussian + Lorentzian
         f = g + l
         out[0] += f
@@ -2667,7 +2669,7 @@ cpdef list gausspow2d(double x, double y, double[:] pars, int nderiv):
 # ####### SERSIC ########
 
 
-cpdef list asersic2d(double[:] x, double[:] y, double[:] pars, int nderiv):
+cpdef double[:,:] asersic2d(double[:] x, double[:] y, double[:] pars, int nderiv, int osamp):
     """
     Sersic profile and can be elliptical and rotated.
     With x/y arrays input.
@@ -2698,29 +2700,258 @@ cpdef list asersic2d(double[:] x, double[:] y, double[:] pars, int nderiv):
     g,derivative = sersic2d(x,y,pars,nderiv)
 
     """
-    cdef double[:] g
-    cdef double[:,:] deriv
+    cdef double amp,xc,yc,kserc,alpha,recc,theta,xsig,ysig,xsig2,ysig2,cxx,cyy,cxy
+    cdef double x1,y1
+    cdef long i,j,npix,index
 
-    if len(pars)!=7:
-        raise Exception('aseric2d pars must have 7 elements')
+    amp = pars[0]
+    xc = pars[1]
+    yc = pars[2]
+    kserc = pars[3]
+    alpha = pars[4]
+    recc = pars[5]
+    theta = pars[6]
+    xsig2 = 1.0           # major axis
+    ysig2 = recc ** 2     # minor axis
+    if len(pars)==7:
+        xsig = 1.0
+        ysig = sqrt(ysig2)
+        cxx,cyy,cxy = gauss_abt2cxy(xsig,ysig,theta)
+    else:
+        cxx = pars[7]
+        cyy = pars[8]
+        cxy = pars[9]
+
+    cdef double allpars[10]
+    allpars[0] = amp
+    allpars[1] = xc
+    allpars[2] = yc
+    allpars[3] = kserc
+    allpars[4] = alpha
+    allpars[5] = recc
+    allpars[6] = theta
+    allpars[7] = cxx
+    allpars[8] = cyy
+    allpars[9] = cxy
 
     npix = len(x)
-    # Initialize output
-    g = np.zeros(npix,float)
-    if nderiv>0:
-        deriv = np.zeros((npix,nderiv),float)
-    else:
-        deriv = np.zeros((1,1),float)
+
+    # 2D arrays
+    out = cvarray(shape=(npix,8),itemsize=sizeof(double),format="d")
+    cdef double[:,:] mout = out
+
+    cdef double *out1 = <double*>malloc(8 * sizeof(double))
+
     # Loop over the points
     for i in range(npix):
-        g1,deriv1 = sersic2d(x[i],y[i],pars,nderiv)
-        g[i] = g1
-        if nderiv>0:
-            for j in range(nderiv):
-                deriv[i,j] = deriv1[j]
-    return [g,deriv]
+        x1 = x[i]
+        y1 = y[i]
+        sersic2d_integrate(x1,y1,allpars,nderiv,osamp,out1)
+        for j in range(nderiv+1):
+            mout[i,j] = out1[j]
 
-  
+    free(out1)
+
+    return mout
+
+cdef void sersic2d_integrate(double x, double y, double[10] pars, int nderiv, int osamp, double* out):
+    """
+    Sersic profile and can be elliptical and rotated.
+    For a single point.
+
+    Parameters
+    ----------
+    x : float
+      Single X-value for which to compute the Sersic model.
+    y : float
+      Single Y-value for which to compute the Sersic model.
+    pars : numpy array
+       Parameter list.
+        pars = [amp,x0,y0,k,alpha,recc,theta]
+    nderiv : int
+       The number of derivatives to return.
+
+    Returns
+    -------
+    g : float
+      The Sersic model for the input x/y values and parameters (same
+        shape as x/y).
+    derivative : numpy array
+      Array of derivatives of g relative to the input parameters.
+
+    Example
+    -------
+    
+    g,derivative = sersic2d(x,y,pars,nderiv)
+
+    """
+    cdef double theta,cost2,sint2,sin2t,amp,kserc,recc,alpha
+    cdef double xsig2,ysig2,a,b,c,u,v,u2,v2,x0,y0,dx,dy
+    cdef int nx,ny,col,row,nsamp,hosamp,i
+    #cdef double[:] x2,y2,u,v,g
+    cdef double dg_dA,dg_dx_mean,dg_dy_mean,dg_dkserc,dg_dalpha,dg_drecc,dg_dtheta,rr,du_drr
+    cdef double cost,sint,xsig3,ysig3,da_dxsig,db_dxsig,dc_dxsig
+    cdef double da_dysig,db_dysig,dc_dysig
+    cdef double da_dtheta,db_dtheta,dc_dtheta
+    cdef double z2,gxy,dgxy_dz2,g_gxy
+
+    # Sersic radial profile
+    # I(R) = I0 * exp(-k*R**(1/n))
+    # n is the sersic index
+    # I'm going to use alpha = 1/n instead
+    # I(R) = I0 * exp(-k*R**alpha)    
+    # most galaxies have indices in the range 1/2 < n < 10
+    # n=4 is the de Vaucouleurs profile
+    # n=1 is the exponential
+
+    # pars = [amp,x0,y0,k,alpha,recc,theta]
+    amp = pars[0]
+    x0 = pars[1]
+    y0 = pars[2]
+    kserc = pars[3]
+    alpha = pars[4]
+    recc = pars[5]
+    theta = pars[6]
+    cxx = pars[7]
+    cyy = pars[8]
+    cxy = pars[9]
+    sint = sin(theta)
+    cost = cos(theta)
+    cost2 = cost ** 2
+    sint2 = sint ** 2
+    sin2t = sin(2. * theta)
+    # recc = b/c
+    xsig2 = 1.0           # major axis
+    ysig2 = recc ** 2     # minor axis
+
+    if kserc<0:
+        kserc = 0
+
+    u = x-x0
+    v = y-y0
+    cdef double f = 0.0
+    if osamp < 1:
+        f = exp(-((cxx * u ** 2) + (cxy * u * v) +
+                  (cyy * v ** 2)))
+
+    # Automatically determine the oversampling
+    # These are the thresholds that daophot uses
+    # from the IRAF daophot version in
+    # noao/digiphot/daophot/daolib/profile.x
+    if osamp < 1:
+        if (f >= 0.046):
+            osamp = 4
+        elif (f >= 0.0022):
+            osamp = 3
+        elif (f >= 0.0001):
+            osamp = 2
+        elif (f >= 1.0e-10):
+            osamp = 1
+
+    nsamp = osamp*osamp
+    cdef double dd = 0.0
+    cdef double dd0 = 0.0
+    # dx = (np.arange(osamp).astype(float)+1)/osamp-(1/(2*osamp))-0.5
+    if osamp>1:
+        dd = 1/float(osamp)
+        dd0 = 1/(2*float(osamp))-0.5
+
+    cdef double g = 0.0
+    for i in range(8):
+        out[i] = 0.0
+    hosamp = osamp//2
+    dg_dA = 0.0
+    dg_dx_mean = 0.0
+    dg_dy_mean = 0.0
+    dg_dkserc = 0.0
+    dg_dalpha = 0.0
+    dg_drecc = 0.0
+    dg_dtheta = 0.0
+    for i in range(nsamp):
+        col = i // osamp
+        row = i % osamp
+        dx = col*dd+dd0
+        dy = row*dd+dd0
+        u = (x+dx)-x0
+        v = (y+dy)-y0
+        u2 = u*u
+        v2 = v*v
+
+        rr = sqrt( (cxx * u2) + (cxy * u * v) + (cyy * v2) )
+        g = amp * exp(-kserc*rr**alpha)
+        out[0] += g
+
+        # Compute derivative as well
+        if nderiv>=1:
+            if rr==0:
+                du_drr = 1.0
+            else:
+                du_drr = (kserc*alpha)*(rr**(alpha-2))
+            # amplitude
+            dg_dA = g / amp
+            out[1] = dg_dA
+        if nderiv>=2:
+            if rr != 0:
+                dg_dx_mean = g * du_drr * 0.5 * ((2 * cxx * u) + (cxy * v))
+            else:
+                # not well defined at rr=0
+                # g comes to a sharp point at rr=0
+                # if you approach rr=0 from the left, then the slope is +
+                # but if you approach rr=0 from the right, then the slope is -
+                # use 0 so it is at least well-behaved
+                dg_dx_mean = 0.0
+            out[2] += dg_dx_mean
+        if nderiv>=3:
+            if rr != 0:
+                dg_dy_mean = g * du_drr * 0.5 * ((2 * cyy * v) + (cxy * u))
+            else:
+                # not well defined at rr=0, see above
+                dg_dy_mean = 0.0
+            out[3] += dg_dy_mean
+        if nderiv>=4:
+            # kserc
+            dg_dkserc = -g * rr**alpha
+            out[4] = dg_dkserc
+        if nderiv>=5:
+            # alpha
+            if rr != 0:
+                dg_dalpha = -g * kserc*log(rr) * rr**alpha
+            else:
+                dg_dalpha = 0.0
+            out[5] = dg_dalpha
+        if nderiv>=6:
+            # recc
+            recc3 = recc**3
+            da_drecc = -2*sint2 / recc3
+            db_drecc =  2*sin2t / recc3            
+            dc_drecc = -2*cost2 / recc3
+            if rr==0:
+                dg_drecc = 0.0
+            else:
+                dg_drecc = -g * du_drr * 0.5 * (da_drecc * u2 +
+                                                db_drecc * u * v +
+                                                dc_drecc * v2)
+            out[6] += dg_drecc
+        if nderiv>=7:
+            # theta
+            cos2t = cos(2.0*theta)
+            da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
+            db_dtheta = (cos2t / xsig2) - (cos2t / ysig2)            
+            dc_dtheta = -da_dtheta
+            if rr==0:
+                dg_dtheta = 0.0
+            else:
+                dg_dtheta = -g * du_drr * (da_dtheta * u2 +
+                                           db_dtheta * u * v +
+                                           dc_dtheta * v2)
+            out[7] += dg_dtheta
+
+    if osamp>1:
+        for i in range(nderiv+1):
+            out[i] /= nsamp   # take average
+
+
+
 cpdef list sersic2d(double x, double y, double[:] pars, int nderiv):
     """
     Sersic profile and can be elliptical and rotated.
