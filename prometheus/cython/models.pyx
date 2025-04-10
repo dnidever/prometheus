@@ -747,7 +747,7 @@ cdef double* gaussian2d(double x, double y, double[:] pars, int nderiv):
     u2 = u**2
     v = (y-yc)
     v2 = v**2
-    # amp = 1/(asemi*bsemi*2*np.pi)
+    # amp = 1/(asemi*bsemi*2*pi)
     g = amp * exp(-0.5*(cxx*u**2 + cyy*v**2 + cxy*u*v))
 
     out[0] = g
@@ -1144,8 +1144,8 @@ cpdef double moffat2d_flux(double[:] pars):
     beta = pars[6]
 
     # This worked for beta=2.5, but was too high by ~1.05-1.09 for beta=1.5
-    #volume = amp * xstd*ystd*np.pi/(beta-1)
-    volume = amp * xsig*ysig*np.pi/(beta-1)
+    #volume = amp * xstd*ystd*pi/(beta-1)
+    volume = amp * xsig*ysig*pi/(beta-1)
     # what is the beta dependence?? linear is very close!
 
     # I think undersampling is becoming an issue at beta=3.5 with fwhm=2.78
@@ -1239,7 +1239,7 @@ cpdef double[:,:] amoffat2d(double[:] x, double[:] y, double[:] pars, int nderiv
 
 
 cdef void moffat2d_integrate(double x, double y, double[10] pars, int nderiv, int osamp, double* out):
-    cdef double theta,cost2,sint2,amp,beta
+    cdef double theta,cost2,sint2,amp,beta,denom
     cdef double xsig2,ysig2,a,b,c,u,v,u2,v2,x0,y0,dx,dy
     cdef int nx,ny,col,row,nsamp,hosamp,i
     #cdef double[:] x2,y2,u,v,g
@@ -1318,7 +1318,9 @@ cdef void moffat2d_integrate(double x, double y, double[10] pars, int nderiv, in
         v2 = v*v
 
         rr_gg = (cxx*u**2 + cyy*v**2 + cxy*u*v)
-        g = amp * (1 + rr_gg) ** (-beta)
+        #g = amp * (1 + rr_gg) ** (-beta)
+        denom = (1 + rr_gg) ** beta
+        g = amp / denom
         out[0] += g
 
         # Compute derivative as well
@@ -1350,7 +1352,7 @@ cdef void moffat2d_integrate(double x, double y, double[10] pars, int nderiv, in
                                                 dc_dysig * v2)
             out[5] += dg_dysig
         if nderiv>=6 and xsig != ysig:
-            cos2t = np.cos(2.0*theta)
+            cos2t = cos(2.0*theta)
             da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
             db_dtheta = (cos2t / xsig2) - (cos2t / ysig2)
             dc_dtheta = -da_dtheta
@@ -1604,10 +1606,10 @@ cpdef double penny2d_flux(double[:] pars):
 
     # Gaussian portion
     # Volume is 2*pi*A*sigx*sigy
-    gvolume = 2*np.pi*amp*(1-relamp)*xsig*ysig
+    gvolume = 2*pi*amp*(1-relamp)*xsig*ysig
 
     # Moffat beta=1.2 wings portion
-    lvolume = amp*relamp * sigma**2 * np.pi/(beta-1)
+    lvolume = amp*relamp * sigma**2 * pi/(beta-1)
     
     # Sum
     volume = gvolume + lvolume
@@ -1731,7 +1733,7 @@ cdef void penny2d_integrate(double x, double y, double[11] pars, int nderiv, int
 
     """
 
-    cdef double theta,cost2,sint2,amp,relamp,sigma,beta
+    cdef double theta,cost2,sint2,amp,relamp,sigma,beta,rr_gg,ldenom
     cdef double xsig2,ysig2,a,b,c,u,v,u2,v2,x0,y0,dx,dy
     cdef int nx,ny,col,row,nsamp,hosamp,i
     cdef double df_dA,df_dx_mean,df_dy_mean,df_dxsig,df_dysig,df_dtheta,df_drelamp,df_dsigma
@@ -1824,7 +1826,8 @@ cdef void penny2d_integrate(double x, double y, double[11] pars, int nderiv, int
         # Add Lorentzian/Moffat beta=1.2 wings
         rr_gg = (u2+v2) / sigma ** 2
         beta = 1.2
-        l = amp * relamp / (1 + rr_gg)**(beta)
+        ldenom = (1 + rr_gg)**(beta)
+        l = amp * relamp / ldenom
         # Sum of Gaussian + Lorentzian
         f = g + l
         out[0] += f
@@ -2002,7 +2005,7 @@ cdef void penny2d_integrate(double x, double y, double[11] pars, int nderiv, int
 
 #     # Now get the flux, multiply by the volume of the Gaussian
 #     #asemi,bsemi,theta = bestpar[3],bestpar[4],bestpar[5]
-#     #gvolume = asemi*bsemi*2*np.pi
+#     #gvolume = asemi*bsemi*2*pi
 #     #flux = bestpar[0]*gvolume
 #     #fluxerr = perror[0]*gvolume
 
@@ -2136,13 +2139,13 @@ cpdef double gausspow2d_flux(double[:] pars):
 
     # This seems to be accurate to ~0.5%
     
-    volume = np.pi*amp*xsig*ysig*integral
+    volume = pi*amp*xsig*ysig*integral
     
     return volume
 
 
 
-cpdef list agausspow2d(double[:] x, double[:] y, double[:] pars, int nderiv):
+cpdef double[:,:] agausspow2d(double[:] x, double[:] y, double[:] pars, int nderiv, int osamp):
     """
     Two dimensional Gausspow model function with x/y array inputs.
     
@@ -2174,40 +2177,237 @@ cpdef list agausspow2d(double[:] x, double[:] y, double[:] pars, int nderiv):
     g,derivative = agausspow2d(x,y,pars,nderiv)
 
     """
-    cdef double[:] allpars,g
-    cdef double[:,:] deriv
+    cdef double amp,xc,yc,xsig,ysig,theta,cxx,cyy,cxy,beta4,beta6
+    cdef double x1,y1
+    cdef long i,j,npix,index
 
-    if len(pars)!=8 and len(pars)!=11:
-        raise Exception('agausspow2d pars must have either 6 or 9 elements')
-    
-    allpars = np.zeros(11,float)
+    amp = pars[0]
+    xc = pars[1]
+    yc = pars[2]
+    xsig = pars[3]
+    ysig = pars[4]
+    theta = pars[5]
+    beta4 = pars[6]
+    beta6 = pars[7]
     if len(pars)==8:
-        amp,xc,yc,asemi,bsemi,theta,beta4,beta6 = pars
-        cxx,cyy,cxy = gauss_abt2cxy(asemi,bsemi,theta)
-        allpars[:8] = pars
-        allpars[8] = cxx
-        allpars[9] = cyy
-        allpars[10] = cxy
+        cxx,cyy,cxy = gauss_abt2cxy(xsig,ysig,theta)
     else:
-        allpars[:] = pars
+        cxx = pars[8]
+        cyy = pars[9]
+        cxy = pars[10]
+
+    cdef double allpars[11]
+    allpars[0] = amp
+    allpars[1] = xc
+    allpars[2] = yc
+    allpars[3] = xsig
+    allpars[4] = ysig
+    allpars[5] = theta
+    allpars[6] = beta4
+    allpars[7] = beta6
+    allpars[8] = cxx
+    allpars[9] = cyy
+    allpars[10] = cxy
 
     npix = len(x)
-    # Initialize output
-    g = np.zeros(npix,float)
-    if nderiv>0:
-        deriv = np.zeros((npix,nderiv),float)
-    else:
-        deriv = np.zeros((1,1),float)
+
+    # 2D arrays
+    out = cvarray(shape=(npix,9),itemsize=sizeof(double),format="d")
+    cdef double[:,:] mout = out
+
+    cdef double *out1 = <double*>malloc(9 * sizeof(double))
+
     # Loop over the points
     for i in range(npix):
-        g1,deriv1 = gausspow2d(x[i],y[i],allpars,nderiv)
-        g[i] = g1
-        if nderiv>0:
-            for j in range(nderiv):
-                deriv[i,j] = deriv1[j]
-    return [g,deriv]
+        x1 = x[i]
+        y1 = y[i]
+        gausspow2d_integrate(x1,y1,allpars,nderiv,osamp,out1)
+        for j in range(nderiv+1):
+            mout[i,j] = out1[j]
 
-    
+    free(out1)
+
+    return mout
+
+
+cdef void gausspow2d_integrate(double x, double y, double[11] pars, int nderiv, int osamp, double* out):
+    """
+    DoPHOT PSF, sum of elliptical Gaussians.
+    For a single point.
+
+    Parameters
+    ----------
+    x : float
+      Single X-value for which to compute the Gausspow model.
+    y : float
+      Single Y-value for which to compute the Gausspow model.
+    pars : numpy array
+       Parameter list.
+        pars = [amplitude, x0, y0, sigx, sigy, theta, beta4, beta6]
+         The cxx, cyy, cxy parameter can be added to the end so they don't
+         have to be computed.
+    nderiv : int
+       The number of derivatives to return.
+
+    Returns
+    -------
+    g : float
+      The Gausspow model for the input x/y values and parameters.
+    derivative : numpy array
+      Array of derivatives of g relative to the input parameters.
+
+    Example
+    -------
+
+    g,derivative = gausspow2d(x,y,pars,nderiv)
+
+    """
+    cdef double theta,cost2,sint2,sin2t,amp,beta4,beta6
+    cdef double xsig2,ysig2,a,b,c,u,v,u2,v2,x0,y0,dx,dy
+    cdef int nx,ny,col,row,nsamp,hosamp,i
+    #cdef double[:] x2,y2,u,v,g
+    cdef double dg_dA,dg_dx_mean,dg_dy_mean,dg_dxsig,dg_dysig,dg_dtheta,dg_dbeta
+    cdef double cost,sint,xsig3,ysig3,da_dxsig,db_dxsig,dc_dxsig
+    cdef double da_dysig,db_dysig,dc_dysig
+    cdef double da_dtheta,db_dtheta,dc_dtheta
+    cdef double z2,gxy,dgxy_dz2,g_gxy
+
+    # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6, cxx, cyy, cxy]
+    amp = pars[0]
+    x0 = pars[1]
+    y0 = pars[2]
+    xsig = pars[3]
+    ysig = pars[4]
+    theta = pars[5]
+    beta4 = pars[6]
+    beta6 = pars[7]
+    cxx = pars[8]
+    cyy = pars[9]
+    cxy = pars[10]
+    sint = sin(theta)
+    cost = cos(theta)
+    cost2 = cost ** 2
+    sint2 = sint ** 2
+    sin2t = sin(2. * theta)
+    xsig2 = xsig ** 2
+    ysig2 = ysig ** 2
+
+    # Schechter, Mateo & Saha (1993), eq. 1 on pg.4
+    # I(x,y) = Io * (1+z2+0.5*beta4*z2**2+(1/6)*beta6*z2**3)**(-1)
+    # z2 = [0.5*(x**2/sigx**2 + 2*sigxy*x*y + y**2/sigy**2]
+    # x = (x'-x0)
+    # y = (y'-y0)
+    # nominal center of image at (x0,y0)
+    # if beta4=beta6=1, then it's just a truncated power series for a Gaussian
+    # 8 free parameters
+    # pars = [amplitude, x0, y0, sigx, sigy, theta, beta4, beta6]
+
+    u = x-x0
+    v = y-y0
+    cdef double f = 0.0
+    if osamp < 1:
+        f = exp(-((cxx * u ** 2) + (cxy * u * v) +
+                  (cyy * v ** 2)))
+
+    # Automatically determine the oversampling
+    # These are the thresholds that daophot uses
+    # from the IRAF daophot version in
+    # noao/digiphot/daophot/daolib/profile.x
+    if osamp < 1:
+        if (f >= 0.046):
+            osamp = 4
+        elif (f >= 0.0022):
+            osamp = 3
+        elif (f >= 0.0001):
+            osamp = 2
+        elif (f >= 1.0e-10):
+            osamp = 1
+
+    nsamp = osamp*osamp
+    cdef double dd = 0.0
+    cdef double dd0 = 0.0
+    # dx = (np.arange(osamp).astype(float)+1)/osamp-(1/(2*osamp))-0.5
+    if osamp>1:
+        dd = 1/float(osamp)
+        dd0 = 1/(2*float(osamp))-0.5
+
+    cdef double g = 0.0
+    for i in range(8):
+        out[i] = 0.0
+    hosamp = osamp//2
+    dg_dA = 0.0
+    dg_dx_mean = 0.0
+    dg_dy_mean = 0.0
+    dg_dxsig = 0.0
+    dg_dysig = 0.0
+    dg_dtheta = 0.0
+    dg_dbeta4 = 0.0
+    dg_dbeta6 = 0.0
+    for i in range(nsamp):
+        col = i // osamp
+        row = i % osamp
+        dx = col*dd+dd0
+        dy = row*dd+dd0
+        u = (x+dx)-x0
+        v = (y+dy)-y0
+        u2 = u*u
+        v2 = v*v
+
+        z2 = 0.5 * (cxx*u2 + cxy*u*v + cyy*v2)
+        gxy = (1 + z2 + 0.5*beta4*z2**2 + (1.0/6.0)*beta6*z2**3)
+        g = amp / gxy
+        out[0] += g
+
+        # Compute derivative as well
+        if nderiv>=1:
+            dgxy_dz2 = (1 + beta4*z2 + 0.5*beta6*z2**2)
+            g_gxy = g / gxy
+            dg_dA = g / amp
+            out[1] += dg_dA
+        if nderiv>=2:
+            dg_dx_mean = g_gxy * dgxy_dz2 * 0.5 * (2*cxx*u + cxy*v)
+            out[2] += dg_dx_mean
+        if nderiv>=3:
+            dg_dy_mean = g_gxy * dgxy_dz2 * 0.5 * (2*cyy*v + cxy*u)
+            out[3] += dg_dy_mean
+        if nderiv>=4:
+            xsig3 = xsig ** 3
+            da_dxsig = -cost2 / xsig3
+            db_dxsig = -sin2t / xsig3
+            dc_dxsig = -sint2 / xsig3
+            dg_dxsig = -g_gxy * dgxy_dz2 * (da_dxsig * u2 +
+                                            db_dxsig * u * v +
+                                            dc_dxsig * v2)   
+            out[4] += dg_dxsig
+        if nderiv>=5:
+            ysig3 = ysig ** 3
+            da_dysig = -sint2 / ysig3
+            db_dysig = sin2t / ysig3
+            dc_dysig = -cost2 / ysig3
+            dg_dysig = -g_gxy * dgxy_dz2 * (da_dysig * u2 +
+                                            db_dysig * u * v +
+                                            dc_dysig * v2)
+            out[5] += dg_dysig
+        if nderiv>=6 and xsig != ysig:
+            cos2t = cos(2.0*theta)
+            da_dtheta = (sint * cost * ((1. / ysig2) - (1. / xsig2)))
+            db_dtheta = (cos2t / xsig2) - (cos2t / ysig2)
+            dc_dtheta = -da_dtheta
+            dg_dtheta = -g_gxy * dgxy_dz2 * (da_dtheta * u2 +
+                                             db_dtheta * u * v +
+                                             dc_dtheta * v2)
+            out[6] += dg_dtheta
+        if nderiv>=7:
+            dg_dbeta4 = -g_gxy * (0.5*z2**2)
+            out[7] = dg_dbeta4
+        if nderiv>=8:
+            dg_dbeta6 = -g_gxy * ((1.0/6.0)*z2**3)
+            out[8] = dg_dbeta6
+
+    if osamp>1:
+        for i in range(nderiv+1):
+            out[i] /= nsamp   # take average
+
 
 cpdef list gausspow2d(double x, double y, double[:] pars, int nderiv):
     """
@@ -2241,6 +2441,7 @@ cpdef list gausspow2d(double x, double y, double[:] pars, int nderiv):
     g,derivative = gausspow2d(x,y,pars,nderiv)
 
     """
+
     cdef double u,u2,v,v2,z2,gxy
     cdef double g
     cdef double[:] deriv
@@ -2451,7 +2652,7 @@ cpdef list gausspow2d(double x, double y, double[:] pars, int nderiv):
 
 #     # Now get the flux, multiply by the volume of the Gaussian
 #     #asemi,bsemi,theta = bestpar[3],bestpar[4],bestpar[5]
-#     #gvolume = asemi*bsemi*2*np.pi
+#     #gvolume = asemi*bsemi*2*pi
 #     #flux = bestpar[0]*gvolume
 #     #fluxerr = perror[0]*gvolume
 
@@ -2738,7 +2939,7 @@ cpdef double sersic_lum(double Ie, double re, double n):
     bn = sersic_b(n)
     #g2n = utils.gamma(2*n)
     g2n = gamma(2*n)
-    return Ie * re**2 * 2*np.pi*n * np.exp(bn)/(bn**(2*n)) * g2n
+    return Ie * re**2 * 2*pi*n * np.exp(bn)/(bn**(2*n)) * g2n
 
 
 cpdef list sersic_full2half(double I0, double kserc, double alpha):
@@ -2852,20 +3053,20 @@ cpdef double sersic2d_flux(double[:] pars):
 #     # Solve flux equation for kserc
 #     # bn = sersic_b(n)
 #     # g2n = gamma(2*n)
-#     # flux =  recc * Ie * Re**2 * 2*np.pi*n * np.exp(bn)/(bn**(2*n)) * g2n
-#     # Re = np.sqrt(flux/(recc * Ie * 2*np.pi*n * np.exp(bn)/(bn**(2*n)) * g2n))
+#     # flux =  recc * Ie * Re**2 * 2*pi*n * np.exp(bn)/(bn**(2*n)) * g2n
+#     # Re = np.sqrt(flux/(recc * Ie * 2*pi*n * np.exp(bn)/(bn**(2*n)) * g2n))
 #     # kserc = bn/Re**alpha    
-#     # kserc = bn * ((recc * Ie * 2*np.pi*n * np.exp(bn)/(bn**(2*n)) * g2n)/flux)**(alpha/2)
+#     # kserc = bn * ((recc * Ie * 2*pi*n * np.exp(bn)/(bn**(2*n)) * g2n)/flux)**(alpha/2)
 
 #     # Setting the two equal and then putting everything to one side
-#     # 0 = np.log(0.5)/rhalf**alpha + bn * ((recc * Ie * 2*np.pi*n * np.exp(bn)/(bn**(2*n)) * g2n)/flux)**(alpha/2)
+#     # 0 = np.log(0.5)/rhalf**alpha + bn * ((recc * Ie * 2*pi*n * np.exp(bn)/(bn**(2*n)) * g2n)/flux)**(alpha/2)
 #     cpdef alphafunc(alpha):
 #         # rhalf, recc, flux are defined above
 #         n = 1/alpha
 #         bn = sersic_b(n)
 #         g2n = utils.gamma(2*n)
 #         Ie,_ = sersic_full2half(peak,1.0,alpha)
-#         return np.log(0.5)/rhalf**alpha + bn * ((recc * Ie * 2*np.pi*n * np.exp(bn)/(bn**(2*n)) * g2n)/flux)**(alpha/2)
+#         return np.log(0.5)/rhalf**alpha + bn * ((recc * Ie * 2*pi*n * np.exp(bn)/(bn**(2*n)) * g2n)/flux)**(alpha/2)
     
 #     # Solve for the roots
 #     res = root_scalar(alphafunc,x0=1.0,x1=0.5)
@@ -3219,28 +3420,28 @@ cpdef double[:,:] model2d_bounds(int psftype):
     # Gaussian
     if psftype==1:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
-        lbounds = np.array([0.00, 0.0, 0.0, 0.1, 0.1, -np.pi])
-        ubounds = np.array([1e30, 1e4, 1e4,  50,  50,  np.pi])
+        lbounds = np.array([0.00, 0.0, 0.0, 0.1, 0.1, -pi])
+        ubounds = np.array([1e30, 1e4, 1e4,  50,  50,  pi])
     # Moffat
     elif psftype==2:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
-        lbounds = np.array([0.00, 0.0, 0.0, 0.1, 0.1, -np.pi, 0.1])
-        ubounds = np.array([1e30, 1e4, 1e4,  50,  50,  np.pi, 10])
+        lbounds = np.array([0.00, 0.0, 0.0, 0.1, 0.1, -pi, 0.1])
+        ubounds = np.array([1e30, 1e4, 1e4,  50,  50,  pi, 10])
     # Penny
     elif psftype==3:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
-        lbounds = np.array([0.00, 0.0, 0.0, 0.1, 0.1, -np.pi, 0.0, 0.1])
-        ubounds = np.array([1e30, 1e4, 1e4,  50,  50,  np.pi, 1.0,  50])
+        lbounds = np.array([0.00, 0.0, 0.0, 0.1, 0.1, -pi, 0.0, 0.1])
+        ubounds = np.array([1e30, 1e4, 1e4,  50,  50,  pi, 1.0,  50])
     # Gausspow
     elif psftype==4:
         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
-        lbounds = np.array([0.00, 0.0, 0.0, 0.1, 0.1, -np.pi, 0.1, 0.1])
-        ubounds = np.array([1e30, 1e4, 1e4,  50,  50,  np.pi,  50,  50])
+        lbounds = np.array([0.00, 0.0, 0.0, 0.1, 0.1, -pi, 0.1, 0.1])
+        ubounds = np.array([1e30, 1e4, 1e4,  50,  50,  pi,  50,  50])
     # Sersic
     elif psftype==5:
         # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
-        lbounds = np.array([0.00, 0.0, 0.0, 0.01, 0.02, 0.0, -np.pi])
-        ubounds = np.array([1e30, 1e4, 1e4,   20,  100, 1.0,  np.pi])
+        lbounds = np.array([0.00, 0.0, 0.0, 0.01, 0.02, 0.0, -pi])
+        ubounds = np.array([1e30, 1e4, 1e4,   20,  100, 1.0,  pi])
     else:
         print('psftype=',psftype,'not supported')
         bounds = np.zeros((7,2),float)
