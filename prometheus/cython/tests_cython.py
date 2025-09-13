@@ -26,36 +26,36 @@ def utils_tests():
 
     import utils
     
-    sig = utils.mad(np.random.rand(100),False,False)
+    sig = utils.mad(np.random.rand(100),0,0)
     #sig = utils.mad(np.random.rand(10,10))
     arr = np.random.rand(1000)
     arr[1:3] = np.nan
-    sig = utils.mad(arr,True,False)
+    sig = utils.mad(arr,1,0)
     print('utils_cython.mad() okay')
 
-    sig = utils.mad2d(np.random.rand(10,10),0,False,False)
-    sig = utils.mad2d(np.random.rand(10,10),1,False,False)
-    arr = np.random.rand(10,10)
-    arr[0,1] = np.nan
-    sig = utils.mad2d(arr,0,True,False)
-    print('utils_cython.mad2d() okay')
+    # sig = utils.mad2d(np.random.rand(10,10),0,0,0)
+    # sig = utils.mad2d(np.random.rand(10,10),1,0,0)
+    # arr = np.random.rand(10,10)
+    # arr[0,1] = np.nan
+    # sig = utils.mad2d(arr,0,1,0)
+    # print('utils_cython.mad2d() okay')
 
-    sig = utils.mad3d(np.random.rand(10,10,20),0,False,False)
-    sig = utils.mad3d(np.random.rand(10,10,20),1,False,False)
-    sig = utils.mad3d(np.random.rand(10,10,20),2,False,False)
-    arr = np.random.rand(10,10,20)
-    arr[0,1,2] = np.nan
-    sig = utils.mad3d(arr,0,True,False)
-    print('utils_cython.mad3d() okay')
+    # sig = utils.mad3d(np.random.rand(10,10,20),0,0,0)
+    # sig = utils.mad3d(np.random.rand(10,10,20),1,0,0)
+    # sig = utils.mad3d(np.random.rand(10,10,20),2,0,0)
+    # arr = np.random.rand(10,10,20)
+    # arr[0,1,2] = np.nan
+    # sig = utils.mad3d(arr,0,1,0)
+    # print('utils_cython.mad3d() okay')
 
-    x = np.arange(1,4,1.0)
-    y = 1.0+0.5*x-0.33*x**2
-    out = utils.quadratic_bisector(x,y)
-    print('utils_cython.quadratic_bisector() okay')
+    # x = np.arange(1,4,1.0)
+    # y = 1.0+0.5*x-0.33*x**2
+    # out = utils.quadratic_bisector(x,y)
+    # print('utils_cython.quadratic_bisector() okay')
 
-    data = np.random.rand(10,20)
-    out = utils.linearinterp(data,1.4,2.5)
-    print('utils_cython.linearinterp() okay')
+    # data = np.random.rand(10,20)
+    # out = utils.linearinterp(data,1.4,2.5)
+    # print('utils_cython.linearinterp() okay')
 
     data = np.random.rand(10,20)
     x = np.array([1.4,2.5])
@@ -377,9 +377,9 @@ def models_tests():
     out = mnb.model2d_maxsteps(5,pars_sersic)
     print('models_cython.model2d_maxsteps() okay')
 
-    # x,y = np.meshgrid(np.arange(51),np.arange(51))
-    # x1d = x.ravel().astype(float)
-    # y1d = y.ravel().astype(float)
+    x,y = np.meshgrid(np.arange(51),np.arange(51))
+    x1d = x.ravel().astype(float)
+    y1d = y.ravel().astype(float)
     # im,_ = mnb.amodel2d(x1d,y1d,1,pars_gauss,6,0)
     # err = np.sqrt(np.maximum(im,1))
     # out = mnb.model2dfit(im,err,x1d,y1d,1,90.0,5.1,6.2,False)
@@ -400,33 +400,43 @@ def models_tests():
     # err = np.sqrt(np.maximum(im,1))
     # out = mnb.model2dfit(im,err,x1d,y1d,5,90.0,5.1,6.2,False)
     # print('models_cython.model2dfit() okay')
-    
-    # out = mnb.relcoord(x,y,shape)
-    # print('models_cython.relcoord() okay')
-    
-    # out = mnb.empirical(x, y, pars, data, imshape=None, deriv=False)
-    # print('models_cython.empirical() okay')
 
-    psf = mnb.packpsf(1,pars_gauss[3:],np.zeros((11,11,4),float),(1000,1000))
+    shape = np.array([1000,1000]).astype(np.int32)
+    out = mnb.relcoord(x1d,y1d,shape)
+    print('models_cython.relcoord() okay')
+
+    data = np.zeros((21,21,4),float)
+    out = mnb.empirical(x1d, y1d, pars, data, shape, 0)
+    print('models_cython.empirical() okay')
+
+    imshape = np.array([1000,1000]).astype(np.int32)
+    psf = mnb.packpsf(1,pars_gauss[3:],np.zeros((11,11,4),float),imshape)
     print('models_cython.packpsf() okay')
+
+    #import pdb; pdb.set_trace()
     
     # psftype,pars,npsfx,npsfy,psforder,nxhalf,nyhalf,lookup
+    psf = np.array(psf)
     out = mnb.unpackpsf(psf)
     print('models_cython.unpackpsf() okay')
     
-    out = mnb.psfinfo(psf)
-    print('models_cython.psfinfo() okay')
+    #out = mnb.psfinfo(psf)
+    #print('models_cython.psfinfo() okay')
 
+    x,y = np.meshgrid(np.arange(51),np.arange(51))
+    x1d = x.ravel().astype(float)
+    y1d = y.ravel().astype(float)
+    
     out = mnb.psf2d_fwhm(psf)
     print('models_cython.psf2d_fwhm() okay')
 
     out = mnb.psf2d_flux(psf,100.0,5.5,6.6)
     print('models_cython.psf2d_flux() okay')
 
-    out = mnb.psf2d(x1d,y1d,psf,100.0,5.5,6.6,False,False)
+    out = mnb.psf2d(x1d,y1d,psf,100.0,5.5,6.6,0)
     print('models_cython.psf2d() okay')
 
-    im,_ = mnb.psf2d(x1d,y1d,psf,100.0,5.5,6.6,False,False)
+    out = mnb.psf2d(x1d,y1d,psf,100.0,5.5,6.6,0)
     err = np.sqrt(np.maximum(im,1))
     out = mnb.psf2dfit(im,err,x1d,y1d,psf,90.0,5.1,6.1,False)
     print('models_cython.psf2dfit() okay')

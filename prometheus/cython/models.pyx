@@ -30,7 +30,7 @@ cdef extern from "math.h":
     double cos(double x)
     #double atan2(double x)
 
-#cimport utils
+cimport utils
 
 from libc.time cimport time, time_t, clock, clock_t, CLOCKS_PER_SEC
 from cpython.datetime cimport datetime
@@ -2910,105 +2910,6 @@ cpdef double sersic2d_flux(double[:] pars):
 # Generic model routines
 
 
-# cpdef double[:] model2d(double x, double y, int psftype, double[:] pars, int nderiv, int osamp):
-#     """
-#     Two dimensional model function.
-    
-#     Parameters
-#     ----------
-#     x : float
-#       Single X-value for which to compute the 2D model.
-#     y : float
-#       Single Y-value of points for which to compute the 2D model.
-#     psftype : int
-#       Type of PSF model: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic.
-#     pars : numpy array
-#        Parameter list.
-#     nderiv : int
-#        The number of derivatives to return.
-
-#     Returns
-#     -------
-#     g : float
-#       The 2D model for the input x/y values and parameters (same
-#         shape as x/y).
-#     derivative : numpy array
-#       Array of derivatives of g relative to the input parameters.
-
-#     Example
-#     -------
-
-#     g,derivative = model2d(x,y,1,pars,nderiv)
-
-#     """
-#     cdef double asemi,bsemi,theta,xsig,ysig,ysig2,recc,cxx,cyy,cxy
-#     cdef double *out1 = <double*>malloc(9 * sizeof(double))
-#     out = cvarray(shape=(9,),itemsize=sizeof(double),format="d")
-#     cdef double[:] mout = out
-
-#     cdef int npars
-#     npars = len(pars)
-#     cdef double allpars[11]
-#     for i in range(npars):
-#         allpars[i] = pars[i]
-
-#     if psftype < 5:
-#         xsig = pars[3]
-#         ysig = pars[4]
-#         theta = pars[5]
-#         cxx,cyy,cxy = gauss_abt2cxy(xsig,ysig,theta)
-#     else:
-#         recc = pars[5]
-#         theta = pars[6]
-#         #xsig2 = 1.0           # major axis
-#         ysig2 = recc ** 2     # minor axis
-#         xsig = 1.0
-#         ysig = sqrt(ysig2)
-#         cxx,cyy,cxy = gauss_abt2cxy(xsig,ysig,theta)
-#     allpars[npars] = cxx
-#     allpars[npars+1] = cyy
-#     allpars[npars+3] = cxy
-
-
-#     # Gaussian
-#     if psftype==1:
-#         # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
-#         gaussian2d_integrate(x,y,allpars,nderiv,osamp,out1)
-#         for i in range(nderiv+1):
-#             mout[i] = out1[i]
-#         free(out1)
-#     # Moffat
-#     elif psftype==2:
-#         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
-#         moffat2d_integrate(x,y,allpars,nderiv,osamp,out1)
-#         for i in range(nderiv+1):
-#             mout[i] = out1[i]
-#         free(out1)
-#     # Penny
-#     elif psftype==3:
-#         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
-#         penny2d_integrate(x,y,allpars,nderiv,osamp,out1)
-#         for i in range(nderiv+1):
-#             mout[i] = out1[i]
-#         free(out1)
-#     # Gausspow
-#     elif psftype==4:
-#         # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
-#         gausspow2d_integrate(x,y,allpars,nderiv,osamp,out1)
-#         for i in range(nderiv+1):
-#             mout[i] = out1[i]
-#         free(out1)
-#     # Sersic
-#     elif psftype==5:
-#         # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
-#         sersic2d_integrate(x,y,allpars,nderiv,osamp,out1)
-#         for i in range(nderiv+1):
-#             mout[i] = out1[i]
-#         free(out1)
-#     else:
-#         print('psftype=',psftype,'not supported')
-#     return mout
-
 cpdef double[:,:] amodel2d(double[:] x, double[:] y, int psftype, double[:] pars, int nderiv, int osamp):
     """
     Two dimensional model function with x/y array inputs.
@@ -3071,66 +2972,6 @@ cpdef double[:,:] amodel2d(double[:] x, double[:] y, int psftype, double[:] pars
         #printf("psftype= %d not supported\n",psftype)
 
     return mout
-
-cpdef double[:,:] amodel2d2(double[:] x, double[:] y, int psftype, double[:] pars, int nderiv, int osamp):
-    """
-    Two dimensional model function with x/y array inputs.
-    
-    Parameters
-    ----------
-    x : numpy array
-      Array of X-values of points for which to compute the 2D model.
-    y : numpy array
-      Array of Y-values of points for which to compute the 2D model.
-    psftype : int
-      Type of PSF model: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic.
-    pars : numpy array
-       Parameter list.
-    nderiv : int
-       The number of derivatives to return.
-
-    Returns
-    -------
-    g : numpy array
-      The 2D model for the input x/y values and parameters.  Always
-        returned as 1D raveled() array.
-    derivative : numpy array
-      Array of derivatives of g relative to the input parameters.
-        Always 2D [Npix,Nderiv] with the 1st dimension being the x/y arrays
-        raveled() to 1D.
-
-    Example
-    -------
-
-    g,derivative = amodel2d(x,y,1,pars,3)
-
-    """
-
-
-    # Gaussian
-    if psftype==1:
-        # pars = [amplitude, x0, y0, xsigma, ysigma, theta]
-        return agaussian2d(x,y,pars,nderiv,osamp)
-    # Moffat
-    elif psftype==2:
-        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta]
-        return amoffat2d(x,y,pars,nderiv,osamp)
-    # Penny
-    elif psftype==3:
-        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, relamp, sigma]
-        return apenny2d(x,y,pars,nderiv,osamp)
-    # Gausspow
-    elif psftype==4:
-        # pars = [amplitude, x0, y0, xsigma, ysigma, theta, beta4, beta6]
-        return agausspow2d(x,y,pars,nderiv,osamp)
-    # Sersic
-    elif psftype==5:
-        # pars = [amplitude, x0, y0, kserc, alpha, recc, theta]
-        return asersic2d(x,y,pars,nderiv,osamp)
-    #else:
-    #    print('psftype=',psftype,'not supported')
-    #    return [np.nan,np.nan]
-
 
 
 cpdef double model2d_flux(int psftype, double[:] pars):
@@ -3577,7 +3418,9 @@ cpdef list relcoord(double[:] x, double[:] y, int[:] shape):
     """
     cdef int[:] midpt
     cdef double[:] relx,rely
-    midpt = np.array([shape[0]//2,shape[1]//2])
+    midpt = np.array(shape)
+    midpt[0] = shape[0]//2
+    midpt[1] = shape[1]//2
     nx = len(x)
     relx = np.zeros(nx,float)
     rely = np.zeros(nx,float)
@@ -3587,136 +3430,165 @@ cpdef list relcoord(double[:] x, double[:] y, int[:] shape):
     return [relx,rely]
 
 
-# cpdef list empirical(double[:] x, double[:] y, double[:] pars, double[:,:,:] data,
-#                      int[:] imshape, bool deriv):
-#     """
-#     Evaluate an empirical PSF.
+cpdef list empirical(double[:] x, double[:] y, double[:] pars, double[:,:,:] data,
+                     int[:] imshape, int deriv):
+    """
+    Evaluate an empirical PSF.
 
-#     Parameters
-#     ----------
-#     x : numpy array
-#       Array of X-values of points for which to compute the empirical model.
-#     y : numpy array
-#       Array of Y-values of points for which to compute the empirical model.
-#     pars : numpy array or list
-#        Parameter list.  pars = [amplitude, x0, y0].
-#     data : numpy array
-#        The empirical PSF information.  This must be in the proper 2D (Ny,Nx)
-#          or 3D shape (Ny,Nx,psforder+1).
-#     imshape : numpy array
-#        The (ny,nx) shape of the full image.  This is needed if the PSF is
-#          spatially varying.
-#     deriv : boolean, optional
-#        Return the derivatives as well.
+    Parameters
+    ----------
+    x : numpy array
+      Array of X-values of points for which to compute the empirical model.
+    y : numpy array
+      Array of Y-values of points for which to compute the empirical model.
+    pars : numpy array or list
+       Parameter list.  pars = [amplitude, x0, y0].
+    data : numpy array
+       The empirical PSF information.  This must be in the proper 2D (Ny,Nx)
+         or 3D shape (Ny,Nx,psforder+1).
+    imshape : numpy array
+       The (ny,nx) shape of the full image.  This is needed if the PSF is
+         spatially varying.
+    deriv : boolean, optional
+       Return the derivatives as well.
 
-#     Returns
-#     -------
-#     g : numpy array
-#       The empirical model for the input x/y values and parameters (same
-#         shape as x/y).
-#     derivative : numpy array
-#       Array of derivatives of g relative to the input parameters.
-#         This is only returned if deriv=True.
+    Returns
+    -------
+    g : numpy array
+      The empirical model for the input x/y values and parameters (same
+        shape as x/y).
+    derivative : numpy array
+      Array of derivatives of g relative to the input parameters.
+        This is only returned if deriv=True.
 
-#     Example
-#     -------
+    Example
+    -------
 
-#     g = empirical(x,y,pars,data)
+    g = empirical(x,y,pars,data)
 
-#     or
+    or
 
-#     g,derivative = empirical(x,y,pars,data,deriv=True)
+    g,derivative = empirical(x,y,pars,data,deriv=True)
 
-#     """
-#     cdef int npsfx,npsfy,npsforder
-#     cdef double amp,xc,yc,xoff,yoff,relx,rely
-#     cdef double[:] dx,dy,coeff,gxplus,gyplus,g
-#     cdef double[:,:] derivative
+    """
+    cdef int npsfx,npsfy,npsforder
+    cdef double amp,xc,yc,xoff,yoff
+    cdef double[:] dx,dy,coeff,gxplus,gyplus,g,relx,rely
+    cdef double[:] dx_xoff, dy_yoff
+    cdef double[:] data_interp,derivx_interp,derivy_interp
+    cdef double[:,:] derivative
 
-#     #psftype,pars,npsfx,npsfy,psforder,nxhalf,nyhalf,lookup = unpackpsf(psf)    
+    #psftype,pars,npsfx,npsfy,psforder,nxhalf,nyhalf,lookup = unpackpsf(psf)    
 
-#     #if data.ndim != 2 and data.ndim != 3:
-#     #    raise Exception('data must be 2D or 3D')
+    #if data.ndim != 2 and data.ndim != 3:
+    #    raise Exception('data must be 2D or 3D')
         
-#     # Reshape the lookup table
-#     #if data.ndim == 2:
-#     #    data3d = data.reshape((data.shape[0],data.shape[1],1))
-#     #else:
-#     #    data3d = data
-#     npsfy = data.shape[0]
-#     npsfx = data.shape[1]
-#     npsforder = data.shape[2]
-#     #npsfy,npsfx,npsforder = data.shape
-#     if npsfy % 2 == 0 or npsfx % 2 ==0:
-#         raise Exception('Empirical PSF dimensions must be odd')
-#     npsfyc = npsfy // 2
-#     npsfxc = npsfx // 2
+    # Reshape the lookup table
+    #if data.ndim == 2:
+    #    data3d = data.reshape((data.shape[0],data.shape[1],1))
+    #else:
+    #    data3d = data
+    npsfy = data.shape[0]
+    npsfx = data.shape[1]
+    npsforder = data.shape[2]
+    #npsfy,npsfx,npsforder = data.shape
+    if npsfy % 2 == 0 or npsfx % 2 ==0:
+        raise Exception('Empirical PSF dimensions must be odd')
+    npsfyc = npsfy // 2
+    npsfxc = npsfx // 2
     
-#     # Parameters for the profile
-#     amp = pars[0]
-#     xc = pars[1]
-#     yc = pars[2]
-#     # xc/yc are positions within the large image
+    # Parameters for the profile
+    amp = pars[0]
+    xc = pars[1]
+    yc = pars[2]
+    # xc/yc are positions within the large image
 
-#     #if x.ndim==2:
-#     #    x1d = x.ravel()
-#     #    y1d = y.ravel()
-#     #else:
-#     #    x1d = x
-#     #    y1d = y
-#     npix = len(x)
+    #if x.ndim==2:
+    #    x1d = x.ravel()
+    #    y1d = y.ravel()
+    #else:
+    #    x1d = x
+    #    y1d = y
+    npix = len(x)
     
-#     ## Relative positions
-#     #  npsfyc/nsfpxc are the pixel coordinates at the center of
-#     #  the lookup table
-#     dx = np.zeros(npix,float)
-#     dy = np.zeros(npix,float)
-#     for i in range(npix):
-#         dx[i] = x[i] - xc + npsfxc
-#         dy[i] = y[i] - yc + npsfyc
+    ## Relative positions
+    #  npsfyc/nsfpxc are the pixel coordinates at the center of
+    #  the lookup table
+    dx = np.zeros(npix,float)
+    dy = np.zeros(npix,float)
+    for i in range(npix):
+        dx[i] = x[i] - xc + npsfxc
+        dy[i] = y[i] - yc + npsfyc
     
-#     # Higher-order X/Y terms
-#     if npsforder>1:
-#         relx,rely = relcoord(xc,yc,imshape)
-#         coeff = np.array([1.0, relx, rely, relx*rely])
-#     else:
-#         coeff = np.array([1.0])
+    # Higher-order X/Y terms
+    cdef double[:] txc = np.zeros(1,float)
+    cdef double[:] tyc = np.zeros(1,float)
+    txc[0] = xc
+    tyc[0] = yc
+    if npsforder>1:
+        relx,rely = relcoord(txc,tyc,imshape)
+        coeff = np.zeros(4,float)
+        coeff[0] = 1.0
+        coeff[1] = relx[0]
+        coeff[2] = rely[0]
+        coeff[3] = relx[0]*rely[0]
+        #coeff = np.array([1.0, relx, rely, relx*rely])
+    else:
+        coeff = np.array([1.0])
 
-#     # Perform the interpolation
-#     g = np.zeros(npix,float)
-#     # We must find the derivative with x0/y0 empirically
-#     if deriv:
-#         gxplus = np.zeros(npix,float)
-#         gyplus = np.zeros(npix,float)        
-#         xoff = 0.01
-#         yoff = 0.01
-#     for i in range(npsforder):
-#         # spline is initialized with x,y, z(Nx,Ny)
-#         # and evaluated with f(x,y)
-#         # since we are using im(Ny,Nx), we have to evalute with f(y,x)
-#         g[:] += utils.alinearinterp(data[:,:,i],dx,dy) * coeff[i]
-#         #g += farr[i](dy,dx,grid=False) * coeff[i]
-#         if deriv:
-#             gxplus[:] += utils.alinearinterp(data[:,:,i],dx-xoff,dy) * coeff[i]
-#             gyplus[:] += utils.alinearinterp(data[:,:,i],dx,dy-yoff) * coeff[i]
-#             #gxplus += farr[i](dy,dx-xoff,grid=False) * coeff[i]
-#             #gyplus += farr[i](dy-yoff,dx,grid=False) * coeff[i]
-#     g *= amp
-#     if deriv:
-#         gxplus *= amp
-#         gyplus *= amp        
+    # Perform the interpolation
+    g = np.zeros(npix,float)
+    # We must find the derivative with x0/y0 empirically
+    if deriv==1:
+        gxplus = np.zeros(npix,float)
+        gyplus = np.zeros(npix,float)        
+        xoff = 0.01
+        yoff = 0.01
 
-#     if deriv is True:
-#         # We cannot use np.gradient() because the input x/y values
-#         # might not be a regular grid
-#         derivative = np.zeros((npix,3),float)
-#         derivative[:,0] = g/amp
-#         derivative[:,1] = (gxplus-g)/xoff
-#         derivative[:,2] = (gyplus-g)/yoff
-#     else:
-#         derivative = np.zeros((1,1),float)
+    dx_xoff = np.zeros(npix,float)
+    dy_yoff = np.zeros(npix,float)    
+    for i in range(npix):
+        dx_xoff[i] = dx[i]-xoff
+        dy_yoff[i] = dy[i]-yoff
+        
+    for i in range(npsforder):
+        # spline is initialized with x,y, z(Nx,Ny)
+        # and evaluated with f(x,y)
+        # since we are using im(Ny,Nx), we have to evalute with f(y,x)
+        data_interp = utils.alinearinterp(data[:,:,i],dx,dy)
+        for j in range(npix):
+            g[j] += amp * coeff[i] * data_interp[j]
+        #g[:] += utils.alinearinterp(data[:,:,i],dx,dy) * coeff[i]
+        ##g += farr[i](dy,dx,grid=False) * coeff[i]
+        if deriv==1:
+            derivx_interp = utils.alinearinterp(data[:,:,i],dx_xoff,dy)
+            derivy_interp = utils.alinearinterp(data[:,:,i],dx,dy_yoff)
+            for j in range(npix):
+                gxplus[j] += amp * coeff[i] * derivx_interp[j]
+                gyplus[j] += amp * coeff[i] * derivy_interp[j]                
+        #    gxplus[:] += utils.alinearinterp(data[:,:,i],dx-xoff,dy) * coeff[i]
+        #    gyplus[:] += utils.alinearinterp(data[:,:,i],dx,dy-yoff) * coeff[i]
+        #    #gxplus += farr[i](dy,dx-xoff,grid=False) * coeff[i]
+        #    #gyplus += farr[i](dy-yoff,dx,grid=False) * coeff[i]
+    # g *= amp
+    # if deriv:
+    #     gxplus *= amp
+    #     gyplus *= amp 
+        
+
+    derivative = np.zeros((1,1),float)
+    if deriv==1:
+        # We cannot use np.gradient() because the input x/y values
+        # might not be a regular grid
+        derivative = np.zeros((npix,3),float)
+        for i in range(npix):
+            derivative[i,0] = g[i]/amp
+            derivative[i,1] = (gxplus[i]-g[i])/xoff
+            derivative[i,2] = (gyplus[i]-g[i])/yoff
+    else:
+        derivative = np.zeros((1,1),float)
     
-#     return [g,derivative]
+    return [g,derivative]
 
 
 # #########################################################################
@@ -3757,7 +3629,7 @@ cpdef list unpackpsf(double[:] psf):
     psftype,pars,lookup,imshape = unpackpsf(psf)
     
     """
-    cdef int npsf,psftype,npars,npsfx,npsfy,psforder,nimx,nimy
+    cdef int npsf,psftype,npars,npsfx,npsfy,psforder,nimx,nimy,idx
     cdef int[:] imshape,npsfarr
     cdef double[:] pars,lookup1d
     cdef double[:,:,:] lookup
@@ -3781,9 +3653,17 @@ cpdef list unpackpsf(double[:] psf):
         nimx = int(nimx)
         nimy = int(nimy)
         lookup1d = psf[npars+1+5:]
-        imshape[:] = np.array([nimy,nimx])
+        imshape[0] = nimy
+        imshape[1] = nimx
         # Reshape the lookup table
-        lookup = lookup1d.reshape((npsfy,npsfx,psforder+1))
+        lookup = np.zeros((npsfy,npsfx,psforder+1),float)
+        idx = 0
+        for i in range(npsfy):
+            for j in range(npsfx):
+                for k in range(psforder+1):
+                    lookup[i, j, k] = lookup1d[idx]
+                    idx += 1
+        #lookup = lookup1d.reshape((npsfy,npsfx,psforder+1))
     else:
         lookup = np.zeros((1,1,1),float)
         
@@ -3792,7 +3672,7 @@ cpdef list unpackpsf(double[:] psf):
 
 cpdef double[:] packpsf(int psftype, double[:] pars, double[:,:,:] lookup, int[:] imshape):
     """ Put all of the PSF information into a 1D array."""
-    cdef int npsfx,npsfy,norder,npsf,psforder
+    cdef int npsfx,npsfy,norder,npsf,psforder,count
     cdef double[:] psf
 
     # Figure out how many elements we need in the array
@@ -3816,6 +3696,7 @@ cpdef double[:] packpsf(int psftype, double[:] pars, double[:,:,:] lookup, int[:
         psf[count:count+len(pars)] = pars
         count += len(pars)
     # Add lookup table/empirical PSF information
+    cdef int i,j,k,idx
     if lookupsize>1:
         #if lookup.ndim==2:
         #    npsfy,npsfx = lookup.shape
@@ -3827,8 +3708,19 @@ cpdef double[:] packpsf(int psftype, double[:] pars, double[:,:,:] lookup, int[:
             nimy,nimx = imshape
         else:
             nimy,nimx = 0,0
-        psf[count:count+5] = np.array([npsfx,npsfy,psforder,nimx,nimy])
-        psf[count+5:] = lookup.ravel()
+        psf[count]   = npsfx
+        psf[count+1] = npsfy
+        psf[count+2] = psforder
+        psf[count+3] = nimx
+        psf[count+4] = nimy
+        # unravel lookup by hand
+        idx = 0
+        for i in range(lookup.shape[0]):
+            for j in range(lookup.shape[1]):
+                for k in range(lookup.shape[2]):
+                    psf[count+5+idx] = lookup[i, j, k]
+                    idx += 1
+        #psf[count+5:] = lookup.ravel()
     return psf
 
 
@@ -3858,44 +3750,54 @@ cpdef double[:] packpsf(int psftype, double[:] pars, double[:,:,:] lookup, int[:
 #             print('Image size = [',nimx,nimy,']')
 
 
-# cpdef double psf2d_fwhm(double[:] psf):
-#     """
-#     Return the FWHM of the PSF
-#     """
-#     cdef int psftype
-#     cdef int[:] imshape
-#     cdef double[:] pars,tpars
-#     cdef double[:,:,:] lookup
-#     cdef double fwhm
+cpdef double psf2d_fwhm(double[:] psf):
+    """
+    Return the FWHM of the PSF
+    """
+    cdef int psftype
+    cdef int[:] imshape
+    cdef double[:] pars,tpars
+    cdef double[:,:,:] lookup
+    cdef double fwhm
 
-#     psftype,psfpars,lookup,imshape = unpackpsf(psf)
-#     tpars = np.zeros(3+len(psfpars),float)
-#     tpars[0] = 1.0
-#     tpars[3:] = psfpars
-#     fwhm = model2d_fwhm(psftype,tpars)
-#     # Need to make the PSF if it is empirical or has a lookup table
+    psftype,psfpars,lookup,imshape = unpackpsf(psf)
+    tpars = np.zeros(3+len(psfpars),float)
+    tpars[0] = 1.0
+
+    cdef int i
+    for i in range(psfpars.shape[0]):
+        tpars[3 + i] = psfpars[i]
     
-#     return fwhm
-
-
-# cpdef double psf2d_flux(double[:] psf, double amp, double xc, double yc):
-#     """
-#     Return the flux of the PSF
-#     """
-#     cdef int psftype
-#     cdef double[:] psfpars,tpars
-#     cdef double[:,:,:] lookup
-#     cdef int[:] imshape
-#     cdef double flux
-
-#     psftype,psfpars,lookup,imshape = unpackpsf(psf)
-#     tpars = np.zeros(3+len(psfpars),float)
-#     tpars[:3] = np.array([amp,xc,yc])
-#     tpars[3:] = psfpars
-#     flux = model2d_flux(psftype,tpars)
-#     # Need to make the PSF if it is empirical or has a lookup table
+    fwhm = model2d_fwhm(psftype,tpars)
+    # Need to make the PSF if it is empirical or has a lookup table
     
-#     return flux
+    return fwhm
+
+
+cpdef double psf2d_flux(double[:] psf, double amp, double xc, double yc):
+    """
+    Return the flux of the PSF
+    """
+    cdef int psftype
+    cdef double[:] psfpars,tpars
+    cdef double[:,:,:] lookup
+    cdef int[:] imshape
+    cdef double flux
+
+    psftype,psfpars,lookup,imshape = unpackpsf(psf)
+    tpars = np.zeros(3+len(psfpars),float)
+    tpars[0] = amp
+    tpars[1] = xc
+    tpars[2] = yc
+
+    cdef int i
+    for i in range(psfpars.shape[0]):
+        tpars[3 + i] = psfpars[i]
+
+    flux = model2d_flux(psftype,tpars)
+    # Need to make the PSF if it is empirical or has a lookup table
+    
+    return flux
 
 
 # cpdef list psf(double[:] x, double[:] y, double[:] pars, int psftype, double[:] psfparams,
@@ -4121,98 +4023,104 @@ cpdef double[:] packpsf(int psftype, double[:] pars, double[:,:,:] lookup, int[:
 #     return bestpar,perror,cov,flux,fluxerr,chisq
 
 
-# cpdef psf2d(x,y,psf,amp,xc,yc,deriv=False,verbose=False):
-#     """
-#     Return a PSF model.
+cpdef double[:,:] psf2d(double[:] x, double[:] y, double[:] psf, double amp,
+                        double xc, double yc, int deriv):
+    #x,y,psf,amp,xc,yc,deriv=False,verbose=False):
+    """
+    Return a PSF model.
 
-#     Parameters
-#     ----------
-#     x : numpy array
-#        Array of X-values at which to evaluate the PSF model.
-#     y : numpy array
-#        Array of Y-values at which to evaluate the PSF model.
-#     psf : int
-#        The PSF model description in a single 1D array.
-#        If there is no lookup table, then
-#        pars = [psftype, parameters[
-#        where the types are: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic, 6-empirical
-#        if there's a lookup table, then there are extract parameters
-#        [psftype, parameters, npsfx,npsfy,psforder, nxhalf, nyhalf, raveled lookup table values]
-#        where nxhalf and nyhalf are the center of the entire image in pixels
-#        that's only needed when psforder is greater than 0
-#     amp : float
-#        PSF Amplitude.
-#     xc : float
-#        PSF central X coordinate.
-#     yc : float
-#        PSF central Y coordinate.
-#     deriv : bool
-#        Return derivatives as well.
-#     verbose : bool
-#        Verbose output to the screen.
+    Parameters
+    ----------
+    x : numpy array
+       Array of X-values at which to evaluate the PSF model.
+    y : numpy array
+       Array of Y-values at which to evaluate the PSF model.
+    psf : numpy float array
+       The PSF model description in a single 1D array.
+       If there is no lookup table, then
+       pars = [psftype, parameters[
+       where the types are: 1-gaussian, 2-moffat, 3-penny, 4-gausspow, 5-sersic, 6-empirical
+       if there's a lookup table, then there are extract parameters
+       [psftype, parameters, npsfx,npsfy,psforder, nxhalf, nyhalf, raveled lookup table values]
+       where nxhalf and nyhalf are the center of the entire image in pixels
+       that's only needed when psforder is greater than 0
+    amp : float
+       PSF Amplitude.
+    xc : float
+       PSF central X coordinate.
+    yc : float
+       PSF central Y coordinate.
+    deriv : int
+       Return derivatives as well.
 
-#     Returns
-#     -------
-#     model : numpy array
-#        PSF model.
-#     derivatives : numpy array
-#        Array of partial derivatives.
+    Returns
+    -------
+    model : numpy array
+       PSF model.
+    derivatives : numpy array
+       Array of partial derivatives.
     
-#     Examples
-#     --------
+    Examples
+    --------
 
-#     model,derivatives = psf2d(x,y,psf,100.0,5.5,6.5,True,False)
+    model,derivatives = psf2d(x,y,psf,100.0,5.5,6.5,1)
 
-#     """
-    
-#     # Unpack psf parameters
-#     psftype,psfpars,lookup,imshape = unpackpsf(psf)
+    """
+    cdef double[:,:] result
 
-#     # Get the analytic portion
-#     if deriv==True:
-#         nderiv = 3
-#     else:
-#         nderiv = 0
 
-#     if psftype <= 5:
-#         nparsarr = [6,7,8,8,7]
-#         npars = nparsarr[psftype-1]
-#         # Add amp, xc, yc to the parameters
-#         pars = np.zeros(npars,float)
-#         pars[:3] = [amp,xc,yc]
-#         pars[3:] = psfpars
+    # Unpack psf parameters
+    psftype,psfpars,lookup,imshape = unpackpsf(psf)
+
+    # Get the analytic portion
+    if deriv==1:
+        nderiv = 3
+    else:
+        nderiv = 0
+
+    if psftype <= 5:
+        nparsarr = [6,7,8,8,7]
+        npars = nparsarr[psftype-1]
+        # Add amp, xc, yc to the parameters
+        pars = np.zeros(npars,float)
+        pars[0] = amp
+        pars[1] = xc
+        pars[2] = yc
+        for i in range(psfpars.size):
+            pars[3+i] = psfpars[i]
         
-#     # Gaussian
-#     if psftype==1:
-#         g,derivative = agaussian2d(x,y,pars,nderiv)
-#     # Moffat
-#     elif psftype==2:
-#         g,derivative = amoffat2d(x,y,pars,nderiv)
-#     # Penny
-#     elif psftype==3:
-#         g,derivative = apenny2d(x,y,pars,nderiv)
-#     # Gausspow
-#     elif psftype==4:
-#         g,derivative = agausspow2d(x,y,pars,nderiv)
-#     # Sersic
-#     elif psftype==5:
-#         g,derivative = asersic2d(x,y,pars,nderiv)
-#     # Empirical
-#     elif psftype==6:
-#         g,derivative = empirical(x,y,np.array([amp,xc,yc]),lookup,imshape,nderiv)
-#     else:
-#         print('psftype=',psftype,'not supported')
-#         g = np.zeros(1,float)
-#         derivative = np.zeros((1,1),float)
+    # Gaussian
+    if psftype==1:
+        result = agaussian2d(x,y,pars,nderiv,0)
+    # Moffat
+    elif psftype==2:
+        result = amoffat2d(x,y,pars,nderiv,0)
+    # Penny
+    elif psftype==3:
+        result = apenny2d(x,y,pars,nderiv,0)
+    # Gausspow
+    elif psftype==4:
+        result = agausspow2d(x,y,pars,nderiv,0)
+    # Sersic
+    elif psftype==5:
+        result = asersic2d(x,y,pars,nderiv,0)
+    ## Empirical
+    #elif psftype==6:
+    #    result = empirical(x,y,np.array([amp,xc,yc]),lookup,imshape,nderiv)
+    else:
+        print('psftype=',psftype,'not supported')
+        #g = np.zeros(1,float)
+        #derivative = np.zeros((1,1),float)
+        result = np.zeros((1,1),float)
 
-#     # Add lookup table portion
-#     if psftype <= 5 and lookup.size > 1:
-#         eg,ederivative = empirical(x,y,np.array([amp,xc,yc]),lookup,imshape,(nderiv>0))
-#         g[:] += eg
-#         # Make sure the model is positive everywhere
-#         derivative[:,:] += ederivative
+    ## Add lookup table portion
+    #if psftype <= 5 and lookup.size > 1:
+    #    eg,ederivative = empirical(x,y,np.array([amp,xc,yc]),lookup,imshape,(nderiv>0))
+    #    g[:] += eg
+    #    # Make sure the model is positive everywhere
+    #    derivative[:,:] += ederivative
     
-#     return g,derivative
+    return result
 
 
 # cpdef psf2dfit(im,err,x,y,psf,ampc,xc,yc,verbose=False):

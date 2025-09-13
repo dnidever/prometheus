@@ -26,18 +26,18 @@ cdef extern from "stdlib.h":
     void qsort(void *base, int nmemb, int size,
                 int(*compar)(const_void *, const_void *)) nogil
 
-cdef int mycmp(const_void * pa, const_void * pb) noexcept:
-    cdef double a = (<double *>pa)[0]
-    cdef double b = (<double *>pb)[0]
-    if a < b:
-        return -1
-    elif a > b:
-        return 1
-    else:
-        return 0
+# cdef int mycmp(const_void * pa, const_void * pb) noexcept:
+#     cdef double a = (<double *>pa)[0]
+#     cdef double b = (<double *>pb)[0]
+#     if a < b:
+#         return -1
+#     elif a > b:
+#         return 1
+#     else:
+#         return 0
 
-cdef void myqsort(double * y, ssize_t l) nogil:
-    qsort(y, l, sizeof(double), mycmp)
+# cdef void myqsort(double * y, ssize_t l) nogil:
+#     qsort(y, l, sizeof(double), mycmp)
 
 
 cdef double linearinterp(double[:,:] data, double x, double y):
@@ -127,7 +127,7 @@ cdef double[:] alinearinterp(double[:,:] data, double[:] x, double[:] y):
     #npix = x.size
     npix = len(x)
     #f = np.zeros(npix,float)
-    f = cvarray(shape=(100),itemsize=sizeof(double),format="d")
+    f = cvarray(shape=(100,),itemsize=sizeof(double),format="d")
     cdef double[:] mf = f
     for i in range(npix):
        mf[i] = linearinterp(data,x[i],y[i])
@@ -219,10 +219,10 @@ cpdef double mad(double[:] data, int ignore_nan, int zero):
     cdef int ndata
     cdef double[:] resid
     cdef double ref,result    
-
+    
     ndata = len(data)
     resid = np.zeros(ndata,float)
-    resid = cvarray(shape=(),itemsize=sizeof(double),format="d")
+    resid = cvarray(shape=(ndata,),itemsize=sizeof(double),format="d")
     # With median reference point
     if zero==0:
         if ignore_nan==1:

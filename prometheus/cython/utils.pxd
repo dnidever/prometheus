@@ -1,0 +1,7 @@
+cdef double linearinterp(double[:,:] data, double x, double y)
+cdef double[:] alinearinterp(double[:,:] data, double[:] x, double[:] y)
+cpdef double nanmean(double[:] data)
+cpdef tuple nonnanindexes(double[:] data)
+cpdef double[:] nonnanarray(double[:] data)
+cpdef double nanmedian(double[:] data)
+cpdef double mad(double[:] data, int ignore_nan, int zero)
