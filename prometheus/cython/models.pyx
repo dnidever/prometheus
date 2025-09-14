@@ -3389,49 +3389,8 @@ cpdef double[:] model2d_maxsteps(int psftype, double[:] pars):
 # # Empirical PSF
 
 
-cpdef list relcoord(double[:] x, double[:] y, int[:] shape):
-    """
-    Convert absolute X/Y coordinates to relative ones to use
-    with the lookup table.
-
-    Parameters
-    ----------
-    x : numpy array
-      Input x-values of positions in an image.
-    y : numpy array
-      Input Y-values of positions in an image.
-    shape : tuple or list
-      Two-element tuple or list of the (Ny,Nx) size of the image.
-
-    Returns
-    -------
-    relx : numpy array
-      The relative x-values ranging from -1 to +1.
-    rely : numpy array
-      The relative y-values ranging from -1 to +1.
-
-    Example
-    -------
-
-    relx,rely = relcoord(x,y,shape)
-
-    """
-    cdef int[:] midpt
-    cdef double[:] relx,rely
-    midpt = np.array(shape)
-    midpt[0] = shape[0]//2
-    midpt[1] = shape[1]//2
-    nx = len(x)
-    relx = np.zeros(nx,float)
-    rely = np.zeros(nx,float)
-    for i in range(nx):
-        relx[i] = (x[i]-midpt[1])/shape[1]*2
-        rely[i] = (y[i]-midpt[0])/shape[0]*2
-    return [relx,rely]
-
-
 cpdef list empirical(double[:] x, double[:] y, double[:] pars, double[:,:,:] data,
-                     int[:] imshape, int deriv):
+                     Py_ssize_t[:] imshape, int deriv):
     """
     Evaluate an empirical PSF.
 
@@ -3526,7 +3485,7 @@ cpdef list empirical(double[:] x, double[:] y, double[:] pars, double[:,:,:] dat
     txc[0] = xc
     tyc[0] = yc
     if npsforder>1:
-        relx,rely = relcoord(txc,tyc,imshape)
+        relx,rely = utils.relcoord(txc,tyc,imshape)
         coeff = np.zeros(4,float)
         coeff[0] = 1.0
         coeff[1] = relx[0]

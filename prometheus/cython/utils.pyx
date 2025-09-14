@@ -9,7 +9,7 @@ cimport numpy as np
 from cython.view cimport array as cvarray
 #from scipy.special import gamma, gammaincinv, gammainc
 
-from libc.math cimport exp,sqrt,atan2,pi,NAN,floor
+from libc.math cimport exp,sqrt,atan2,pi,NAN,floor,pow
 from libcpp cimport bool
 
 cdef extern from "math.h":
@@ -39,6 +39,325 @@ cdef extern from "stdlib.h":
 # cdef void myqsort(double * y, ssize_t l) nogil:
 #     qsort(y, l, sizeof(double), mycmp)
 
+cpdef double[:,:] transpose(double[:,:] A):
+    """ Transpose a 2D array """
+    cdef Py_ssize_t nx,ny
+    cdef double[:,:] B
+    ny = A.shape[0]
+    nx = A.shape[1]
+    B = np.zeros((nx,ny),np.float64)
+    for i in range(ny):
+        for j in range(nx):
+            B[j,i] = A[i,j]
+    return B
+    
+cpdef double[:,:] matmult(double[:,:] A, double[:,:] B):
+    """
+    Multiply two matrices A and B into C:  C = A @ B
+    A: m x k
+    B: k x n
+    C: m x n (output, must be pre-allocated)
+    """
+    cdef Py_ssize_t i, j, k
+    cdef Py_ssize_t m = A.shape[0]
+    cdef Py_ssize_t n = B.shape[1]
+    cdef Py_ssize_t K = A.shape[1]
+    cdef double s
+    cdef double[:,:] C
+    C = np.zeros((m,n),np.float64)
+    
+    for i in range(m):
+        for j in range(n):
+            s = 0.0
+            for k in range(K):
+                s += A[i,k] * B[k,j]
+            C[i,j] = s
+    return C
+
+cpdef double[:] sub1d(double[:] arr1,double[:] arr2):
+    """ Subtract two 1D arrays"""
+    cdef Py_ssize_t n,i
+    cdef double[:] out
+    n = len(arr1)
+    out = np.zeros(n,np.float64)
+    for i in range(n):
+        out[i] = arr1[i]-arr2[i]
+    return out
+
+cpdef double[:] add1d(double[:] arr1,double[:] arr2):
+    """ Add two 1D arrays"""
+    cdef Py_ssize_t n,i
+    cdef double[:] out
+    n = len(arr1)
+    out = np.zeros(n,np.float64)
+    for i in range(n):
+        out[i] = arr1[i]+arr2[i]
+    return out
+
+cpdef double[:] mult1d(double[:] arr1,double[:] arr2):
+    """ Multiply two 1D arrays"""
+    cdef Py_ssize_t n,i
+    cdef double[:] out
+    n = len(arr1)
+    out = np.zeros(n,np.float64)
+    for i in range(n):
+        out[i] = arr1[i]*arr2[i]
+    return out
+
+cpdef double[:] pow1d(double[:] arr,double power):
+    """ Take 1D array to a power """
+    cdef Py_ssize_t n,i
+    cdef double[:] out
+    n = len(arr)
+    out = np.zeros(n,np.float64)
+    for i in range(n):
+        out[i] = pow(arr[i],power)
+    return out
+
+cpdef double[:] fact1d(double[:] arr,double factor):
+    """ Multiply 1D array by a factor """
+    cdef Py_ssize_t n,i
+    cdef double[:] out
+    n = len(arr)
+    out = np.zeros(n,np.float64)
+    for i in range(n):
+        out[i] = arr[i] * factor
+    return out
+
+cpdef double[:,:] sub2d(double[:,:] arr1,double[:,:] arr2):
+    """ Subtract two 2D arrays"""
+    cdef Py_ssize_t nx,ny,i,j
+    cdef double[:,:] out
+    ny = arr1.shape[0]
+    nx = arr1.shape[1]
+    out = np.zeros((ny,nx),np.float64)
+    for i in range(ny):
+        for j in range(nx):
+            out[i,j] = arr1[i,j]-arr2[i,j]
+    return out
+
+cpdef double[:,:] add2d(double[:,:] arr1,double[:,:] arr2):
+    """ Add two 2D arrays"""
+    cdef Py_ssize_t nx,ny,i,j
+    cdef double[:,:] out
+    ny = arr1.shape[0]
+    nx = arr1.shape[1]
+    out = np.zeros((ny,nx),np.float64)
+    for i in range(ny):
+        for j in range(nx):
+            out[i,j] = arr1[i,j]+arr2[i,j]
+    return out
+
+cpdef double[:,:] mult2d(double[:,:] arr1,double[:,:] arr2):
+    """ Multiply two 2D arrays"""
+    cdef Py_ssize_t nx,ny,i,j
+    cdef double[:,:] out
+    ny = arr1.shape[0]
+    nx = arr1.shape[1]
+    out = np.zeros((ny,nx),np.float64)
+    for i in range(ny):
+        for j in range(nx):
+            out[i,j] = arr1[i,j]*arr2[i,j]
+    return out
+
+cpdef double[:,:] pow2d(double[:,:] arr,double power):
+    """ Take a 2D array to a power """
+    cdef Py_ssize_t nx,ny,i,j
+    cdef double[:,:] out
+    ny = arr.shape[0]
+    nx = arr.shape[1]
+    out = np.zeros((ny,nx),np.float64)
+    for i in range(ny):
+        for j in range(nx):
+            out[i,j] = pow(arr[i,j],power)
+    return out
+
+cpdef double[:,:] fact2d(double[:,:] arr,double factor):
+    """ Multiply 2D array by a factor """
+    cdef Py_ssize_t nx,ny,i,j
+    cdef double[:,:] out
+    ny = arr.shape[0]
+    nx = arr.shape[1]
+    out = np.zeros((ny,nx),np.float64)
+    for i in range(ny):
+        for j in range(nx):
+            out[i,j] = arr[i,j] * factor
+    return out
+
+cpdef double[:,:,:] sub3d(double[:,:,:] arr1,double[:,:,:] arr2):
+    """ Subtract two 3D arrays"""
+    cdef Py_ssize_t nx,ny,nz,i,j,k
+    cdef double[:,:,:] out
+    nz = arr1.shape[0]
+    ny = arr1.shape[1]
+    nx = arr1.shape[2]
+    out = np.zeros((nz,ny,nx),np.float64)
+    for i in range(nz):
+        for j in range(ny):
+            for k in range(nx):
+                out[i,j,k] = arr1[i,j,k]-arr2[i,j,k]
+    return out
+
+cpdef double[:,:,:] add3d(double[:,:,:] arr1,double[:,:,:] arr2):
+    """ Add two 3D arrays"""
+    cdef Py_ssize_t nx,ny,nz,i,j,k
+    cdef double[:,:,:] out
+    nz = arr1.shape[0]
+    ny = arr1.shape[1]
+    nx = arr1.shape[2]
+    out = np.zeros((nz,ny,nx),np.float64)
+    for i in range(nz):
+        for j in range(ny):
+            for k in range(nx):
+                out[i,j,k] = arr1[i,j,k]+arr2[i,j,k]
+    return out
+
+cpdef double[:,:,:] mult3d(double[:,:,:] arr1,double[:,:,:] arr2):
+    """ Multiply two 3D arrays"""
+    cdef Py_ssize_t nx,ny,nz,i,j,k
+    cdef double[:,:,:] out
+    nz = arr1.shape[0]
+    ny = arr1.shape[1]
+    nx = arr1.shape[2]
+    out = np.zeros((nz,ny,nx),np.float64)
+    for i in range(nz):
+        for j in range(ny):
+            for k in range(nx):
+                out[i,j,k] = arr1[i,j,k]*arr2[i,j,k]
+    return out
+
+cpdef double[:,:,:] pow3d(double[:,:,:] arr,double power):
+    """ Take a 3D array to a power """
+    cdef Py_ssize_t nx,ny,nz,i,j,k
+    cdef double[:,:,:] out
+    nz = arr.shape[0]
+    ny = arr.shape[1]
+    nx = arr.shape[2]
+    out = np.zeros((nz,ny,nx),np.float64)
+    for i in range(nz):
+        for j in range(ny):
+            for k in range(nx):
+                out[i,j,k] = pow(arr[i,j,k],power)
+    return out
+
+cpdef double[:,:,:] fact3d(double[:,:,:] arr,double factor):
+    """ Multiply 3D array by a factor """
+    cdef Py_ssize_t nx,ny,nz,i,j,k
+    cdef double[:,:,:] out
+    nz = arr.shape[0]
+    ny = arr.shape[1]
+    nx = arr.shape[2]
+    out = np.zeros((nz,ny,nx),np.float64)
+    for i in range(nz):
+        for j in range(ny):
+            for k in range(nx):
+                out[i,j,k] = arr[i,j,k] * factor
+    return out
+
+cpdef double[:] ravel2d(double[:,:] datain):
+    """ Ravel or flatten 2D data to 1D """
+    # Use C-type indexing
+    # with the last axis index changing fastest, back to the first
+    # axis index changing slowest.
+    cdef int i,j,idx
+    cdef Py_ssize_t nx,ny
+    ny = datain.shape[0]
+    nx = datain.shape[1]
+    npix = nx*ny
+    dataout = np.zeros(npix,np.float64)
+    idx = 0
+    for i in range(ny):
+        for j in range(nx):
+            dataout[idx] = datain[i,j]
+            idx += 1
+    return dataout
+
+cpdef double[:] ravel3d(double[:,:,:] datain):
+    """ Ravel or flatten 2D data to 1D """
+    # Use C-type indexing
+    # with the last axis index changing fastest, back to the first
+    # axis index changing slowest.
+    cdef int i,j,k,idx
+    cdef Py_ssize_t nx,ny,nz
+    nz = datain.shape[0]
+    ny = datain.shape[1]
+    nx = datain.shape[2]
+    npix = nx*ny*nz
+    dataout = np.zeros(npix,np.float64)
+    idx = 0
+    for i in range(nz):
+        for j in range(ny):
+            for k in range(nx):
+                dataout[idx] = datain[i,j,k]
+                idx += 1
+    return dataout
+
+    
+cpdef double[:,:] reshape2d(double[:,:] datain, Py_ssize_t[:] shapeout):
+    """ Reshape a 2D double array """
+    # 2D -> 2D
+    cdef Py_ssize_t nxout,nyout
+    cdef long i,j,idx
+    cdef double[:] datain1d
+    cdef double[:,:] dataout
+
+    # Reshape reading the index order using C-like index order
+    # with the last axis index changing fastest, back to the first
+    # axis index changing slowest.
+
+    # You can think of reshaping as first raveling the array (using the given
+    # index order), then inserting the elements from the raveled array into the
+    # new array using the same kind of index ordering as was used for the
+    # raveling.
+
+    # Step 1: ravel the input 2D array to 1D
+    datain1d = ravel2d(datain)
+
+    # Step 2: insert the elements into the new array using
+    #           the same index ordering
+    nyout = shapeout[0]
+    nxout = shapeout[1]
+    dataout = np.zeros((nyout,nxout),np.float64)
+    idx = 0
+    for i in range(nyout):
+        for j in range(nxout):
+            dataout[i,j] = datain1d[idx]
+            idx += 1
+    return dataout
+
+cpdef double[:,:,:] reshape3d(double[:,:,:] datain, Py_ssize_t[:] shapeout):
+    """ Reshape a 3D double array """
+    # 3D -> 3D
+    cdef Py_ssize_t nxout,nyout,nzout
+    cdef long i,j,k,idx
+    cdef double[:] datain1d
+    cdef double[:,:,:] dataout
+
+    # Reshape reading the index order using C-like index order
+    # with the last axis index changing fastest, back to the first
+    # axis index changing slowest.
+
+    # You can think of reshaping as first raveling the array (using the given
+    # index order), then inserting the elements from the raveled array into the
+    # new array using the same kind of index ordering as was used for the
+    # raveling.
+
+    # Step 1: ravel the input 2D array to 1D
+    datain1d = ravel3d(datain)
+
+    # Step 2: insert the elements into the new array using
+    #           the same index ordering
+    nzout = shapeout[0]
+    nyout = shapeout[1]
+    nxout = shapeout[2]
+    dataout = np.zeros((nzout,nyout,nxout),np.float64)
+    idx = 0
+    for i in range(nzout):
+        for j in range(nyout):
+            for k in range(nxout):
+                dataout[i,j,k] = datain1d[idx]
+                idx += 1
+    return dataout
 
 cdef double linearinterp(double[:,:] data, double x, double y):
     """
@@ -126,7 +445,7 @@ cdef double[:] alinearinterp(double[:,:] data, double[:] x, double[:] y):
     cdef Py_ssize_t npix
     #npix = x.size
     npix = len(x)
-    #f = np.zeros(npix,float)
+    #f = np.zeros(npix,np.float64)
     f = cvarray(shape=(100,),itemsize=sizeof(double),format="d")
     cdef double[:] mf = f
     for i in range(npix):
@@ -221,7 +540,7 @@ cpdef double mad(double[:] data, int ignore_nan, int zero):
     cdef double ref,result    
     
     ndata = len(data)
-    resid = np.zeros(ndata,float)
+    resid = np.zeros(ndata,np.float64)
     resid = cvarray(shape=(ndata,),itemsize=sizeof(double),format="d")
     # With median reference point
     if zero==0:
@@ -229,310 +548,678 @@ cpdef double mad(double[:] data, int ignore_nan, int zero):
             ref = np.nanmedian(data)
             for i in range(ndata):
                 resid[i] = data[i]-ref
-            result = np.median(np.abs(resid))
+            result = np.nanmedian(np.abs(resid))
         else:
             ref = np.median(data)
             for i in range(ndata):
                 resid[i] = data[i]-ref
-            result = np.nanmedian(np.abs(resid))
+            result = np.median(np.abs(resid))
     # Using zero as reference point
     else:
         if ignore_nan==1:
-            result= np.median(np.abs(data))
+            result = np.nanmedian(np.abs(data))
         else:
             ref = np.median(data)
-            result = np.nanmedian(np.abs(data))
+            result = np.median(np.abs(data))
     return result * 1.482602218505602
 
-# cpdef double[:] mad2d(double[:,:] data, int axis, int ignore_nan, int zero):
-#     """ Calculate the median absolute deviation of an array."""
-#     cdef double[:] result,ref
-#     cdef int nx,ny
-#     cdef double[:,:] ref2d
-#     ny = data.shape[0]
-#     nx = data.shape[1]
-#     if axis==0:
-#         ref = np.zeros(nx,float)
-#     elif axis==1:
-#         ref = np.zeros(ny,float)
-#     ref2d = np.zeros((ny,nx),float)
-#     resid = np.zeros((ny,nx),float)
+cpdef double[:] mad2d(double[:,:] data, int axis, int ignore_nan, int zero):
+    """ Calculate the median absolute deviation of an array."""
+    cdef Py_ssize_t nx,ny
+    cdef int i
+    cdef double[:] result,ref
+    cdef double[:,:] ref2d
+    ny = data.shape[0]
+    nx = data.shape[1]
+    #if axis==0:
+    #    ref = np.zeros(nx,np.float64)
+    #elif axis==1:
+    #    ref = np.zeros(ny,np.float64)
+    ref2d = np.zeros((ny,nx),np.float64)
+    resid = np.zeros((ny,nx),np.float64)
 
-#     # With median reference point
-#     if zero==0:
-#         if ignore_nan==1:
-#             ref = np.asarray(np.nanmedian(data,axis=axis))
-#             newshape = np.array(data.shape)
-#             newshape[axis] = -1
-#             newshape = (newshape[0],newshape[1])
-# 	    for i in range():
-#                 ref2d[i,:] = ref
-#             resid = data-ref.reshape(newshape)
-#             result = np.nanmedian(np.abs(resid),axis=axis) * 1.482602218505602
-#         else:
-#             ref = np.asarray(np.median(data,axis=axis))
-#             newshape = np.array(data.shape)
-#             newshape[axis] = -1
-#             newshape = (newshape[0],newshape[1])
-#             resid = data-ref.reshape(newshape)
-#             result = np.median(np.abs(resid),axis=axis) * 1.482602218505602
-#     # Using zero as reference point
-#     else:
-#         if ignore_nan==1:
-#             result = np.nanmedian(np.abs(data),axis=axis) * 1.482602218505602
-#         else:
-#             result = np.median(np.abs(data),axis=axis) * 1.482602218505602
+    # With median reference point
+    if zero==0:
+        if ignore_nan==1:
+            ref = np.asarray(np.nanmedian(data,axis=axis))
+            if axis==0:
+                for i in range(ny):
+                    ref2d[i,:] = ref
+            else:
+                for i in range(nx):
+                    ref2d[:,i] = ref
+            resid = sub2d(data,ref2d)
+            result = np.nanmedian(np.abs(resid),axis=axis) * 1.482602218505602
+        else:
+            ref = np.asarray(np.median(data,axis=axis))
+            if axis==0:
+                for i in range(ny):
+                    ref2d[i,:] = ref
+            else:
+                for i in range(nx):
+                    ref2d[:,i] = ref
+            resid = sub2d(data,ref2d)
+            result = np.median(np.abs(resid),axis=axis) * 1.482602218505602
+    # Using zero as reference point
+    else:
+        if ignore_nan==1:
+            result = np.nanmedian(np.abs(data),axis=axis) * 1.482602218505602
+        else:
+            result = np.median(np.abs(data),axis=axis) * 1.482602218505602
 
-#     return result
+    return result
 
-# cpdef double[:,:] mad3d(double[:,:,:] data, int axis, int ignore_nan, int zero):
-#     """ Calculate the median absolute deviation of an array."""
-#     cdef double[:] ref
-#     cdef double[:,:] result
+cpdef double[:,:] mad3d(double[:,:,:] data, int axis, int ignore_nan, int zero):
+    """ Calculate the median absolute deviation of an array."""
+    cdef double[:,:] ref
+    cdef double[:,:] result
 
-#     nz = data.shape[0]
-#     ny = data.shape[1]
-#     nx = data.shape[2]
-#     if axis==0:
-#         ref = np.zeros((ny,nx),float)
-#     elif axis==1:
-#         ref = np.zeros((nz,nx),float)
-#     elif axis==2:
-#         ref = np.zeros((nz,ny),float)
-#     resid = np.zeros((nz,ny,nx),float)
+    nz = data.shape[0]
+    ny = data.shape[1]
+    nx = data.shape[2]
+    #if axis==0:
+    #    ref = np.zeros((ny,nx),np.float64)
+    #elif axis==1:
+    #    ref = np.zeros((nz,nx),np.float64)
+    #elif axis==2:
+    #    ref = np.zeros((nz,ny),np.float64)
+    ref3d = np.zeros((nz,ny,nx),np.float64)
+    resid = np.zeros((nz,ny,nx),np.float64)
 
-#     # With median reference point
-#     if zero==0:
-#         if ignore_nan==1:
-#             ref = np.nanmedian(data,axis=axis)
-#             newshape = np.array(data.shape)
-#             newshape[axis] = -1
-#             newshape = (newshape[0],newshape[1],newshape[2])
-#             resid = data-ref.reshape(newshape)
-#             result = np.nanmedian(np.abs(resid),axis=axis) * 1.482602218505602
-#         else:
-#             ref = np.median(data,axis=axis)
-#             newshape = np.array(data.shape)
-#             newshape[axis] = -1
-#             newshape = (newshape[0],newshape[1],newshape[2])
-#             resid = data-ref.reshape(newshape)
-#             result = np.median(np.abs(resid),axis=axis) * 1.482602218505602
-#     # Using zero as reference point
-#     else:
-#         if ignore_nan==1:
-#             result = np.nanmedian(np.abs(data),axis=axis) * 1.482602218505602
-#         else:
-#             result = np.median(np.abs(data),axis=axis) * 1.482602218505602
-#     return result
+    # With median reference point
+    if zero==0:
+        if ignore_nan==1:
+            ref = np.nanmedian(data,axis=axis)
+            if axis==0:
+                for i in range(nz):
+                    ref3d[i,:,:] = ref
+            elif axis==1:
+                for i in range(ny):
+                    ref3d[:,i,:] = ref
+            else:
+                for i in range(nx):
+                    ref3d[:,:,i] = ref
+            resid = sub3d(data,ref3d)
+            result = np.nanmedian(np.abs(resid),axis=axis) * 1.482602218505602
+        else:
+            ref = np.median(data,axis=axis)
+            if axis==0:
+                for i in range(nz):
+                    ref3d[i,:,:] = ref
+            elif axis==1:
+                for i in range(ny):
+                    ref3d[:,i,:] = ref
+            else:
+                for i in range(nx):
+                    ref3d[:,:,i] = ref
+            resid = sub3d(data,ref3d)
+            result = np.median(np.abs(resid),axis=axis) * 1.482602218505602
+    # Using zero as reference point
+    else:
+        if ignore_nan==1:
+            result = np.nanmedian(np.abs(data),axis=axis) * 1.482602218505602
+        else:
+            result = np.median(np.abs(data),axis=axis) * 1.482602218505602
+    return result
 
-# cpdef double quadratic_bisector(double[:] x, double[:] y):
-#     """ Calculate the axis of symmetric or bisector of parabola"""
-#     #https://www.azdhs.gov/documents/preparedness/state-laboratory/lab-licensure-certification/technical-resources/
-#     #    calibration-training/12-quadratic-least-squares-regression-calib.pdf
-#     #quadratic regression statistical equation
-#     cdef long n
-#     cdef double Sx,Sy,Sxx,Sxy,Sxx2,Sx2y,Sx2x2,denom,a,b
-#     n = len(x)
-#     if n<3:
-#         return np.nan
-#     Sx = np.sum(x)
-#     Sy = np.sum(y)
-#     Sx2 = 0.0
-#     for i in range(n):
-#         Sx2 += x[i]**2
-#     Sxx = 0.0
-#     Sxy = 0.0
-#     Sxx2 = 0.0
-#     Sx2y = 0.0
-#     Sx2x2 = 0.0
-#     for i in range(n):
-#         Sxx += x[i]**2 - Sx/n
-#         Sxy += x[i]*y[i] - Sx*Sy/n
-#         Sxx2 += x[i]**3 - Sx*Sx2/n
-#         Sx2y += x[i]**2 * y[i] - Sx2*Sy/n
-#         Sx2x2 += x[i]**4 - Sx2**2/n
-#     #Sxx = np.sum(x**2) - np.sum(x)**2/n
-#     #Sxy = np.sum(x*y) - np.sum(x)*np.sum(y)/n
-#     #Sxx2 = np.sum(x**3) - np.sum(x)*np.sum(x**2)/n
-#     #Sx2y = np.sum(x**2 * y) - np.sum(x**2)*np.sum(y)/n
-#     #Sx2x2 = np.sum(x**4) - np.sum(x**2)**2/n
-#     #a = ( S(x^2*y)*S(xx)-S(xy)*S(xx^2) ) / ( S(xx)*S(x^2x^2) - S(xx^2)^2 )
-#     #b = ( S(xy)*S(x^2x^2) - S(x^2y)*S(xx^2) ) / ( S(xx)*S(x^2x^2) - S(xx^2)^2 )
-#     denom = Sxx*Sx2x2 - Sxx2**2
-#     if denom==0:
-#         return np.nan
-#     a = ( Sx2y*Sxx - Sxy*Sxx2 ) / denom
-#     b = ( Sxy*Sx2x2 - Sx2y*Sxx2 ) / denom
-#     if a==0:
-#         return np.nan
-#     return -b/(2*a)
+cpdef double quadratic_bisector(double[:] x, double[:] y):
+    """ Calculate the axis of symmetric or bisector of parabola"""
+    #https://www.azdhs.gov/documents/preparedness/state-laboratory/lab-licensure-certification/technical-resources/
+    #    calibration-training/12-quadratic-least-squares-regression-calib.pdf
+    #quadratic regression statistical equation
+    cdef long n
+    cdef double Sx,Sy,Sxx,Sxy,Sxx2,Sx2y,Sx2x2,denom,a,b
+    n = len(x)
+    if n<3:
+        return np.nan
+    Sx = np.sum(x)
+    Sy = np.sum(y)
+    Sx2 = 0.0
+    for i in range(n):
+        Sx2 += x[i]**2
+    Sxx = 0.0
+    Sxy = 0.0
+    Sxx2 = 0.0
+    Sx2y = 0.0
+    Sx2x2 = 0.0
+    for i in range(n):
+        Sxx += x[i]**2 - Sx/n
+        Sxy += x[i]*y[i] - Sx*Sy/n
+        Sxx2 += x[i]**3 - Sx*Sx2/n
+        Sx2y += x[i]**2 * y[i] - Sx2*Sy/n
+        Sx2x2 += x[i]**4 - Sx2**2/n
+    #Sxx = np.sum(x**2) - np.sum(x)**2/n
+    #Sxy = np.sum(x*y) - np.sum(x)*np.sum(y)/n
+    #Sxx2 = np.sum(x**3) - np.sum(x)*np.sum(x**2)/n
+    #Sx2y = np.sum(x**2 * y) - np.sum(x**2)*np.sum(y)/n
+    #Sx2x2 = np.sum(x**4) - np.sum(x**2)**2/n
+    #a = ( S(x^2*y)*S(xx)-S(xy)*S(xx^2) ) / ( S(xx)*S(x^2x^2) - S(xx^2)^2 )
+    #b = ( S(xy)*S(x^2x^2) - S(x^2y)*S(xx^2) ) / ( S(xx)*S(x^2x^2) - S(xx^2)^2 )
+    denom = Sxx*Sx2x2 - Sxx2**2
+    if denom==0:
+        return np.nan
+    a = ( Sx2y*Sxx - Sxy*Sxx2 ) / denom
+    b = ( Sxy*Sx2x2 - Sx2y*Sxx2 ) / denom
+    if a==0:
+        return np.nan
+    return -b/(2*a)
 
-# cpdef qr_jac_solve(jac,resid,weight=None):
-#     """ Solve part of a non-linear least squares equation using QR decomposition
-#         using the Jacobian."""
-#     # jac: Jacobian matrix, first derivatives, [Npix, Npars]
-#     # resid: residuals [Npix]
-#     # weight: weights, ~1/error**2 [Npix]
+
+cpdef long[:] arange(int start, int stop, int step):
+    """ Make an array from start to stop in steps """
+    cdef int num,i
+    cdef long[:] array
+    num = (stop-start) // step
+    array = np.zeros(num,int)
+    for i in range(num):
+        array[i] = start + i*step
+    return array
+
+cpdef double[:] linspace(double start, double stop, int num):
+    """ Make an array from start to stop with num elements """
+    # the endpoint is always included
+    cdef int i
+    cdef double step
+    cdef double[:] array
+    step = (stop-start)/(num-1)
+    array = np.zeros(num,np.float64)
+    for i in range(num):
+        array[i] = start + i*step
+    return array
+
+cdef list intmeshgrid(long[:] x, long[:] y):
+    """ Implementation of numpy's meshgrid function."""
+    cdef int nx,ny
+    cdef long[:,:] xx,yy
+    nx = len(x)
+    ny = len(y)
+    xx = np.zeros((ny,nx),int)
+    for i in range(ny):
+        xx[i,:] = x
+    yy = np.zeros((ny,nx),int)
+    for i in range(nx):
+        yy[:,i] = y
+    return xx,yy
+
+cdef list meshgrid(double[:] x, double[:] y):
+    """ Implementation of numpy's meshgrid function."""
+    cdef int nx,ny
+    cdef double[:,:] xx,yy
+    nx = len(x)
+    ny = len(y)
+    xx = np.zeros((ny,nx),np.float64)
+    for i in range(ny):
+        xx[i,:] = x
+    yy = np.zeros((ny,nx),np.float64)
+    for i in range(nx):
+        yy[:,i] = y
+    return xx,yy
+
+cdef double[:] aclip(double[:] val,double minval,double maxval):
+    cdef double[:] newals
+    newvals = np.zeros(len(val),np.float64)
+    for i in range(len(val)):
+        if val[i] < minval:
+            nval = minval
+        elif val[i] > maxval:
+            nval = maxval
+        else:
+            nval = val[i]
+        newvals[i] = nval
+    return newvals
+
+cdef double clip(double val,double minval,double maxval):
+    if val < minval:
+        nval = minval
+    elif val > maxval:
+        nval = maxval
+    else:
+        nval = val
+    return nval
+
+cdef double gamma(double z):
+    # Gamma function for a single z value
+    # Using the Lanczos approximation
+    # https://en.wikipedia.org/wiki/Lanczos_approximation
+    cdef int g,n,i
+    cdef double y
+    cdef double[:] p
+    cdef double PI = 3.141592653589793
+    g = 7
+    n = 9
+    p = np.array([
+        0.99999999999980993,
+        676.5203681218851,
+        -1259.1392167224028,
+        771.32342877765313,
+        -176.61502916214059,
+        12.507343278686905,
+        -0.13857109526572012,
+        9.9843695780195716e-6,
+        1.5056327351493116e-7
+    ])
+    if z < 0.5:
+        y = PI / (np.sin(PI * z) * gamma(1 - z))  # Reflection formula
+    else:
+        z -= 1
+        x = p[0]
+        for i in range(1, len(p)):
+            x += p[i] / (z + i)
+        t = z + g + 0.5
+        y = np.sqrt(2 * PI) * t ** (z + 0.5) * np.exp(-t) * x
+    return y
+
+cdef double gammaincinv05(double a):
+    """ gammaincinv(a,0.5) """
+    cdef int ind
+    cdef double out,slp
+    cdef double[:] n,y
+    n = np.array([1.00e-03, 1.12e-01, 2.23e-01, 3.34e-01, 4.45e-01, 5.56e-01,
+                  6.67e-01, 7.78e-01, 8.89e-01, 1.00e+00, 2.00e+00, 3.00e+00,
+                  4.00e+00, 5.00e+00, 6.00e+00, 7.00e+00, 8.00e+00, 9.00e+00,
+                  1.00e+01, 1.10e+01, 1.20e+01])
+
+    y = np.array([5.24420641e-302, 1.25897478e-003, 3.03558724e-002, 9.59815712e-002,
+                  1.81209305e-001, 2.76343765e-001, 3.76863377e-001, 4.80541354e-001,
+                  5.86193928e-001, 6.93147181e-001, 1.67834699e+000, 2.67406031e+000,
+                  3.67206075e+000, 4.67090888e+000, 5.67016119e+000, 6.66963707e+000,
+                  7.66924944e+000, 8.66895118e+000, 9.66871461e+000, 1.06685224e+001,
+                  1.16683632e+001])
+    # Lower edge
+    if a < n[0]:
+        out = 0.0
+    # Upper edge
+    elif a > n[-1]:
+        # linear approximation to large values
+        # coef = np.array([ 0.99984075, -0.32972584])
+        out = 0.99984075*a-0.32972584
+    # Interpolate values
+    else:
+        ind = np.searchsorted(n,a)
+        # exact match
+        if n[ind]==a:
+            out = y[ind]
+        # At beginning
+        elif ind==0:
+            slp = (y[1]-y[0])/(n[1]-n[0])
+            out = slp*(a-n[0])+y[0]
+        else:
+            slp = (y[ind]-y[ind-1])/(n[ind]-n[ind-1])
+            out = slp*(a-n[ind-1])+y[ind-1]
+            
+    return out
+
+cpdef double[:,:] inverse(double[:,:] a):
+    """ Safely take the inverse of a square 2D matrix."""
+    # This checks for zeros on the diagonal and "fixes" them.
+    cdef int i
+    cdef Py_ssize_t[:] badpar
+    cdef double[:,:] ainv
     
-#     # QR decomposition
-#     if weight is None:
-#         q,r = np.linalg.qr(jac)
-#         rinv = inverse(r)
-#         dbeta = rinv @ (q.T @ resid)
-#     # Weights input, multiply resid and jac by weights        
-#     else:
-#         q,r = np.linalg.qr( jac * weight.reshape(-1,1) )
-#         rinv = inverse(r)
-#         dbeta = rinv @ (q.T @ (resid*weight))
-        
-#     return dbeta
-
-# cpdef jac_covariance(jac,resid,wt):
-#     """ Determine the covariance matrix. """
+    # If one of the dimensions is zero in the R matrix [Npars,Npars]
+    # then replace it with a "dummy" value.  A large value in R
+    # will give a small value in inverse of R.
+    #badpar, = np.where(np.abs(np.diag(a))<sys.float_info.min)
+    badpar = np.where(np.abs(np.diag(a))<2e-300)[0]
+    if len(badpar)>0:
+        for i in range(len(badpar)):
+            a[badpar[i],badpar[i]] = 1e10
+    ainv = np.linalg.inv(a)
+    # What if the inverse fails???
+    # can we catch it
+    # Fix values
+    if len(badpar)>0:
+        for i in range(len(badpar)):
+            #a[badpar] = 0  # put values back
+            ainv[badpar[i],badpar[i]] = 0
     
-#     npix,npars = jac.shape
+    return ainv
+
+cpdef double[:] qr_jac_solve(double[:,:] jac,double[:] resid,double[:] weight):
+    """ Solve part of a non-linear least squares equation using QR decomposition
+        using the Jacobian."""
+    # jac: Jacobian matrix, first derivatives, [Npix, Npars]
+    # resid: residuals [Npix]
+    # weight: weights, ~1/error**2 [Npix]
+    # dbeta: update array [Npix]
+    cdef Py_ssize_t npix,npars
+    cdef double wsum
+    cdef double[:] dbeta,sqrtweight
+    cdef double[:,:] sqrtweight2d
+
+    npix = jac.shape[0]
+    npars = jac.shape[1]
+
+    # Check if the weights are all the same, unweighted
+    wsum = 0.0
+    for i in range(npix):
+        wsum += np.abs(weight[i]-weight[0])
     
-#     # Weights
-#     #   If weighted least-squares then
-#     #   J.T * W * J
-#     #   where W = I/sig_i**2
-#     if wt is not None:
-#         wt2 = wt.reshape(-1,1) + np.zeros(npars)
-#         hess = jac.T @ (wt2 * jac)
-#     else:
-#         hess = jac.T @ jac  # not weighted
+    # QR decomposition
+    if wsum <= 1e-10:
+        q,r = np.linalg.qr(jac)
+        rinv = inverse(r)
+        #rinv = np.linalg.pinv(r)  # use pseudo-inverse 
+        dbeta = rinv @ (q.T @ resid)
+    # Weights input, multiply resid and jac by weights        
+    else:
+        # We need to multiply Jac and resid by the sqrt(weight)
+        sqrtweight = pow1d(weight,0.5)
+        sqrtweight2d = np.zeros((npix,npars),np.float64)
+        for i in range(npars):
+            sqrtweight2d[:,i] = sqrtweight
+        q,r = np.linalg.qr( mult2d(jac,sqrtweight2d) )
+        rinv = inverse(r)
+        #rinv = np.linalg.pinv(r)
+        dbeta = rinv @ (q.T @ mult1d(resid,sqrtweight))
+        
+    return dbeta
 
-#     # cov = H-1, covariance matrix is inverse of Hessian matrix
-#     cov_orig = inverse(hess)
+cpdef double[:,:] jac_covariance(double[:,:] jac,double[:] resid, double[:] weight):
+    """ Determine the covariance matrix. """
+    cdef Py_ssize_t npix,npars
+    cdef double dof,wsum
+    cdef double[:,:] cov,cov_orig,hess,jacT
+
+    npix = jac.shape[0]
+    npars = jac.shape[1]
+
+    jacT = transpose(jac)
     
-#     # Rescale to get an unbiased estimate
-#     # cov_scaled = cov * (RSS/(m-n)), where m=number of measurements, n=number of parameters
-#     # RSS = residual sum of squares
-#     #  using rss gives values consistent with what curve_fit returns
-#     # Use chi-squared, since we are doing the weighted least-squares and weighted Hessian
-#     if wt is not None:
-#         chisq = np.sum(resid**2 * wt)
-#     else:
-#         chisq = np.sum(resid**2)
-#     dof = npix-npars
-#     if dof<=0:
-#         dof = 1
-#     cov = cov_orig * (chisq/dof)  # what MPFITFUN suggests, but very small
+    # Check if the weights are all the same, unweighted
+    wsum = 0.0
+    for i in range(npix):
+        wsum += np.abs(weight[i]-weight[0])
+    
+    # Weights
+    #   If weighted least-squares then
+    #   J.T * W * J
+    #   where W = I/sig_i**2
+    if wsum > 1e-10:
+        weight2d = np.zeros((npix,npars),np.float64)
+        for i in range(npars):
+            weight2d[:,i] = weight
+        hess = matmult(jacT, (mult2d(weight2d,jac)))
+    else:
+        hess = matmult(jacT, jac)  # not weighted
         
-#     return cov
+    # cov = H-1, covariance matrix is inverse of Hessian matrix
+    cov_orig = inverse(hess)
+    
+    # Rescale to get an unbiased estimate
+    # cov_scaled = cov * (RSS/(m-n)), where m=number of measurements, n=number of parameters
+    # RSS = residual sum of squares
+    #  using rss gives values consistent with what curve_fit returns
+    # Use chi-squared, since we are doing the weighted least-squares and weighted Hessian
+    if wsum > 1e-10:
+        chisq = np.sum(mult1d(pow1d(resid,2),weight))
+    else:
+        chisq = np.sum(pow1d(resid,2))
+    dof = npix-npars
+    if dof<=0:
+        dof = 1
+    cov = fact2d(cov_orig,(chisq/dof))  # what MPFITFUN suggests, but very small
+        
+    return cov
 
 
-# cpdef double[:] poly2d(double[:,:] xdata, double[:] pars):
-#     """ model of 2D linear polynomial."""
-#     cdef double[:] x,y,result
-#     cdef long n
-#     x = xdata[:,0]
-#     y = xdata[:,1]
-#     n = len(x)
-#     result = np.zeros(n,float)
-#     for i in range(n):
-#         result[i] = pars[0]+pars[1]*x[i]+pars[2]*y[i]+pars[3]*x[i]*y[i]
-#     return result
+# checkbounds: return integer array
+cpdef int[:] checkbounds(double[:] pars, double[:,:] bounds):
+    """
+    Check the parameters against the bounds.
+    0 = ok, 1 = below lower bound, 2 = above upper bound
+    """
+    cdef Py_ssize_t npars = pars.shape[0]
+    cdef double[:] lbounds = bounds[:,0]
+    cdef double[:] ubounds = bounds[:,1]
+    cdef int[:] check = np.zeros(npars, dtype=np.int32)
+    cdef Py_ssize_t i
 
-# cpdef list jacpoly2d(double[:,:] xdata, double[:] pars):
-#     """ jacobian of 2D linear polynomial."""
-#     cdef double[:] x,y,m
-#     cdef double[:,:] jac
-#     cdef long n
-#     x = xdata[:,0]
-#     y = xdata[:,1]
-#     n = len(x)
-#     # Model
-#     m = np.zeros(n,float)
-#     for i in range(n):
-#         m[i] = pars[0]+pars[1]*x[i]+pars[2]*y[i]+pars[3]*x[i]*y[i]
-#     # Jacobian, partical derivatives wrt the parameters
-#     jac = np.zeros((n,4),float)
-#     jac[:,0] = 1    # constant coefficient
-#     jac[:,1] = x    # x-coefficient
-#     jac[:,2] = y    # y-coefficient
-#     for i in range(n):
-#         jac[i,3] = x[i]*y[i]  # xy-coefficient
-#     return m,jac
+    for i in range(npars):
+        if pars[i] <= lbounds[i]:
+            check[i] = 1
+        elif pars[i] >= ubounds[i]:
+            check[i] = 2
+        else:
+            check[i] = 0
+    return check
 
-# cpdef poly2dfit(x,y,data,error,maxiter=2,minpercdiff=0.5,verbose=False):
-#     """ Fit a 2D linear function to data robustly."""
-#     ndata = len(data)
-#     if ndata<4:
-#         raise Exception('Need at least 4 data points for poly2dfit')
-#     gd1, = np.where(np.isfinite(data))
-#     if len(gd1)<4:
-#         raise Exception('Need at least 4 good data points for poly2dfit')
-#     xdata = np.zeros((len(gd1),2),float)
-#     xdata[:,0] = x[gd1]
-#     xdata[:,1] = y[gd1]
-#     initpar = np.zeros(4,float)
-#     med = np.median(data[gd1])
-#     sig = mad(data[gd1])
-#     gd2, = np.where( (np.abs(data-med)<3*sig) & np.isfinite(data))
-#     if len(gd1)>=4 and len(gd2)<4:
-#         gd = gd1
-#     else:
-#         gd = gd2
-#     initpar[0] = med
-#     xdata = np.zeros((len(gd),2),float)
-#     xdata[:,0] = x[gd]
-#     xdata[:,1] = y[gd]
-#     data1 = data[gd]
-#     error1 = error[gd]
 
-#     # Do the fit
-#     # Iterate
-#     count = 0
-#     bestpar = initpar.copy()
-#     maxpercdiff = 1e10
-#     # maxsteps = None
-#     wt = 1.0/error1.ravel()**2
-#     while (count<maxiter and maxpercdiff>minpercdiff):
-#         # Use Cholesky, QR or SVD to solve linear system of equations
-#         m,j = jacpoly2d(xdata,bestpar)
-#         dy = data1.ravel()-m.ravel()
-#         # Solve Jacobian
-#         #if error is not None:
-#         #dbeta = qr_jac_solve(j,dy,weight=wt)
-#         dbeta = qr_jac_solve(j,dy)
-#         #else:
-#         #    dbeta = qr_jac_solve(j,dy)
-#         dbeta[~np.isfinite(dbeta)] = 0.0  # deal with NaNs
+# limbounds: clip parameters to boundaries
+cpdef double[:] limbounds(double[:] pars, double[:,:] bounds):
+    """
+    Limit the parameters to the boundaries.
+    """
+    cdef Py_ssize_t npars = pars.shape[0]
+    cdef double[:] lbounds = bounds[:,0]
+    cdef double[:] ubounds = bounds[:,1]
+    cdef double[:] outpars = np.zeros(npars, dtype=np.float64)
+    cdef Py_ssize_t i
 
-#         # -add "shift cutting" and "line search" in the least squares method
-#         # basically scale the beta vector to find the best match.
-#         # check this out
-#         # https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.line_search.html
+    for i in range(npars):
+        if pars[i] < lbounds[i]:
+            outpars[i] = lbounds[i]
+        elif pars[i] > ubounds[i]:
+            outpars[i] = ubounds[i]
+        else:
+            outpars[i] = pars[i]
+
+    return outpars
+
+
+# limsteps: limit the magnitude of parameter steps
+cpdef double[:] limsteps(double[:] steps, double maxsteps):
+    """
+    Limit the parameter steps to maximum step sizes.
+    """
+    cdef Py_ssize_t npars = steps.shape[0]
+    cdef double[:] outsteps = np.zeros(npars, dtype=np.float64)
+    cdef double s
+    cdef Py_ssize_t i
+
+    for i in range(npars):
+        s = steps[i]
+        if s >= 0:
+            outsteps[i] = min(s, maxsteps)
+        else:
+            outsteps[i] = max(s, -maxsteps)
+
+    return outsteps
+
+
+cpdef double[:] newpars(double[:] pars,double[:] steps,
+                        double[:,:] bounds,int maxsteps):
+    """
+    Return new parameters that fit the constraints.
+    pars, steps: double[:]
+    bounds: double[:,2] or None
+    maxsteps: int, optional. If -1, no limit
+    """
+    cdef Py_ssize_t n = pars.shape[0]
+    cdef double[:] limited_steps = np.zeros(n, dtype=np.float64)
+    cdef double[:] newsteps = np.zeros(n, dtype=np.float64)
+    cdef double[:] newpars_arr = np.zeros(n, dtype=np.float64)
+    cdef double[:] lbounds
+    cdef double[:] ubounds
+    cdef double[:] check
+    cdef bint[:] badpars
+    cdef int count, maxiter = 2
+    cdef Py_ssize_t i
+    
+    # Limit the steps
+    if maxsteps > 0:
+        limited_steps = limsteps(steps, maxsteps)
+    else:
+        for i in range(n):
+            limited_steps[i] = steps[i]
+
+    # Extract lower and upper bounds
+    lbounds = bounds[:,0]
+    ubounds = bounds[:,1]
+
+    # Initialize
+    check = checkbounds(add1d(pars,limited_steps), bounds)
+    badpars = np.zeros(n, dtype=np.int8)
+    for i in range(n):
+        badpars[i] = check[i] != 0
+
+    # Reduce step sizes if outside bounds
+    newsteps[:] = limited_steps
+    count = 0
+    while np.sum(badpars) > 0 and count <= maxiter:
+        for i in range(n):
+            if badpars[i]:
+                newsteps[i] /= 2
+        check = checkbounds(add1d(pars,newsteps), bounds)
+        for i in range(n):
+            badpars[i] = check[i] != 0
+        count += 1
+
+    # Final parameters
+    for i in range(n):
+        newpars_arr[i] = pars[i] + newsteps[i]
+
+    # Make sure final parameters stay inside bounds
+    check = checkbounds(newpars_arr, bounds)
+    for i in range(n):
+        badpars[i] = check[i] != 0
+
+    if np.sum(badpars) > 0:
+        for i in range(n):
+            newpars_arr[i] = min(max(newpars_arr[i], lbounds[i] + 1e-30),
+                                 ubounds[i] - 1e-30)
+
+    return newpars_arr
+
+cpdef double[:] poly2d(double[:,:] xdata, double[:] pars):
+    """ model of 2D linear polynomial."""
+    cdef double[:] x,y,result
+    cdef long n
+    x = xdata[:,0]
+    y = xdata[:,1]
+    n = len(x)
+    result = np.zeros(n,np.float64)
+    for i in range(n):
+        result[i] = pars[0]+pars[1]*x[i]+pars[2]*y[i]+pars[3]*x[i]*y[i]
+    return result
+
+cpdef list jacpoly2d(double[:,:] xdata, double[:] pars):
+    """ jacobian of 2D linear polynomial."""
+    cdef double[:] x,y,m
+    cdef double[:,:] jac
+    cdef long n
+    x = xdata[:,0]
+    y = xdata[:,1]
+    n = len(x)
+    # Model
+    m = np.zeros(n,np.float64)
+    for i in range(n):
+        m[i] = pars[0]+pars[1]*x[i]+pars[2]*y[i]+pars[3]*x[i]*y[i]
+    # Jacobian, partical derivatives wrt the parameters
+    jac = np.zeros((n,4),np.float64)
+    jac[:,0] = 1    # constant coefficient
+    jac[:,1] = x    # x-coefficient
+    jac[:,2] = y    # y-coefficient
+    for i in range(n):
+        jac[i,3] = x[i]*y[i]  # xy-coefficient
+    return m,jac
+
+cpdef list poly2dfit(double[:] x,double[:] y,double[:] data,double[:] error,int maxiter,double minpercdiff):
+    """ Fit a 2D linear function to data robustly."""
+    # maxiter=2
+    # minpercdiff=0.5
+    cdef int ndata,count
+    cdef Py_ssize_t[:] gd1,gd2,gd,bad
+    cdef double med,sig
+    cdef double[:] initpar,bestpar,wt,wt1
+    cdef double[:] data1,error1,resid
+    cdef double[:,:] xdata
+    
+    ndata = len(data)
+    #if ndata<4:
+    #    raise Exception('Need at least 4 data points for poly2dfit')
+    gd1, = np.where(np.isfinite(data))
+    #if len(gd1)<4:
+    #    raise Exception('Need at least 4 good data points for poly2dfit')
+    xdata = np.zeros((len(gd1),2),np.float64)
+    xdata[:,0] = np.array(x)[gd1]
+    xdata[:,1] = np.array(y)[gd1]
+    initpar = np.zeros(4,np.float64)
+    med = np.median(np.array(data)[gd1])
+    sig = mad(np.array(data)[gd1],0,0)
+    resid = np.zeros(ndata,np.float64)
+    for i in range(ndata):
+        resid[i] = data[i]-med
+    gd2, = np.where( (np.abs(resid)<3*sig) & np.isfinite(data))
+    if len(gd1)>=4 and len(gd2)<4:
+        gd = gd1
+    else:
+        gd = gd2
+    initpar[0] = med
+    xdata = np.zeros((len(gd),2),np.float64)
+    xdata[:,0] = np.array(x)[gd]
+    xdata[:,1] = np.array(y)[gd]
+    data1 = np.array(data)[gd]
+    error1 = np.array(error)[gd]
+
+    # Do the fit
+    # Iterate
+    count = 0
+    bestpar = initpar.copy()
+    maxpercdiff = 1e10
+    # maxsteps = None
+    wt = np.zeros(ndata,np.float64)
+    for i in range(ndata):
+        wt[i] = 1.0/error1[i]**2
+    wt1 = np.ones(ndata,np.float64)    
+    while (count<maxiter and maxpercdiff>minpercdiff):
+        # Use Cholesky, QR or SVD to solve linear system of equations
+        m,j = jacpoly2d(xdata,bestpar)
+        dy = data1-m
+        # Solve Jacobian
+        #if error is not None:
+        #dbeta = qr_jac_solve(j,dy,weight=wt)
+        dbeta = qr_jac_solve(j,dy,wt1)
+        #else:
+        #    dbeta = qr_jac_solve(j,dy)
+        bad = np.where(~np.isfinite(dbeta))[0]
+        if len(bad)>0:
+            for i in range(len(bad)):
+                dbeta[bad[i]] = 0.0    # deal with NaNs
+
+        # -add "shift cutting" and "line search" in the least squares method
+        # basically scale the beta vector to find the best match.
+        # check this out
+        # https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.line_search.html
         
         
-#         # Update parameters
-#         oldpar = bestpar.copy()
-#         # limit the steps to the maximum step sizes and boundaries
-#         #if bounds is not None or maxsteps is not None:
-#         #    bestpar = newpars(bestpar,dbeta,bounds,maxsteps)
-#         #else:
-#         bestpar += dbeta
-#         # Check differences and changes
-#         diff = np.abs(bestpar-oldpar)
-#         denom = np.maximum(np.abs(oldpar.copy()),0.0001)
-#         percdiff = diff.copy()/denom*100  # percent differences
-#         maxpercdiff = np.max(percdiff)
+        # Update parameters
+        oldpar = bestpar.copy()
+        # limit the steps to the maximum step sizes and boundaries
+        #if bounds is not None or maxsteps is not None:
+        #    bestpar = newpars(bestpar,dbeta,bounds,maxsteps)
+        #else:
+        bestpar = add1d(bestpar,dbeta)
+        # Check differences and changes
+        diff = np.abs(sub1d(bestpar,oldpar))
+        denom = np.maximum(np.abs(oldpar.copy()),0.0001)
+        percdiff = diff.copy()/denom*100  # percent differences
+        maxpercdiff = np.max(percdiff)
                 
-#         if verbose:
-#             print('N = ',count)
-#             print('bestpars = ',bestpar)
-#             print('dbeta = ',dbeta)
+        #if verbose:
+        #    print('N = ',count)
+        #    print('bestpars = ',bestpar)
+        #    print('dbeta = ',dbeta)
                 
-#         count += 1
+        count += 1
 
-#     # Get covariance and errors
-#     m,j = jacpoly2d(xdata,bestpar)
-#     dy = data1.ravel()-m.ravel()
-#     cov = jac_covariance(j,dy,wt)
-#     perror = np.sqrt(np.diag(cov))
+    # Get covariance and errors
+    m,j = jacpoly2d(xdata,bestpar)
+    dy = data1.ravel()-m.ravel()
+    cov = jac_covariance(j,dy,wt)
+    perror = np.sqrt(np.diag(cov))
 
-#     return bestpar,perror,cov
+    return bestpar,perror,cov
 
 
 # cpdef crossmatch(X1, X2, max_distance=np.inf,k=1):
@@ -617,10 +1304,10 @@ cpdef double mad(double[:] data, int ignore_nan, int zero):
 #     """
 #     n1 = len(ra1)
 #     n2 = len(ra2)
-#     X1 = np.zeros((n1,2),float)
+#     X1 = np.zeros((n1,2),np.float64)
 #     X1[:,0] = ra1
 #     X1[:,1] = dec1
-#     X2 = np.zeros((n2,2),float)
+#     X2 = np.zeros((n2,2),np.float64)
 #     X2[:,0] = ra2
 #     X2[:,1] = dec2
     
@@ -635,14 +1322,14 @@ cpdef double mad(double[:] data, int ignore_nan, int zero):
 #         max_distance = (dcr / 3600) * (np.pi / 180.)
         
 #         # Convert 2D RA/DEC to 3D cartesian coordinates
-#         Y1 = np.zeros((n1,3),float)
+#         Y1 = np.zeros((n1,3),np.float64)
 #         Y1[:,0] = np.cos(X1[:, 0]) * np.cos(X1[:, 1])
 #         Y1[:,1] = np.sin(X1[:, 0]) * np.cos(X1[:, 1])
 #         Y1[:,2] = np.sin(X1[:, 1])
 #         #Y1 = np.transpose(np.vstack([np.cos(X1[:, 0]) * np.cos(X1[:, 1]),
 #         #                             np.sin(X1[:, 0]) * np.cos(X1[:, 1]),
 #         #                             np.sin(X1[:, 1])]))
-#         Y2 = np.zeros((n2,3),float)
+#         Y2 = np.zeros((n2,3),np.float64)
 #         Y2[:,0] = np.cos(X2[:, 0]) * np.cos(X2[:, 1])
 #         Y2[:,1] = np.sin(X2[:, 0]) * np.cos(X2[:, 1])
 #         Y2[:,2] = np.sin(X2[:, 1])
@@ -720,7 +1407,7 @@ cpdef double mad(double[:] data, int ignore_nan, int zero):
 #             mindist = dist[:,0][not_inf1]
 #             if len(ind2)==0:
 #                 return np.array([-1]), np.array([-1]), np.array([np.inf])
-#             find2 = np.zeros(len(ind2),float)
+#             find2 = np.zeros(len(ind2),np.float64)
 #             find2[:] = ind2
 #             index = Index(find2)
 #             # some duplicates to deal with
@@ -755,9 +1442,9 @@ cpdef double mad(double[:] data, int ignore_nan, int zero):
 #                         temp[niter:] = ind[torem_orig_index[i],niter:]  #.squeeze()
 #                         temp[-niter:] = np.zeros(niter,np.int64)-1
 #                         ind[torem_orig_index[i],:] = temp
-#                         temp2 = np.zeros(10,float)
+#                         temp2 = np.zeros(10,np.float64)
 #                         temp2[niter:] = dist[torem_orig_index[i],niter:]   #.squeeze()
-#                         temp2[-niter:] = np.zeros(niter,float)+np.inf
+#                         temp2[-niter:] = np.zeros(niter,np.float64)+np.inf
 #                         dist[torem_orig_index[i],:] = temp2
 #                         #ind[torem_orig_index[i],:] = np.hstack( (ind[torem_orig_index[i],niter:].squeeze(),
 #                         #                                         np.repeat(-1,niter)) )
@@ -784,7 +1471,7 @@ cpdef double mad(double[:] data, int ignore_nan, int zero):
 #     ny,nx = im.shape
 #     ny2 = ny // binsize
 #     nx2 = nx // binsize
-#     bgim = np.zeros((ny2,nx2),float)
+#     bgim = np.zeros((ny2,nx2),np.float64)
 #     nsample = np.minimum(1000,binsize*binsize)
 #     sample = np.random.randint(0,binsize*binsize-1,nsample)
 #     for i in range(nx2):
@@ -921,11 +1608,11 @@ cpdef double mad(double[:] data, int ignore_nan, int zero):
 #     nbin = 3  # 5
 #     nhbin = nbin//2
 
-#     mnim = np.zeros(im.shape,float)-100000
+#     mnim = np.zeros(im.shape,np.float64)-100000
     
 #     count = 0
-#     xpeak = np.zeros(100000,float)
-#     ypeak = np.zeros(100000,float)
+#     xpeak = np.zeros(100000,np.float64)
+#     ypeak = np.zeros(100000,np.float64)
 #     for i in np.arange(nhbin+1,nx-nhbin-2):
 #         for j in range(nhbin+1,ny-nhbin-2):
 #             if im[j,i]>nsig*sig:
@@ -1088,7 +1775,7 @@ cpdef double mad(double[:] data, int ignore_nan, int zero):
 #     nbin = 3
 #     nhbin = nbin//2
 
-#     mout = np.zeros((len(xpeak),17),float)
+#     mout = np.zeros((len(xpeak),17),np.float64)
 #     for i in range(len(xpeak)):
 #         xp = int(xpeak[i])
 #         yp = int(ypeak[i])
@@ -1110,55 +1797,119 @@ cpdef double mad(double[:] data, int ignore_nan, int zero):
 
 #     return mout
 
-# cpdef starbbox(coords,imshape,radius):
-#     """                                                                                        
-#      Return the boundary box for a star given radius and image size.                            
+
+cpdef Py_ssize_t[:] starbbox(double[:] coords,Py_ssize_t[:] imshape,double radius):
+    """                                                                                        
+     Return the boundary box for a star given radius and image size.                            
                                                                                                 
-#     Parameters                                                                                 
-#     ----------                                                                                 
-#     coords: list or tuple                                                                      
-#        Central coordinates (xcen,ycen) of star (*absolute* values).                            
-#     imshape: list or tuple                                                                     
-#        Image shape (ny,nx) values.  Python images are (Y,X).                                   
-#     radius: float                                                                              
-#        Radius in pixels.  
+    Parameters                                                                                 
+    ----------                                                                                 
+    coords: array                                                                  
+       Central coordinates (xcen,ycen) of star (*absolute* values).                            
+    imshape: array
+       Image shape (ny,nx) values.  Python images are (Y,X).                                   
+    radius: float                                                                              
+       Radius in pixels.  
  
-#     Returns                                                                                     
-#     -------                                                                                     
-#     bbox : BoundingBox object                                                                   
-#        Bounding box of the x/y ranges.                                                          
-#        Upper values are EXCLUSIVE following the python convention.                              
+    Returns                                                                                     
+    -------                                                                                     
+    bbox : BoundingBox object                                                                   
+       Bounding box of the x/y ranges.                                                          
+       Upper values are EXCLUSIVE following the python convention.                              
                                                                                                 
-#     """
+    """
+    cdef Py_ssize_t nx,ny,xlo,xhi,ylo,yhi
+    cdef double eta,xcen,ycen,x0,x1,y0,y1
+    
+    # pixels span +/-0.5 pixels in each direction
+    # so pixel x=5 spans x=4.5-5.5
+    # Use round() to get the value of the pixel that is covers
+    # the coordinate
+    # to include pixels at the bottom but not the top we have to
+    # subtract a tiny bit before we round
+    eta = 1e-5
 
-#     # pixels span +/-0.5 pixels in each direction
-#     # so pixel x=5 spans x=4.5-5.5
-#     # Use round() to get the value of the pixel that is covers
-#     # the coordinate
-#     # to include pixels at the bottom but not the top we have to
-#     # subtract a tiny bit before we round
-#     eta = 1e-5
+    # Star coordinates
+    xcen,ycen = coords
+    ny,nx = imshape   # python images are (Y,X)
+    x0 = xcen-radius
+    x1 = xcen+radius
+    y0 = ycen-radius
+    y1 = ycen+radius
+    xlo = np.maximum(int(np.round(x0-eta)),0)
+    xhi = np.minimum(int(np.round(x1-eta))+1,nx)
+    ylo = np.maximum(int(np.round(y0-eta)),0)
+    yhi = np.minimum(int(np.round(y1-eta))+1,ny)
+    # add 1 at the upper end because those values are EXCLUDED
+    # by the standard python convention
 
-#     # Star coordinates
-#     xcen,ycen = coords
-#     ny,nx = imshape   # python images are (Y,X)
-#     x0 = xcen-radius
-#     x1 = xcen+radius
-#     y0 = ycen-radius
-#     y1 = ycen+radius
-#     xlo = np.maximum(int(np.round(x0-eta)),0)
-#     xhi = np.minimum(int(np.round(x1-eta))+1,nx)
-#     ylo = np.maximum(int(np.round(y0-eta)),0)
-#     yhi = np.minimum(int(np.round(y1-eta))+1,ny)
-#     # add 1 at the upper end because those values are EXCLUDED
-#     # by the standard python convention
+    # The old way of doing it
+    #xlo = np.maximum(int(np.floor(xcen-radius)),0)
+    #xhi = np.minimum(int(np.ceil(xcen+radius+1)),nx)
+    #ylo = np.maximum(int(np.floor(ycen-radius)),0)
+    #yhi = np.minimum(int(np.ceil(ycen+radius+1)),ny)
+    bbox = np.zeros(4,int)
+    bbox[0] = xlo
+    bbox[1] = xhi
+    bbox[2] = ylo
+    bbox[3] = yhi
+    return bbox
 
-#     # The old way of doing it
-#     #xlo = np.maximum(int(np.floor(xcen-radius)),0)
-#     #xhi = np.minimum(int(np.ceil(xcen+radius+1)),nx)
-#     #ylo = np.maximum(int(np.floor(ycen-radius)),0)
-#     #yhi = np.minimum(int(np.ceil(ycen+radius+1)),ny)
-#     return np.array([xlo,xhi,ylo,yhi])
+cpdef double[:,:] slice2d(double[:,:] array, Py_ssize_t[:] bbox):
+    """ Return a slice of a 2D array """
+    # bbox is [xlo,xhi,ylo,yhi]
+    cdef int i,j
+    cdef Py_ssize_t xlo,xhi,ylo,yhi,nx,ny
+    cdef double[:,:] subarray
+    xlo,xhi,ylo,yhi = bbox
+    nx = xhi-xlo
+    ny = yhi-ylo
+    # end points are EXCLUDED by the standard python convention
+    subarray = np.zeros((ny,nx),np.float64)
+    for i in range(ny):
+        for j in range(nx):
+            subarray[i,j] = array[i+ylo,j+xlo]
+    return subarray
+
+cpdef list relcoord(double[:] x, double[:] y, Py_ssize_t[:] shape):
+    """
+    Convert absolute X/Y coordinates to relative ones to use
+    with the lookup table.
+
+    Parameters
+    ----------
+    x : numpy array
+      Input x-values of positions in an image.
+    y : numpy array
+      Input Y-values of positions in an image.
+    shape : tuple or list
+      Two-element tuple or list of the (Ny,Nx) size of the image.
+
+    Returns
+    -------
+    relx : numpy array
+      The relative x-values ranging from -1 to +1.
+    rely : numpy array
+      The relative y-values ranging from -1 to +1.
+
+    Example
+    -------
+
+    relx,rely = relcoord(x,y,shape)
+
+    """
+    cdef int[:] midpt
+    cdef double[:] relx,rely
+    midpt = np.array(shape)
+    midpt[0] = shape[0]//2
+    midpt[1] = shape[1]//2
+    nx = len(x)
+    relx = np.zeros(nx,np.float64)
+    rely = np.zeros(nx,np.float64)
+    for i in range(nx):
+        relx[i] = (x[i]-midpt[1])/shape[1]*2
+        rely[i] = (y[i]-midpt[0])/shape[0]*2
+    return [relx,rely]
 
 
 # cpdef getstar(imshape,xcen,ycen,hpsfnpix,fitradius):
