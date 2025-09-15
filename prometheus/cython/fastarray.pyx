@@ -9,20 +9,37 @@ from libc.math cimport exp,sqrt,atan2,pi,NAN,log,log10,abs,pow,sin,cos
 
 cdef class FastArrayND:
     # These are defined in the pxd file
-    #cdef double[::1] data         # 1D contiguous memoryview
-    #cdef int[::1] shape           # shape as 1D contiguous memoryview
-    #cdef int ndim
-    #cdef Py_ssize_t size
-
+    # cdef double[::1] data         # 1D contiguous memoryview
+    # #cdef int[::1] shape           # shape as 1D contiguous memoryview
+    # cdef int ndim
+    # cdef Py_ssize_t size
+    # cdef Py_ssize_t[:] shape
+    # cdef Py_ssize_t[:] strides
+    
     # -------------------
     # Constructor
     # -------------------
-    def __init__(self, int[::1] shape):
+    def __init__(self, shape):        
         cdef int i, total=1
-        self.ndim = shape.shape[0]
+
+        #if not isinstance(shape, (tuple, list)):
+        #    raise TypeError("shape must be a tuple or list")
+
+        self.ndim = len(shape)
+        if self.ndim < 1 or self.ndim > 3:
+            raise ValueError("Only 1D, 2D, 3D supported")
+
+        # store shape and strides as numpy intp arrays
+        self.shape = np.array(shape, dtype=np.int64)
+        self.strides = np.empty_like(self.shape)
+
+        cdef Py_ssize_t stride = 1
+        for i in range(self.ndim - 1, -1, -1):
+            self.strides[i] = stride
+            stride *= self.shape[i]
 
         # copy shape into contiguous memoryview
-        self.shape = np.empty(self.ndim, dtype=np.int32)
+        self.shape = np.empty(self.ndim, dtype=np.int64)
         for i in range(self.ndim):
             self.shape[i] = shape[i]
             total *= shape[i]
@@ -30,6 +47,19 @@ cdef class FastArrayND:
         self.size = total
         self.data = np.zeros(total, dtype=np.float64)
 
+    cdef inline Py_ssize_t _get_offset(self, tuple idx):
+        """Convert N-D index into flat offset."""
+        if len(idx) != self.ndim:
+            raise IndexError(f"Expected {self.ndim} indices, got {len(idx)}")
+        cdef Py_ssize_t offset = 0
+        cdef int i
+        for i in range(self.ndim):
+            ii = idx[i]
+            if ii < 0 or ii >= self.shape[i]:
+                raise IndexError("index out of range")
+            offset += ii * self.strides[i]
+        return offset
+        
     # -------------------
     # Internal binary operation (with broadcasting)
     # -------------------
@@ -267,8 +297,38 @@ cdef class FastArrayND:
                 return out
         raise IndexError("Unsupported indexing")
 
+    # def __setitem__(self, Py_ssize_t i, double value):
+    #     if i < 0 or i >= self.size:
+    #         raise IndexError("index out of range")
+    #     self.data[i] = value
+
+
+    def __setitem__(self, idx, value):
+        cdef double val = float(value)
+        if self.ndim == 1:
+            if not isinstance(idx, (int, np.integer)):
+                raise IndexError("Expected integer index for 1D array")
+            if idx < 0 or idx >= self.shape[0]:
+                raise IndexError("index out of range")
+            self.data[idx] = val
+        elif isinstance(idx, tuple):
+            self.data[self._get_offset(idx)] = val
+        else:
+            raise IndexError("Invalid index type")
 
     
+    # def __setitem__(self, idx, double value):
+    #     if self.ndim == 1:
+    #         if not isinstance(idx, (int, np.integer)):
+    #             raise IndexError("Expected integer index for 1D array")
+    #         if idx < 0 or idx >= self.shape[0]:
+    #             raise IndexError("index out of range")
+    #         self.data[idx] = value
+    #     elif isinstance(idx, tuple):
+    #         self.data[self._get_offset(idx)] = value
+    #     else:
+    #         raise IndexError("Invalid index type")
+        
     # # -------------------
     # # Matmul for 2D arrays
     # # -------------------
@@ -307,3 +367,30 @@ cdef class FastArrayND:
     # -------------------
     cdef tuple shape_tuple(self):
         return tuple([self.shape[i] for i in range(self.ndim)])
+
+    def to_numpy(self):
+        """
+        Return a NumPy array view of the FastArrayND data.
+        """
+        # cast data to a Cython memoryview for Python buffer interface
+        cdef double[:] mv = self.data[:self.size]  # memoryview over contiguous buffer
+        # convert to NumPy array (copies only if necessary)
+        arr = np.array(mv, copy=False, dtype=np.float64)
+        return arr.reshape(tuple(int(s) for s in self.shape))
+    
+    
+    def flatten(self):
+        """
+        Return a new 1D FastArrayND copy of the data.
+        Equivalent to numpy.flatten().
+        """
+        cdef FastArrayND out = FastArrayND((self.size,))
+        cdef Py_ssize_t i
+        for i in range(self.size):
+            out.data[i] = self.data[i]
+        return out
+
+    def __repr__(self):
+        """Return a string representation of the array."""
+        # Convert to a NumPy array and use NumPy's printing
+        return repr(self.to_numpy())
