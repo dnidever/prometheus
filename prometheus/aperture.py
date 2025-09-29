@@ -18,7 +18,7 @@ import astropy.units as u
 from scipy.optimize import curve_fit, least_squares
 from scipy.interpolate import interp1d
 from dlnpyutils import utils as dln, bindata
-from photutils import aperture_photometry, CircularAperture, CircularAnnulus
+from photutils.aperture import aperture_photometry, CircularAperture, CircularAnnulus
 import copy
 import logging
 import time
