@@ -30,7 +30,8 @@ from astropy.stats import sigma_clipped_stats
 from . import leastsquares as lsq
 from . import groupfit,utils
 from .ccddata import CCDData,BoundingBox
-from photutils.psf.groupstars import DAOGroup
+from .groupstars import DAOGroup
+#from photutils.psf.groupstars import DAOGroup
 
 # Fit a PSF model to all stars in an image
 
