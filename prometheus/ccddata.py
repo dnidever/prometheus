@@ -18,7 +18,22 @@ from copy import deepcopy
 from dlnpyutils import utils as dln
 from . import sky as psky
 
+if np.__version__ >= '2.0':
+    NEWBYTESWAP = True
+else:
+    NEWBYTESWAP = False
 
+def is_int_sequence(x):
+    """Return True if x is a list, tuple, or ndarray of integers."""
+    if isinstance(x, (list, tuple, np.ndarray)):
+        # For numpy array, check dtype kind
+        if isinstance(x, np.ndarray):
+            return np.issubdtype(x.dtype, np.integer)
+        # For list/tuple, check each element
+        else:
+            return all(isinstance(i, (int, np.integer)) for i in x)
+    return False
+    
 def poissonnoise(data,gain=1.0,rdnoise=0.0):
     """ Generate Poisson noise model (ala DAOPHOT)."""
     # gain
@@ -473,13 +488,19 @@ class CCDData(CCD):
             
         # Single slice or integer
         #   make sure we have values for each dimension        
-        if self.ndim==2 and type(item) is not tuple:
+        if self.ndim==2 and isinstance(item,tuple)==False:
             item = (item,slice(None,None,None))
 
-        # Let the other methods handle slicing.
-        kwargs = self._slice(item)        
-        new = self.__class__(**kwargs)
+        # Slicing with an array for x/y causes problems
+        # with wcs and bounding box
+        # NOT allowed
+        if (isinstance(item,(list,tuple,np.ndarray)) and is_int_sequence(item[0])):
+            raise Exception('Cannot use array subscripting on CCDData object')
 
+        # Let the other methods handle slicing.
+        kwargs = self._slice(item)
+        new = self.__class__(**kwargs)
+        
         # Deal with error
         if self._error is not None:
             new._error = self._error[item]
@@ -762,6 +783,7 @@ class CCDData(CCD):
         native_code = sys_is_le and '<' or '>'
         # data
         if self.data.dtype.byteorder != native_code:
+            #new_arr = arr.view(arr.dtype.newbyteorder('>'))
             self.data = self.data.byteswap(inplace=True).newbyteorder()
         # error
         if self._error is not None:
@@ -812,6 +834,10 @@ class CCDData(CCD):
     def sepready(self,data=None):
         """ Return sep-ready data (native byte order and c-continuous)."""
 
+        # Deal with byte order for sep
+        sys_is_le = sys.byteorder == 'little'
+        native_code = sys_is_le and '<' or '>'
+        
         # No data nput, return a sep-ready version of the
         #   the image object
         if data is None:
@@ -835,9 +861,17 @@ class CCDData(CCD):
         # Data array input
         else:
             if self.issepready(data)==False:
-                new = data.copy(order='C')
-                if self.isnative(new)==False:
-                    new = new.byteswap(inplace=True).newbyteorder()
+                new = np.ascontiguousarray(data)
+                # Check if correction is needed
+                if ((data.flags['C_CONTIGUOUS']==False) or
+                    (data.dtype.byteorder not in (native_code, '=', '|'))):
+                    # Make a C-contiguous copy and ensure native endianness
+                    # Flip bytes in-place if necessary
+                    if data.dtype.byteorder not in ('=', '|'):
+                        new = new.byteswap().view(new.dtype.newbyteorder('='))
+                #new = data.copy(order='C')
+                #if self.isnative(new)==False:
+                #    new = new.byteswap(inplace=True).newbyteorder()
                 return new
                 #return data.copy(order='C').byteswap(inplace=True).newbyteorder()
             else:
@@ -856,11 +890,23 @@ class CCDData(CCD):
         for name in ['data','error','mask','_sky']:
             data = getattr(self,name)
             if data is not None:
-                # if not c-contiguous or not native byte order, copy + correct
-                if data.flags['C_CONTIGUOUS']==False or data.dtype.byteorder!=native_code:
-                    out.append(data.copy(order='C').byteswap(inplace=True).newbyteorder())
+                # Check if correction is needed
+                if ((data.flags['C_CONTIGUOUS']==False) or
+                    (data.dtype.byteorder not in (native_code, '=', '|'))):
+                    # Make a C-contiguous copy and ensure native endianness
+                    out1 = np.ascontiguousarray(data)
+                    # Flip bytes in-place if necessary
+                    if data.dtype.byteorder not in ('=', '|'):
+                        out1 = out1.byteswap().view(out1.dtype.newbyteorder('='))
+                    out.append(out1)
                 else:
                     out.append(data)
+                
+                ## if not c-contiguous or not native byte order, copy + correct
+                #if data.flags['C_CONTIGUOUS']==False or data.dtype.byteorder!=native_code:
+                #    out.append(data.copy(order='C').byteswap(inplace=True).newbyteorder())
+                #else:
+                #    out.append(data)
             else:
                 out.append(data)
         return tuple(out)
