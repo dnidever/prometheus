@@ -183,6 +183,17 @@ class CCDData(CCD):
             else:
                 args = (None,*args[1:])
 
+        # Do some checks on error, mask and sky
+        if error is not None:
+            if error.shape != data.shape:
+                raise ValueError('data and error arrays have different shapes')
+        if mask is not None:
+            if mask.shape != data.shape:
+                raise ValueError('data and mask arrays have different shapes')
+        if sky is not None:
+            if sky.shape != data.shape:
+                raise ValueError('data and sky arrays have different shapes')
+            
         # Make sure we have units
         if unit is None:
             unit = 'adu'
@@ -196,9 +207,9 @@ class CCDData(CCD):
         if np.sum(bad)>0:
             data[bad] = 0.0            
             if mask is None:
-                mask = np.array(data.shape,bool)
+                mask = np.zeros(data.shape,bool)
             mask[bad] = True    # masked means bad
-            
+                
         # Initialize with the parent...
         super().__init__(data, *args, mask=mask, copy=copy, unit=unit, **kwargs)
 
@@ -206,17 +217,6 @@ class CCDData(CCD):
         if self.header is None or len(self.header)==0:
             self.header = fits.PrimaryHDU(self.data).header
             # add unit, gain, rdnoise
-        
-        # Do some checks on error, mask and sky
-        if error is not None:
-            if error.shape != data.shape:
-                raise ValueError('data and error arrays have different shapes')
-        if mask is not None:
-            if mask.shape != data.shape:
-                raise ValueError('data and mask arrays have different shapes')
-        if sky is not None:
-            if sky.shape != data.shape:
-                raise ValueError('data and sky arrays have different shapes')            
         
         # Error
         self._error = error

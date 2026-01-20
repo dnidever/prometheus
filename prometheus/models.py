@@ -647,6 +647,8 @@ def gaussian2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
         if nderiv>=4:
             cost = np.cos(theta)
             sint = np.sin(theta)
+            xdiff2 = xdiff ** 2
+            ydiff2 = ydiff ** 2
             xstd3 = pars[1] ** 3
             da_dx_stddev = -cost2 / xstd3
             db_dx_stddev = -sin2t / xstd3
@@ -1394,7 +1396,7 @@ def penny2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
             derivative.append(np.sum(np.sum(df_dtheta,axis=0),axis=0)/osamp2)
         if nderiv>=7:
             df_drelamp = -g/(1-relamp) + l/relamp
-            derivative.append(df_drelamp)
+            derivative.append(np.sum(np.sum(df_drelamp,axis=0),axis=0)/osamp2)
         if nderiv>=8:
             #df_dsigma = l/(1+rr_gg) * 2*rr_gg/sigma
             df_dsigma = beta*l/(1+rr_gg) * 2*(xdiff2+ydiff2)/sigma**3 
@@ -1406,7 +1408,7 @@ def penny2d_integrate(x, y, pars, deriv=False, nderiv=None, osamp=4):
         if ndim>1:
             f = f.reshape(shape)
             derivative = [d.reshape(shape) for d in derivative]
-        
+            
         return f,derivative
 
     # No derivative
@@ -2842,6 +2844,7 @@ class PSFBase:
         # Get the derivatives and model
         m,deriv = self(xdata[0],xdata[1],pars,mpars=mpars,deriv=True,nderiv=nderiv,**kwargs)            
         deriv = np.array(deriv).T
+        
         # Initialize jacobian matrix
         #   the parameters are [amp,xmean,ymean,sky]
         #   if allpars, parameters are [amp,xmean,ymean,sky,model parameters]
@@ -3208,7 +3211,7 @@ class PSFBase:
             # Reshape model and make CCDData image with proper bbox
             model = model.reshape(flux.shape)
             model = CCDData(model,bbox=bbox,unit=im.unit)
-
+                
         # Set input bounds back
         bounds = copy.deepcopy(inbounds)
         
